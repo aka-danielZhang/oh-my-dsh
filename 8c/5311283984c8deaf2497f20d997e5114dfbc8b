@@ -1,0 +1,26 @@
+AGENTS.md
+  h_04d4cd0008e41d 45,111,131
+docs/notes/2026-08-24-titlebar-band-drift-scroll-lock.md
+  h_04d4cd0008e41d 1-31
+plugin/dsh-desktop-bridge/package.json
+  h_04d4cd0008e41d 3
+plugin/dsh-desktop-bridge/src/client/titlebar.ts
+  h_04d4cd0008e41d 40-48,53-56
+plugin/dsh-desktop-bridge/tests/titlebar.test.ts
+  h_04d4cd0008e41d 22-24
+src-tauri/Cargo.toml
+  h_04d4cd0008e41d 28-35,38
+src-tauri/src/lib.rs
+  h_04d4cd0008e41d 2197,2302-2356
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "8c5311283984c8deaf2497f20d997e5114dfbc8b",
+  "prompts": {},
+  "humans": {
+    "h_04d4cd0008e41d": {
+      "author": "aka-danielZhang <424011753@qq.com>"
+    }
+  }
+}
