@@ -1,0 +1,28 @@
+AGENTS.md
+  h_04d4cd0008e41d 5
+docs/notes/2026-08-27-reasoning-efforts-compat-fill.md
+  h_04d4cd0008e41d 1-36
+plugin/dsh-reasoning-efforts/README.md
+  h_04d4cd0008e41d 7,9,11-13,15,25,46-54,59-60,65,67-68
+plugin/dsh-reasoning-efforts/cordis.patch.yml
+  h_04d4cd0008e41d 24-38
+plugin/dsh-reasoning-efforts/package.json
+  h_04d4cd0008e41d 3-4
+plugin/dsh-reasoning-efforts/src/index.ts
+  h_04d4cd0008e41d 2-3,9-12,15-21,97-104
+plugin/dsh-reasoning-efforts/src/rules.ts
+  h_04d4cd0008e41d 5-11,16-19,25-27,38-40,43-80,99-103,111,115-125,183-185,200-236,290-313,316-318,320-323,342-352,360-370,387-394,403-404,406,410,414,417-426,428,434-436,441-463
+plugin/dsh-reasoning-efforts/tests/rules.test.ts
+  h_04d4cd0008e41d 138-251
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "a799e2cc190ca732cf2116c3c6be8a24e81c1160",
+  "prompts": {},
+  "humans": {
+    "h_04d4cd0008e41d": {
+      "author": "aka-danielZhang <424011753@qq.com>"
+    }
+  }
+}
