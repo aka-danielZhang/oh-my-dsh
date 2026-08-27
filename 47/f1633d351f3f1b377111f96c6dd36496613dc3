@@ -1,0 +1,54 @@
+.gitignore
+  h_04d4cd0008e41d 65-67
+AGENTS.md
+  h_04d4cd0008e41d 5
+CHANGELOG.md
+  h_04d4cd0008e41d 23-24
+docs/notes/2026-08-27-dsh-model-efforts-editor.md
+  h_04d4cd0008e41d 1-21
+plugin/dsh-model-efforts-editor/README.md
+  h_04d4cd0008e41d 1-38
+plugin/dsh-model-efforts-editor/cordis.patch.yml
+  h_04d4cd0008e41d 1-10
+plugin/dsh-model-efforts-editor/package.json
+  h_04d4cd0008e41d 1-78
+plugin/dsh-model-efforts-editor/pnpm-lock.yaml
+  h_04d4cd0008e41d 1-3128
+plugin/dsh-model-efforts-editor/src/client/drafts.ts
+  h_04d4cd0008e41d 1-273
+plugin/dsh-model-efforts-editor/src/client/index.ts
+  h_04d4cd0008e41d 1-65
+plugin/dsh-model-efforts-editor/src/client/inject.ts
+  h_04d4cd0008e41d 1-456
+plugin/dsh-model-efforts-editor/src/client/locales.ts
+  h_04d4cd0008e41d 1-63
+plugin/dsh-model-efforts-editor/src/client/styles.ts
+  h_04d4cd0008e41d 1-73
+plugin/dsh-model-efforts-editor/src/index.ts
+  h_04d4cd0008e41d 1-9
+plugin/dsh-model-efforts-editor/tests/dsh-model-efforts-editor.test.ts
+  h_04d4cd0008e41d 1-134
+plugin/dsh-model-efforts-editor/tsconfig.json
+  h_04d4cd0008e41d 1-28
+plugin/dsh-model-efforts-editor/tsdown.config.ts
+  h_04d4cd0008e41d 1-79
+scripts/prepare-desktop-bundle.mjs
+  h_04d4cd0008e41d 23,44,54,68-71,113,244-250,266-267
+src/boot.ts
+  h_04d4cd0008e41d 7,168
+src/constants.ts
+  h_04d4cd0008e41d 10
+src/plugins.ts
+  h_04d4cd0008e41d 9,88-91
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.24",
+  "base_commit_sha": "47f1633d351f3f1b377111f96c6dd36496613dc3",
+  "prompts": {},
+  "humans": {
+    "h_04d4cd0008e41d": {
+      "author": "aka-danielZhang <424011753@qq.com>"
+    }
+  }
+}
