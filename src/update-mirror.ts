@@ -15,7 +15,10 @@ export function parseScutilProxy(stdout: string): string | undefined {
   for (const line of stdout.split(/\n/)) {
     const match = /^\s*(\w+)\s*:\s*(.+?)\s*$/.exec(line)
     if (match === null) continue
-    map[match[1]] = match[2]
+    const key = match[1]
+    const value = match[2]
+    if (key === undefined || value === undefined) continue
+    map[key] = value
   }
   if (map.HTTPSEnable === '1' && map.HTTPSProxy && map.HTTPSPort) {
     return `http://${map.HTTPSProxy}:${map.HTTPSPort}`
