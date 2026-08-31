@@ -11,7 +11,16 @@ import {
 import { ensureSidecarNodeApp } from './sidecar-node-app.ts'
 import { extractBundleTar, readRevisionManifest } from './extract.ts'
 import { repoRoot, resourceDir, shellRoot, userHome } from './paths.ts'
-import { decideRuntimeSource, downloadRuntimeTarball, runtimeArtifactName, runtimeShaDirReady } from './runtime-artifact.ts'
+import {
+  decideRuntimeSource,
+  downloadRuntimeTarball,
+  downloadRuntimeTarballAsync,
+  findUsableRuntimeDir,
+  planRuntimeRelease,
+  RUNTIME_BIN_MARKER,
+  runtimeArtifactName,
+  runtimeShaDirReady,
+} from './runtime-artifact.ts'
 
 export interface Runtime {
   node: string
@@ -270,6 +279,48 @@ function appVersion(): string {
   return process.env.npm_package_version ?? '0.0.0'
 }
 
+export interface BackgroundRuntimeFetchJob {
+  sha: string
+  expectedSha256: string
+  version: string
+  dest: string
+  extractDir: string
+}
+
+const backgroundFetchDests = new Set<string>()
+
+function defaultStartBackgroundRuntimeFetch(job: BackgroundRuntimeFetchJob): void {
+  if (backgroundFetchDests.has(job.dest)) return
+  backgroundFetchDests.add(job.dest)
+  void (async () => {
+    try {
+      const tar = await downloadRuntimeTarballAsync({
+        sha: job.sha,
+        expectedSha256: job.expectedSha256,
+        version: job.version,
+        dest: job.dest,
+      })
+      extractBundleTar(tar, job.extractDir, RUNTIME_BIN_MARKER, job.expectedSha256)
+      console.log(
+        `dsh-desktop: background runtime ${job.sha.slice(0, 12)} extracted to ${job.extractDir} (applies on next launch)`,
+      )
+    } catch (error) {
+      backgroundFetchDests.delete(job.dest)
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(`dsh-desktop: background runtime download failed: ${message}`)
+    }
+  })()
+}
+
+let startBackgroundRuntimeFetch = defaultStartBackgroundRuntimeFetch
+
+/** Test hook: capture the deferred job without curling. */
+export function setStartBackgroundRuntimeFetchForTests(
+  fn: ((job: BackgroundRuntimeFetchJob) => void) | undefined,
+): void {
+  startBackgroundRuntimeFetch = fn ?? defaultStartBackgroundRuntimeFetch
+}
+
 export function releaseRuntimeDir(packaged: boolean): string | undefined {
   if (!packaged) return undefined
   const resources = resourceDir(true)
@@ -287,13 +338,29 @@ export function releaseRuntimeDir(packaged: boolean): string | undefined {
     && fs.readFileSync(path.join(root, '.ok'), 'utf8').trim() === tarball,
   )
   const shaDirReady = runtimeShaDirReady(root)
-  const source = decideRuntimeSource({ okMatches, shaDirReady, bundledTarExists: fs.existsSync(bundledTar) })
-  if (source === 'ok-cache') return root
+  const bundledTarExists = fs.existsSync(bundledTar)
+  const source = decideRuntimeSource({ okMatches, shaDirReady, bundledTarExists })
+  if (source === 'download' && !tarball) {
+    throw new Error(`slim app has no bundled runtime.tar.gz and runtime-revision.json has no runtimeTarball hash`)
+  }
+  const fallbackDir = source === 'download' ? findUsableRuntimeDir(path.join(shellRoot(), 'runtime')) : undefined
+  const plan = planRuntimeRelease({ source, ...(fallbackDir === undefined ? {} : { fallbackDir }) })
+  if (plan.launch === 'target') return root
+  if (plan.fetch === 'defer' && fallbackDir !== undefined) {
+    startBackgroundRuntimeFetch({
+      sha,
+      expectedSha256: tarball,
+      version: appVersion(),
+      dest: path.join(shellRoot(), 'runtime-tarballs', runtimeArtifactName(sha)),
+      extractDir: root,
+    })
+    console.log(
+      `dsh-desktop: launching with existing runtime ${fallbackDir}; fetching ${sha.slice(0, 12)} in background (applies on next launch)`,
+    )
+    return fallbackDir
+  }
   let tar = bundledTar
-  if (source === 'download') {
-    if (!tarball) {
-      throw new Error(`slim app has no bundled runtime.tar.gz and runtime-revision.json has no runtimeTarball hash`)
-    }
+  if (plan.fetch === 'sync') {
     tar = downloadRuntimeTarball({
       sha,
       expectedSha256: tarball,
@@ -301,7 +368,7 @@ export function releaseRuntimeDir(packaged: boolean): string | undefined {
       dest: path.join(shellRoot(), 'runtime-tarballs', runtimeArtifactName(sha)),
     })
   }
-  extractBundleTar(tar, root, 'dsh/node_modules/@deepseek-ai/dsh/lib/bin.js', tarball)
+  extractBundleTar(tar, root, RUNTIME_BIN_MARKER, tarball)
   console.log(`dsh-desktop: extracted ${source === 'download' ? 'downloaded' : 'bundled'} runtime ${sha} to ${root}`)
   return root
 }

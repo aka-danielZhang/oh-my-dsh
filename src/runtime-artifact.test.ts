@@ -5,17 +5,49 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { spawnSync } from 'node:child_process'
 
-import { releaseRuntimeDir } from './runtime.ts'
+import { releaseRuntimeDir, setStartBackgroundRuntimeFetchForTests } from './runtime.ts'
 import {
   curlDownloadArgs,
   decideRuntimeSource,
+  findUsableRuntimeDir,
   latestMacYml,
   patchUpdaterYml,
+  planRuntimeRelease,
   runtimeArtifactName,
   readBundledRevisionFromZip,
   runtimeDownloadUrls,
+  shouldPrestageRuntime,
   stripRuntimeResources,
+  withDestLock,
 } from './runtime-artifact.ts'
+
+function withPackagedRuntimeHome(run: (home: string, resources: string) => void): void {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-home-'))
+  const appRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-app-'))
+  const resources = path.join(appRoot, 'resources')
+  const previousHome = process.env.HOME
+  const previousResources = Object.getOwnPropertyDescriptor(process, 'resourcesPath')
+  fs.mkdirSync(resources, { recursive: true })
+  process.env.HOME = home
+  Object.defineProperty(process, 'resourcesPath', { configurable: true, value: appRoot })
+  try {
+    run(home, resources)
+  } finally {
+    setStartBackgroundRuntimeFetchForTests(undefined)
+    if (previousHome === undefined) delete process.env.HOME
+    else process.env.HOME = previousHome
+    if (previousResources === undefined) delete (process as { resourcesPath?: string }).resourcesPath
+    else Object.defineProperty(process, 'resourcesPath', previousResources)
+    fs.rmSync(home, { recursive: true, force: true })
+    fs.rmSync(appRoot, { recursive: true, force: true })
+  }
+}
+
+function writeRuntimeBin(dir: string, body = 'ok'): void {
+  const marker = path.join(dir, 'dsh/node_modules/@deepseek-ai/dsh/lib/bin.js')
+  fs.mkdirSync(path.dirname(marker), { recursive: true })
+  fs.writeFileSync(marker, body)
+}
 
 describe('decideRuntimeSource', () => {
   it('uses the hashed cache when .ok matches', () => {
@@ -36,6 +68,76 @@ describe('decideRuntimeSource', () => {
       decideRuntimeSource({ okMatches: false, shaDirReady: true, bundledTarExists: false }),
       'ok-cache',
     )
+  })
+})
+
+describe('planRuntimeRelease', () => {
+  it('defers download when a fallback runtime exists', () => {
+    assert.deepEqual(
+      planRuntimeRelease({ source: 'download', fallbackDir: '/old' }),
+      { launch: 'fallback', fetch: 'defer' },
+    )
+  })
+
+  it('sync-downloads on cold start with no fallback', () => {
+    assert.deepEqual(planRuntimeRelease({ source: 'download' }), { launch: 'extract', fetch: 'sync' })
+    assert.deepEqual(
+      planRuntimeRelease({ source: 'download', fallbackDir: undefined }),
+      { launch: 'extract', fetch: 'sync' },
+    )
+  })
+
+  it('does not defer bundled-tar or ok-cache', () => {
+    assert.deepEqual(
+      planRuntimeRelease({ source: 'ok-cache', fallbackDir: '/old' }),
+      { launch: 'target', fetch: 'none' },
+    )
+    assert.deepEqual(
+      planRuntimeRelease({ source: 'bundled-tar', fallbackDir: '/old' }),
+      { launch: 'extract', fetch: 'none' },
+    )
+  })
+})
+
+describe('shouldPrestageRuntime', () => {
+  it('skips when .ok matches or the sha dir is already runnable', () => {
+    assert.equal(shouldPrestageRuntime({ okMatches: true, shaDirReady: false }), false)
+    assert.equal(shouldPrestageRuntime({ okMatches: false, shaDirReady: true }), false)
+    assert.equal(shouldPrestageRuntime({ okMatches: false, shaDirReady: false }), true)
+  })
+})
+
+describe('findUsableRuntimeDir', () => {
+  it('returns the newest sha dir that has bin.js and ignores incomplete trees', () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-runtimes-'))
+    try {
+      const marker = 'dsh/node_modules/@deepseek-ai/dsh/lib/bin.js'
+      const oldDir = path.join(parent, 'oldsha')
+      const newDir = path.join(parent, 'newsha')
+      const incomplete = path.join(parent, 'partial')
+      const staging = path.join(parent, 'oldsha.tmp')
+      fs.mkdirSync(path.join(oldDir, path.dirname(marker)), { recursive: true })
+      fs.writeFileSync(path.join(oldDir, marker), 'old')
+      fs.utimesSync(oldDir, 1, 1)
+      fs.mkdirSync(path.join(newDir, path.dirname(marker)), { recursive: true })
+      fs.writeFileSync(path.join(newDir, marker), 'new')
+      fs.utimesSync(newDir, 2, 2)
+      fs.mkdirSync(incomplete, { recursive: true })
+      fs.mkdirSync(path.join(staging, path.dirname(marker)), { recursive: true })
+      fs.writeFileSync(path.join(staging, marker), 'tmp')
+      assert.equal(findUsableRuntimeDir(parent), newDir)
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true })
+    }
+  })
+
+  it('returns undefined when nothing is extracted', () => {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-empty-rt-'))
+    try {
+      assert.equal(findUsableRuntimeDir(parent), undefined)
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true })
+    }
   })
 })
 
@@ -150,6 +252,42 @@ describe('releaseRuntimeDir cache hit', () => {
       fs.rmSync(appRoot, { recursive: true, force: true })
     }
   })
+
+  it('reuses the same sha dir when bin.js exists even if .ok mismatches', () => {
+    withPackagedRuntimeHome((home, resources) => {
+      const sha = '222343cafebabe00'
+      const dir = path.join(home, '.dsh-desktop', 'runtime', sha)
+      writeRuntimeBin(dir)
+      fs.writeFileSync(path.join(dir, '.ok'), 'old-tarball-hash\n')
+      fs.writeFileSync(path.join(resources, 'runtime-revision.json'), JSON.stringify({
+        sha,
+        runtimeTarball: 'new-tarball-hash',
+      }))
+      const jobs: unknown[] = []
+      setStartBackgroundRuntimeFetchForTests((job) => { jobs.push(job) })
+      assert.equal(releaseRuntimeDir(true), dir)
+      assert.equal(jobs.length, 0)
+    })
+  })
+
+  it('starts from an older sha and defers download when the new sha is missing', () => {
+    withPackagedRuntimeHome((home, resources) => {
+      const oldSha = 'aaa111oldruntime'
+      const newSha = 'bbb222newruntime'
+      const oldDir = path.join(home, '.dsh-desktop', 'runtime', oldSha)
+      writeRuntimeBin(oldDir)
+      fs.writeFileSync(path.join(resources, 'runtime-revision.json'), JSON.stringify({
+        sha: newSha,
+        runtimeTarball: 'deadbeef',
+      }))
+      const jobs: { sha: string; extractDir: string }[] = []
+      setStartBackgroundRuntimeFetchForTests((job) => { jobs.push(job) })
+      assert.equal(releaseRuntimeDir(true), oldDir)
+      assert.equal(jobs.length, 1)
+      assert.equal(jobs[0]?.sha, newSha)
+      assert.equal(jobs[0]?.extractDir, path.join(home, '.dsh-desktop', 'runtime', newSha))
+    })
+  })
 })
 
 describe('readBundledRevisionFromZip', () => {
@@ -199,5 +337,25 @@ describe('curlDownloadArgs', () => {
     const args = curlDownloadArgs('https://example.com/a.tar.gz', '/tmp/a.part')
     assert.equal(args.includes('-x'), false)
     assert.ok(args.includes('-C'))
+  })
+})
+
+describe('withDestLock', () => {
+  it('runs same-dest callbacks one at a time', async () => {
+    const order: string[] = []
+    const first = withDestLock('/tmp/dsh-runtime-lock', async () => {
+      order.push('a-start')
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      order.push('a-end')
+      return 1
+    })
+    const second = withDestLock('/tmp/dsh-runtime-lock', async () => {
+      order.push('b-start')
+      order.push('b-end')
+      return 2
+    })
+    const values = await Promise.all([first, second])
+    assert.deepEqual(values, [1, 2])
+    assert.deepEqual(order, ['a-start', 'a-end', 'b-start', 'b-end'])
   })
 })

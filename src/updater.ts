@@ -8,6 +8,8 @@ import {
   downloadRuntimeTarballAsync,
   readBundledRevisionFromZip,
   runtimeArtifactName,
+  runtimeShaDirReady,
+  shouldPrestageRuntime,
 } from './runtime-artifact.ts'
 import {
   electronProxyRules,
@@ -253,9 +255,12 @@ async function prestageRuntime(zipPath: string, version: string): Promise<void> 
     writeUpdaterLog('warn', [`runtime pre-stage skipped: no runtime-revision.json in ${zipPath}`])
     return
   }
-  const okFile = path.join(shellRoot(), 'runtime', sha, '.ok')
-  if (fs.existsSync(okFile) && fs.readFileSync(okFile, 'utf8').trim() === expected) {
-    writeUpdaterLog('info', [`runtime ${sha.slice(0, 12)} already extracted; pre-stage skipped`])
+  const extracted = path.join(shellRoot(), 'runtime', sha)
+  const okFile = path.join(extracted, '.ok')
+  const okMatches = fs.existsSync(okFile) && fs.readFileSync(okFile, 'utf8').trim() === expected
+  const shaDirReady = runtimeShaDirReady(extracted)
+  if (!shouldPrestageRuntime({ okMatches, shaDirReady })) {
+    writeUpdaterLog('info', [`runtime ${sha.slice(0, 12)} already present; pre-stage skipped`])
     return
   }
   const controller = new AbortController()

@@ -10,7 +10,9 @@ export const SLIM_ZIP_RUNTIME_FILES = ['runtime.tar.gz', 'runtime.tar.gz.sha'] a
 
 export type RuntimeSource = 'ok-cache' | 'bundled-tar' | 'download'
 
-export function runtimeShaDirReady(root: string, marker = 'dsh/node_modules/@deepseek-ai/dsh/lib/bin.js'): boolean {
+export const RUNTIME_BIN_MARKER = 'dsh/node_modules/@deepseek-ai/dsh/lib/bin.js'
+
+export function runtimeShaDirReady(root: string, marker = RUNTIME_BIN_MARKER): boolean {
   return fs.existsSync(path.join(root, marker))
 }
 
@@ -22,6 +24,81 @@ export function decideRuntimeSource(input: {
   if (input.okMatches || input.shaDirReady) return 'ok-cache'
   if (input.bundledTarExists) return 'bundled-tar'
   return 'download'
+}
+
+export type RuntimeReleasePlan =
+  | { launch: 'target'; fetch: 'none' }
+  | { launch: 'extract'; fetch: 'none' }
+  | { launch: 'extract'; fetch: 'sync' }
+  | { launch: 'fallback'; fetch: 'defer' }
+
+/**
+ * First install (no local runtime) still sync-downloads so cold start works.
+ * When any previous sha dir is runnable, defer the ~353MB fetch off the
+ * critical path and keep the old tree for this session.
+ */
+export function planRuntimeRelease(input: {
+  source: RuntimeSource
+  fallbackDir?: string | undefined
+}): RuntimeReleasePlan {
+  if (input.source === 'ok-cache') return { launch: 'target', fetch: 'none' }
+  if (input.source === 'bundled-tar') return { launch: 'extract', fetch: 'none' }
+  if (typeof input.fallbackDir === 'string' && input.fallbackDir !== '') {
+    return { launch: 'fallback', fetch: 'defer' }
+  }
+  return { launch: 'extract', fetch: 'sync' }
+}
+
+/** Updater pre-stage is unnecessary when the sha-keyed extract is already runnable. */
+export function shouldPrestageRuntime(input: { okMatches: boolean; shaDirReady: boolean }): boolean {
+  return !input.okMatches && !input.shaDirReady
+}
+
+/** Newest mtime among `runtime/<sha>/` trees that already have bin.js. */
+export function findUsableRuntimeDir(parent: string, marker = RUNTIME_BIN_MARKER): string | undefined {
+  if (!fs.existsSync(parent)) return undefined
+  let names: string[]
+  try {
+    names = fs.readdirSync(parent)
+  } catch {
+    return undefined
+  }
+  const found: { dir: string; mtime: number }[] = []
+  for (const name of names) {
+    if (name.endsWith('.tmp')) continue
+    const dir = path.join(parent, name)
+    try {
+      const st = fs.statSync(dir)
+      if (!st.isDirectory()) continue
+      if (!runtimeShaDirReady(dir, marker)) continue
+      found.push({ dir, mtime: st.mtimeMs })
+    } catch {
+      continue
+    }
+  }
+  if (found.length === 0) return undefined
+  found.sort((a, b) => b.mtime - a.mtime)
+  return found[0]?.dir
+}
+
+const destLocks = new Map<string, Promise<unknown>>()
+
+/** Serialize curls that share a dest (and its `.part`) so versioned + latest never race. */
+export async function withDestLock<T>(dest: string, run: () => Promise<T>): Promise<T> {
+  const previous = destLocks.get(dest) ?? Promise.resolve()
+  let release!: () => void
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const next = previous.then(() => held, () => held)
+  destLocks.set(dest, next)
+  await previous.then(() => undefined, () => undefined)
+  try {
+    return await run()
+  } finally {
+    release()
+    if (destLocks.get(dest) === next) destLocks.delete(dest)
+  }
 }
 
 export function runtimePlatformTriple(platform: string = process.platform, arch: string = process.arch): string {
@@ -253,31 +330,34 @@ export async function downloadRuntimeTarballAsync(input: {
   onBytes?: (bytes: number) => void
   signal?: AbortSignal
 }): Promise<string> {
-  if (fs.existsSync(input.dest) && sha256File(input.dest) === input.expectedSha256) return input.dest
-  const mirror = readUpdateMirror(input.env)
-  const urls = runtimeDownloadUrls({ sha: input.sha, version: input.version }).flatMap((url) => withMirrorFallback(url, mirror))
-  const seen = new Set<string>()
-  const errors: string[] = []
-  // Read through a function: abort flips between the loop check and the catch.
-  const isAborted = (): boolean => input.signal?.aborted === true
-  for (const url of urls) {
-    if (seen.has(url)) continue
-    seen.add(url)
-    if (isAborted()) throw new Error('runtime pre-stage cancelled')
-    try {
-      console.log(`dsh-desktop: pre-staging runtime ${input.sha.slice(0, 12)} from ${url}`)
-      await downloadUrlToFileAsync(url, input.dest, input.onBytes, input.signal, input.env)
-      const got = sha256File(input.dest)
-      if (got !== input.expectedSha256) {
-        fs.rmSync(input.dest, { force: true })
-        throw new Error(`sha256 mismatch: got ${got}, expected ${input.expectedSha256}`)
-      }
-      return input.dest
-    } catch (error) {
+  return withDestLock(input.dest, async () => {
+    if (fs.existsSync(input.dest) && sha256File(input.dest) === input.expectedSha256) return input.dest
+    const mirror = readUpdateMirror(input.env)
+    const urls = runtimeDownloadUrls({ sha: input.sha, version: input.version }).flatMap((url) => withMirrorFallback(url, mirror))
+    const seen = new Set<string>()
+    const errors: string[] = []
+    // Serial URL tries (versioned, then latest, each with mirror fallback) share
+    // one dest lock so two curls never resume the same `.part` in parallel.
+    const isAborted = (): boolean => input.signal?.aborted === true
+    for (const url of urls) {
+      if (seen.has(url)) continue
+      seen.add(url)
       if (isAborted()) throw new Error('runtime pre-stage cancelled')
-      const message = error instanceof Error ? error.message : String(error)
-      errors.push(`${url}: ${message}`)
+      try {
+        console.log(`dsh-desktop: pre-staging runtime ${input.sha.slice(0, 12)} from ${url}`)
+        await downloadUrlToFileAsync(url, input.dest, input.onBytes, input.signal, input.env)
+        const got = sha256File(input.dest)
+        if (got !== input.expectedSha256) {
+          fs.rmSync(input.dest, { force: true })
+          throw new Error(`sha256 mismatch: got ${got}, expected ${input.expectedSha256}`)
+        }
+        return input.dest
+      } catch (error) {
+        if (isAborted()) throw new Error('runtime pre-stage cancelled')
+        const message = error instanceof Error ? error.message : String(error)
+        errors.push(`${url}: ${message}`)
+      }
     }
-  }
-  throw new Error(`could not download runtime ${input.sha}: ${errors.join('; ')}`)
+    throw new Error(`could not download runtime ${input.sha}: ${errors.join('; ')}`)
+  })
 }
