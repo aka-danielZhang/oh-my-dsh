@@ -5,8 +5,10 @@ import {
   applyUpdateMirror,
   electronProxyRules,
   firstSuccessful,
+  parseScutilProxy,
   readProxyUrl,
   readUpdateMirror,
+  resolveDownloadProxy,
   rewriteGithubReleaseDownloadUrl,
   withMirrorFallback,
 } from './update-mirror.ts'
@@ -50,6 +52,24 @@ describe('proxy and mirror env', () => {
   it('reads HTTPS_PROXY before HTTP_PROXY', () => {
     assert.equal(readProxyUrl({ HTTPS_PROXY: 'http://127.0.0.1:7890', HTTP_PROXY: 'http://ignore' }), 'http://127.0.0.1:7890')
     assert.equal(electronProxyRules('https://127.0.0.1:7890'), 'http://127.0.0.1:7890')
+  })
+
+  it('parses macOS scutil HTTPS proxy', () => {
+    const stdout = [
+      'HTTPSEnable : 1',
+      'HTTPSPort : 7890',
+      'HTTPSProxy : 127.0.0.1',
+      'HTTPEnable : 1',
+      'HTTPPort : 8080',
+      'HTTPProxy : 10.0.0.1',
+    ].join('\n')
+    assert.equal(parseScutilProxy(stdout), 'http://127.0.0.1:7890')
+  })
+
+  it('prefers env proxy over system proxy', () => {
+    assert.equal(resolveDownloadProxy({ HTTPS_PROXY: 'http://127.0.0.1:7890' }, 'http://10.0.0.1:8080'), 'http://127.0.0.1:7890')
+    assert.equal(resolveDownloadProxy({}, 'http://127.0.0.1:7890'), 'http://127.0.0.1:7890')
+    assert.equal(resolveDownloadProxy({}), undefined)
   })
 
   it('reads DSH_UPDATE_MIRROR and trims slashes', () => {

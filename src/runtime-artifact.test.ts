@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process'
 
 import { releaseRuntimeDir } from './runtime.ts'
 import {
+  curlDownloadArgs,
   decideRuntimeSource,
   latestMacYml,
   patchUpdaterYml,
@@ -28,6 +29,13 @@ describe('decideRuntimeSource', () => {
 
   it('downloads when the slim zip omitted the tar', () => {
     assert.equal(decideRuntimeSource({ okMatches: false, bundledTarExists: false }), 'download')
+  })
+
+  it('reuses the sha-keyed extract when the shell bumps tarball hash', () => {
+    assert.equal(
+      decideRuntimeSource({ okMatches: false, shaDirReady: true, bundledTarExists: false }),
+      'ok-cache',
+    )
   })
 })
 
@@ -176,5 +184,20 @@ describe('readBundledRevisionFromZip', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('curlDownloadArgs', () => {
+  it('resumes into .part and passes -x when a proxy is set', () => {
+    assert.deepEqual(
+      curlDownloadArgs('https://example.com/a.tar.gz', '/tmp/a.tar.gz.part', 'http://127.0.0.1:7890'),
+      ['-fL', '--retry', '5', '--retry-all-errors', '--connect-timeout', '30', '-C', '-', '-o', '/tmp/a.tar.gz.part', '-x', 'http://127.0.0.1:7890', 'https://example.com/a.tar.gz'],
+    )
+  })
+
+  it('omits -x when no proxy', () => {
+    const args = curlDownloadArgs('https://example.com/a.tar.gz', '/tmp/a.part')
+    assert.equal(args.includes('-x'), false)
+    assert.ok(args.includes('-C'))
   })
 })

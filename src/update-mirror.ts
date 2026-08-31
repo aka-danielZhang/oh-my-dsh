@@ -9,6 +9,29 @@ export function readProxyUrl(env: NodeJS.ProcessEnv = process.env): string | und
   return trimmed === '' ? undefined : trimmed
 }
 
+
+export function parseScutilProxy(stdout: string): string | undefined {
+  const map: Record<string, string> = {}
+  for (const line of stdout.split(/\n/)) {
+    const match = /^\s*(\w+)\s*:\s*(.+?)\s*$/.exec(line)
+    if (match === null) continue
+    map[match[1]] = match[2]
+  }
+  if (map.HTTPSEnable === '1' && map.HTTPSProxy && map.HTTPSPort) {
+    return `http://${map.HTTPSProxy}:${map.HTTPSPort}`
+  }
+  if (map.HTTPEnable === '1' && map.HTTPProxy && map.HTTPPort) {
+    return `http://${map.HTTPProxy}:${map.HTTPPort}`
+  }
+  if (map.SOCKSEnable === '1' && map.SOCKSProxy && map.SOCKSPort) {
+    return `socks5h://${map.SOCKSProxy}:${map.SOCKSPort}`
+  }
+  return undefined
+}
+
+export function resolveDownloadProxy(env: NodeJS.ProcessEnv = process.env, systemProxy?: string): string | undefined {
+  return readProxyUrl(env) ?? systemProxy
+}
 export function electronProxyRules(proxy: string): string {
   return proxy.replace(/^https:\/\//i, 'http://')
 }

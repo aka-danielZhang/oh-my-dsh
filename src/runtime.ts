@@ -11,7 +11,7 @@ import {
 import { ensureSidecarNodeApp } from './sidecar-node-app.ts'
 import { extractBundleTar, readRevisionManifest } from './extract.ts'
 import { repoRoot, resourceDir, shellRoot, userHome } from './paths.ts'
-import { decideRuntimeSource, downloadRuntimeTarball, runtimeArtifactName } from './runtime-artifact.ts'
+import { decideRuntimeSource, downloadRuntimeTarball, runtimeArtifactName, runtimeShaDirReady } from './runtime-artifact.ts'
 
 export interface Runtime {
   node: string
@@ -286,7 +286,8 @@ export function releaseRuntimeDir(packaged: boolean): string | undefined {
     && fs.existsSync(path.join(root, '.ok'))
     && fs.readFileSync(path.join(root, '.ok'), 'utf8').trim() === tarball,
   )
-  const source = decideRuntimeSource({ okMatches, bundledTarExists: fs.existsSync(bundledTar) })
+  const shaDirReady = runtimeShaDirReady(root)
+  const source = decideRuntimeSource({ okMatches, shaDirReady, bundledTarExists: fs.existsSync(bundledTar) })
   if (source === 'ok-cache') return root
   let tar = bundledTar
   if (source === 'download') {

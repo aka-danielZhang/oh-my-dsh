@@ -4,14 +4,22 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import { UPDATER_GITHUB_OWNER, UPDATER_GITHUB_REPO } from './constants.ts'
-import { readUpdateMirror, withMirrorFallback } from './update-mirror.ts'
+import { parseScutilProxy, resolveDownloadProxy, readUpdateMirror, withMirrorFallback } from './update-mirror.ts'
 
 export const SLIM_ZIP_RUNTIME_FILES = ['runtime.tar.gz', 'runtime.tar.gz.sha'] as const
 
 export type RuntimeSource = 'ok-cache' | 'bundled-tar' | 'download'
 
-export function decideRuntimeSource(input: { okMatches: boolean; bundledTarExists: boolean }): RuntimeSource {
-  if (input.okMatches) return 'ok-cache'
+export function runtimeShaDirReady(root: string, marker = 'dsh/node_modules/@deepseek-ai/dsh/lib/bin.js'): boolean {
+  return fs.existsSync(path.join(root, marker))
+}
+
+export function decideRuntimeSource(input: {
+  okMatches: boolean
+  shaDirReady?: boolean
+  bundledTarExists: boolean
+}): RuntimeSource {
+  if (input.okMatches || input.shaDirReady) return 'ok-cache'
   if (input.bundledTarExists) return 'bundled-tar'
   return 'download'
 }
@@ -90,16 +98,38 @@ export function latestMacYml(input: {
   return lines.join('\n')
 }
 
-export function downloadUrlToFile(url: string, dest: string): void {
+export function probeDarwinSystemProxy(): string | undefined {
+  if (process.platform !== 'darwin') return undefined
+  const result = spawnSync('scutil', ['--proxy'], { encoding: 'utf8', windowsHide: true })
+  if (result.status !== 0 || typeof result.stdout !== 'string') return undefined
+  return parseScutilProxy(result.stdout)
+}
+
+export function curlDownloadArgs(url: string, tmp: string, proxy?: string): string[] {
+  const args = ['-fL', '--retry', '5', '--retry-all-errors', '--connect-timeout', '30', '-C', '-', '-o', tmp]
+  if (proxy !== undefined && proxy !== '') args.push('-x', proxy)
+  args.push(url)
+  return args
+}
+
+function downloadProxy(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return resolveDownloadProxy(env, readProxyUrlFromProbe(env))
+}
+
+function readProxyUrlFromProbe(env: NodeJS.ProcessEnv): string | undefined {
+  if (env !== process.env) return undefined
+  return probeDarwinSystemProxy()
+}
+
+export function downloadUrlToFile(url: string, dest: string, env: NodeJS.ProcessEnv = process.env): void {
   fs.mkdirSync(path.dirname(dest), { recursive: true })
   const tmp = `${dest}.part`
-  fs.rmSync(tmp, { force: true })
-  const result = spawnSync('curl', ['-fL', '--retry', '2', '--connect-timeout', '30', '-o', tmp, url], {
+  const proxy = downloadProxy(env)
+  const result = spawnSync('curl', curlDownloadArgs(url, tmp, proxy), {
     stdio: 'inherit',
     windowsHide: true,
   })
   if (result.status !== 0) {
-    fs.rmSync(tmp, { force: true })
     throw new Error(`download failed (${String(result.status)}): ${url}`)
   }
   fs.renameSync(tmp, dest)
@@ -122,7 +152,7 @@ export function downloadRuntimeTarball(input: {
     seen.add(url)
     try {
       console.log(`dsh-desktop: downloading runtime ${input.sha.slice(0, 12)} from ${url}`)
-      downloadUrlToFile(url, input.dest)
+      downloadUrlToFile(url, input.dest, input.env)
       const got = sha256File(input.dest)
       if (got !== input.expectedSha256) {
         fs.rmSync(input.dest, { force: true })
@@ -166,12 +196,13 @@ export function downloadUrlToFileAsync(
   dest: string,
   onBytes?: (bytes: number) => void,
   signal?: AbortSignal,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   fs.mkdirSync(path.dirname(dest), { recursive: true })
   const tmp = `${dest}.part`
-  fs.rmSync(tmp, { force: true })
+  const proxy = downloadProxy(env)
   return new Promise((resolve, reject) => {
-    const child = spawn('curl', ['-fL', '--retry', '2', '--connect-timeout', '30', '-o', tmp, url], {
+    const child = spawn('curl', curlDownloadArgs(url, tmp, proxy), {
       stdio: 'ignore',
       windowsHide: true,
     })
@@ -190,7 +221,6 @@ export function downloadUrlToFileAsync(
       if (reporter !== undefined) clearInterval(reporter)
       signal?.removeEventListener('abort', onAbort)
       if (error !== undefined) {
-        fs.rmSync(tmp, { force: true })
         reject(error)
         return
       }
@@ -236,7 +266,7 @@ export async function downloadRuntimeTarballAsync(input: {
     if (isAborted()) throw new Error('runtime pre-stage cancelled')
     try {
       console.log(`dsh-desktop: pre-staging runtime ${input.sha.slice(0, 12)} from ${url}`)
-      await downloadUrlToFileAsync(url, input.dest, input.onBytes, input.signal)
+      await downloadUrlToFileAsync(url, input.dest, input.onBytes, input.signal, input.env)
       const got = sha256File(input.dest)
       if (got !== input.expectedSha256) {
         fs.rmSync(input.dest, { force: true })
