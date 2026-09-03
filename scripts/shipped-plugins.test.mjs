@@ -61,6 +61,7 @@ test('lists every ship:true plugin once, including thread', () => {
   assert.equal(compaction?.env, 'DSH_DESKTOP_COMPACTION_PLUGIN')
   assert.ok(!names.includes('dsh-branding'))
   assert.ok(!names.includes('dsh-mcp-settings'))
+  assert.ok(!names.includes('dsh-question-rail'))
 })
 
 test('manifest slice is what a packaged shell can extract', () => {
