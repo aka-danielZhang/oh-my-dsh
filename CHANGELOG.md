@@ -4,6 +4,10 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 
 ## [Unreleased]
 
+### Fixed
+
+- Thread 客户端 `inject` 补上 `remote.session`。0.2.0-rc.5 改走 `ctx.remote.session` 后没声明，fiber 在服务到位前执行，报 `cannot get property "remote.session" without inject`，整页起不来。
+
 ## [0.3.0-rc.29] - 2026-09-03
 
 ### Fixed

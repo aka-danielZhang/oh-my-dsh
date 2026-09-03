@@ -24,7 +24,7 @@ import { createThreadPanelVisibility } from './panel-visibility.ts'
 import { THREAD_SETTINGS_ROW_CSS, ThreadSettingsRow } from './settings-row.tsx'
 import { THREAD_SIDEBAR_CSS, ThreadSidebarView } from './sidebar-view.tsx'
 
-export const inject = ['slots', 'locale', 'sessions', 'remote', 'settingsScope']
+export const inject = ['slots', 'locale', 'sessions', 'remote', 'remote.session', 'settingsScope']
 
 /** Dictionary namespace owned by this plugin. */
 const LOCALE_NS = 'dsh-thread'
