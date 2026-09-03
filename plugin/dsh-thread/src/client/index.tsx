@@ -22,7 +22,6 @@ import { en, zh, type ThreadLocaleKey } from './locales.ts'
 import { ThreadPanel, type ThreadPanelFace } from './panel.tsx'
 import { createThreadPanelVisibility } from './panel-visibility.ts'
 import { THREAD_SETTINGS_ROW_CSS, ThreadSettingsRow } from './settings-row.tsx'
-import type { UseSessions } from './session-hooks.ts'
 import { THREAD_SIDEBAR_CSS, ThreadSidebarView } from './sidebar-view.tsx'
 
 export const inject = ['slots', 'locale', 'sessions', 'remote', 'remote.session', 'settingsScope']
@@ -37,15 +36,10 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
+type UseSessions = ToolCallViewProps['useSessions']
 type ContinuationRequest = Omit<AuthorizeRequest, 'actionId'>
-type HeaderUtilityProps = Omit<PropsRuntime<'conversation.session.header.utilities'>, 'useSessions'> & {
-  threadFace: ThreadFace
-  useSessions: UseSessions
-}
-type ThreadOverlayProps = Omit<PropsRuntime<'shell.overlay'>, 'useSessions'> & {
-  threadFace: ThreadFace
-  useSessions: UseSessions
-}
+type HeaderUtilityProps = PropsRuntime<'conversation.session.header.utilities'> & { threadFace: ThreadFace }
+type ThreadOverlayProps = PropsRuntime<'shell.overlay'> & { threadFace: ThreadFace }
 
 interface ThreadFace extends ThreadPanelFace {
   continue(request: AuthorizeRequest): Promise<ThreadLink>

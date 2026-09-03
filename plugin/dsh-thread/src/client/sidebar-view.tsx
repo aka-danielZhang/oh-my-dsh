@@ -6,16 +6,14 @@ import React from 'react'
 import { deriveThreadGroups } from '../grouping.ts'
 import type { ThreadLink } from '../thread-types.ts'
 import type { ThreadPanelFace } from './panel.tsx'
-import type { UseSessions, UseWorkspaces } from './session-hooks.ts'
 
 export interface ThreadSidebarViewInjected {
   threadFace: ThreadPanelFace
 }
 
 export type ThreadSidebarViewProps =
-  Omit<PropsRuntime<'sidebar.workspaces.sessionListView'>, 'useSessions' | 'useWorkspaces'>
+  PropsRuntime<'sidebar.workspaces.sessionListView'>
   & ThreadSidebarViewInjected
-  & { useSessions: UseSessions; useWorkspaces: UseWorkspaces }
 
 /** Injected hover stylesheet: token-based, installed once per client fiber. */
 export const THREAD_SIDEBAR_CSS = `

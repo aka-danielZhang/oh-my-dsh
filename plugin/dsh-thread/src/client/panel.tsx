@@ -7,11 +7,11 @@ import {
   IconLinkOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import React from 'react'
 import { projectThreadPanel } from '../panel.ts'
 import { pageOfIndex, paginateList } from '../pagination.ts'
 import type { StateResult, ThreadArtifact } from '../thread-types.ts'
-import type { UseSessions } from './session-hooks.ts'
 
 export interface ThreadPanelFace {
   isPanelOpen(): boolean
@@ -24,7 +24,7 @@ export interface ThreadPanelProps {
   placement: React.CSSProperties
   sessionId: SessionId
   threadFace: ThreadPanelFace
-  useSessions: UseSessions
+  useSessions: PropsRuntime<'shell.overlay'>['useSessions']
 }
 
 /** Session rows per page inside the capsule; the rest page over. */
