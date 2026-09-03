@@ -17,7 +17,7 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 
 ### Changed
 
-- Runtime 钉到 `v0.1.2-alpha.5+zw.1`（官方 `dsh-v0.1.2-alpha.5`）。alpha.4 用 `seq` / `eventAt()` / `snapshotEvents()` 取代 `Session.events`，并区分 `SessionSeq` 与 `SessionLogOffset`；`dsh-thread` 已改读 `snapshotEvents()`。alpha.5 修从 `0.1.1-rc.2` / `0.1.2-alpha.3` 升级时可能启动失败或会话列表丢标题。fork 的 `v0.1.2-alpha.5+zw.1` tag 与 `@crazx/*@0.1.2-alpha.5.zw.1` 尚未发出时，`prepare-runtime` 会 fail loud——见 `docs/harness-bump/0.1.2-alpha.5/`。
+- Runtime 钉到 `v0.1.2-alpha.5+zw.1`（`53bfbd566e0ea2752da29937c556bc6f51859e5e`，官方 `dsh-v0.1.2-alpha.5`，fork [PR #12](https://github.com/aka-danielZhang/deepseek-harness/pull/12)）。alpha.4 用 `seq` / `eventAt()` / `snapshotEvents()` 取代 `Session.events`，并区分 `SessionSeq` 与 `SessionLogOffset`；`dsh-thread` 已改读 `snapshotEvents()`。alpha.5 修从 `0.1.1-rc.2` / `0.1.2-alpha.3` 升级时可能启动失败或会话列表丢标题。`@crazx/*@0.1.2-alpha.5.zw.1` 已上 npm。
 
 ## [0.3.0-rc.28] - 2026-09-02
 

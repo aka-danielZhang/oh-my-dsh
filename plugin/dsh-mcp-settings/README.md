@@ -15,7 +15,7 @@ The bundle inserts these rows into a compatible Web profile. The profile must no
 ## Requirements
 
 - A matching DeepSeek Harness development build whose `web` profile already supplies the DSH peer packages listed in `package.json`.
-- The fork runtime `v0.1.2-alpha.5+zw.1` (or the last published `@crazx/dsh-mcp-client@0.1.2-alpha.3.zw.2` until that tag ships) that emits `mcp-client/status`; official `dsh-mcp-client` does not emit this event.
+- The fork runtime `v0.1.2-alpha.5+zw.1` / `@crazx/dsh-mcp-client@0.1.2-alpha.5.zw.1` that emits `mcp-client/status`; official `dsh-mcp-client` does not emit this event.
 - Node.js `^22.19.0 || >=24`.
 - pnpm 10 or newer when installing directly from GitHub.
 
@@ -116,7 +116,7 @@ GitHub CI verifies the consumer-side install, bundle, JavaScript syntax, and pac
 
 ## Compatibility
 
-Current compatible DeepSeek Harness baseline: **fork `v0.1.2-alpha.5+zw.1`**. The manager mirrors reconnect defaults and the server-name pattern locally, but live status still requires the fork's `mcp-client/status` event. The source-checkout devDependency therefore aliases `@deepseek-ai/dsh-mcp-client` to `@crazx/dsh-mcp-client@0.1.2-alpha.3.zw.2` until `0.1.2-alpha.5.zw.1` is on npm; production profiles must provide the same status-capable peer.
+Current compatible DeepSeek Harness baseline: **fork `v0.1.2-alpha.5+zw.1`**. The manager mirrors reconnect defaults and the server-name pattern locally, but live status still requires the fork's `mcp-client/status` event. The source-checkout devDependency therefore aliases `@deepseek-ai/dsh-mcp-client` to `@crazx/dsh-mcp-client@0.1.2-alpha.5.zw.1`; production profiles must provide the same status-capable peer.
 
 This bundle replaces extension points present in the current DeepSeek Harness release-candidate line and deliberately reuses the in-box `@deepseek-ai/dsh-mcp-client`. DSH is pre-release software; update the peer ranges, Typert descriptor, and bundle patch together when those extension points change.
 

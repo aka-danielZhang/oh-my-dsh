@@ -64,7 +64,7 @@ docs/                        packaging-playbook.md + notes/（决策记录住仓
 
 npm 版本依赖是**唯一常态**；源码依赖仅限本地调试，且只能经专门命令进出：
 
-- **默认（提交态）**：所有包的 `@deepseek-ai/*` 依赖钉 registry 版本。上游未修改包直接用官方 `@deepseek-ai/*`（公共 npm 已发布到 `0.1.2-alpha.5`，含 `lib/types`；本仓基线随 `runtime/revision.json`）；fork 修改面包用其自有 scope 的发布版（当前为 `0.1.2-alpha.5.zw.1`，见 fork 仓 FORK.md「发布纪律」；该层须等 fork 打 `v0.1.2-alpha.5+zw.1` 后由 npm-release 发出，此前 `prepare-runtime` fail loud）。
+- **默认（提交态）**：所有包的 `@deepseek-ai/*` 依赖钉 registry 版本。上游未修改包直接用官方 `@deepseek-ai/*`（公共 npm 已发布到 `0.1.2-alpha.5`，含 `lib/types`；本仓基线随 `runtime/revision.json`）；fork 修改面包用其自有 scope 的发布版（当前为 `0.1.2-alpha.5.zw.1`，见 fork 仓 FORK.md「发布纪律」）。
 - **调试（本地态）**：`pnpm run link:source [pkg ...]` 把受管插件的 `@deepseek-ai/*` devDeps 重写为 `link:../deepseek-harness/<subpath>`（锚由 `plugin:setup` 建）并重装；`pnpm run unlink:source` 恢复 registry 版本。映射表（registry 版本 ↔ 源码子路径）在 `scripts/source-deps.mjs` 单点维护，新依赖进映射表才算受管。
 - **禁止**：手写 link:/file:/`../` 依赖并提交；以源码 posture 发版；绕过映射表私接源码。发布与 CI 检查在 registry posture 下进行。
 - 遗留迁移：`dsh-desktop-bridge` / `dsh-mcp-settings` 的 `@deepseek-ai/*` devDep 已钉 registry，但桥自有 `dsh` 锚与 mcp-settings 的 tsconfig project references 还在，按本纪律迁入 `source-deps.mjs` 受管后删除各自 setup 锚——迁移完成前不得新增同类形态。
