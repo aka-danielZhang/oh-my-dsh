@@ -4,6 +4,10 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复启动即弹「Failed to load plugins / dsh-thread: cannot get property "remote.session" without inject」：dsh-thread 0.2.0-rc.6 在 client 入口 inject 补声明 `remote.session` 点号子路径（stock session-controller / ui-plan 同款姿势）。cordis 4 把每个 Remote namespace 挂成独立服务 `remote.<namespace>`，不在 inject 里声明的服务任何 fiber 都解析不到；rc.5 改走 `ctx.remote.session` 时漏了这行声明，类型检查与单测均无法暴露。0.3.0-rc.29 受影响用户升级本版即恢复，无需手动操作。
+
 ## [0.3.0-rc.29] - 2026-09-03
 
 ### Fixed

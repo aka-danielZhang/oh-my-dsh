@@ -1,6 +1,6 @@
 {
   "name": "dsh-thread",
-  "version": "0.2.0-rc.5",
+  "version": "0.2.0-rc.6",
   "description": "Explicit cross-session Thread handoffs for DeepSeek Harness",
   "type": "module",
   "main": "lib/index.js",
@@ -48,7 +48,7 @@
       "tarball": "thread.tar.gz",
       "dest": "plugins/dsh-thread",
       "env": "DSH_DESKTOP_THREAD_PLUGIN",
-      "pin": "0.2.0-rc.5"
+      "pin": "0.2.0-rc.6"
     }
   },
   "scripts": {
