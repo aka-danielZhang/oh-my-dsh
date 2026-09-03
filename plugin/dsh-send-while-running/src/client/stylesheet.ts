@@ -1,10 +1,10 @@
 /**
- * The send-while-running stylesheet, browser half.
+ * The stop-while-running stylesheet, browser half.
  *
- * The Send twin mirrors ui-conversation's composer `.primary` circle (34px,
- * info fill, white glyph, -2px optical lift out of the row's top pad) so it
- * reads as the stock Send's twin beside the stock Stop. Positioning and the
- * Stop recolor use only documented seams:
+ * The Stop button mirrors ui-conversation's composer `.primary` circle (34px,
+ * white glyph, -2px optical lift out of the row's top pad) in the same toned
+ * danger-red as the global Stop recolor below. Positioning uses only
+ * documented seams:
  *
  * - `[data-slot="conversation.input.right"]` — the render machinery's
  *   addressable anchor for this slot (every render site exposes it).
@@ -12,28 +12,28 @@
  *   last direct button child of the trailing row (the model seat and the
  *   context meter render inside their own wrappers; a subagent's separate
  *   Stop never coexists with this button's visibility terms).
- * - `button:has(> svg > rect)` — the Stop STATE anchor: the stock primary
- *   swaps its glyph when it flips Send→Stop (arrow = <path>, stop =
- *   <rect>), so the selector matches the button exactly while it IS a
- *   Stop button. Pure CSS, no JS state mirror; it follows the stock
- *   machine for free, including the subagent's separate Stop (also a
- *   rect button in the same row).
  *
  * Rules:
  * - Ordering (`order: 1` / `:has()`-scoped `order: 2`) lands the pair as
- *   [model][meter][send][stop] and only applies while the Send twin is
+ *   [model][meter][stop][send] and only applies while this button is
  *   mounted; every other state keeps the shipped layout untouched.
- * - The Stop button is danger-red in EVERY state (user preference): it
- *   reads apart from the blue Send at a glance. Toned one shade softer
- *   than the theme error-primary fill after visual review — light theme
- *   red-500 (coral) instead of red-600, dark theme red-400; hover steps
- *   one shade lighter like the stock info button.
+ * - The button is danger-red in EVERY state it renders (it IS a stop):
+ *   light theme red-500 (coral) base / red-400 hover; dark theme red-400
+ *   base with a brightness-step hover — the same shades as the global
+ *   recolor below, so the two stops never read differently.
+ * - The global Stop recolor (below) is UNCHANGED from 0.1.1: every
+ *   stop-shaped button in the trailing row is danger-red in every state,
+ *   anchored on the glyph (`svg > rect`) so it follows the stock machine
+ *   for free. This button is NOT matched by it (it renders inside the slot
+ *   wrapper, not as a direct button child of the trailing row), so it
+ *   carries its own explicit red.
+ *
  * Semantic tokens only, with deliberate exceptions documented inline.
  * @returns the stylesheet text.
  */
-export function sendWhileRunningCss(): string {
+export function stopWhileRunningCss(): string {
   return [
-    '.dsh-send-while-running {',
+    '.dsh-stop-while-running {',
     '  display: grid;',
     '  place-items: center;',
     '  flex: none;',
@@ -41,9 +41,9 @@ export function sendWhileRunningCss(): string {
     '  height: 34px;',
     '  border: none;',
     '  border-radius: 999px;',
-    '  background: var(--dsw-alias-button-info-fill);',
+    '  background: var(--dsw-static-red-500);',
     '  /* Static white, not the foreground token: mirrors the stock primary —',
-    '     the arrow stays white on the blue fill in both themes. */',
+    '     the glyph stays white on the red fill in both themes. */',
     '  color: #fff;',
     '  cursor: pointer;',
     '  transition: background-color 100ms ease;',
@@ -51,19 +51,31 @@ export function sendWhileRunningCss(): string {
     '  transform: translateY(-2px);',
     '  order: 1;',
     '}',
-    '.dsh-send-while-running:hover:not(:disabled) {',
-    '  background: var(--dsw-alias-button-info-hover);',
+    // Light theme: red-500 base, hover steps one shade lighter (red-400) like
+    // the stock info button steps.
+    '.dsh-stop-while-running:hover {',
+    '  background: var(--dsw-static-red-400);',
     '}',
-    '.dsh-send-while-running:disabled {',
-    '  opacity: 0.4;',
-    '  cursor: default;',
+    // Dark theme: red-400 base (softer than red-500 on dark surfaces); hover
+    // lightens via a brightness step instead of another token (the static red
+    // scale has no shade between 400 and the near-white 100).
+    'body[data-ds-dark-theme] .dsh-stop-while-running {',
+    '  background: var(--dsw-static-red-400);',
     '}',
-    'div:has(> [data-slot="conversation.input.right"] .dsh-send-while-running) > button:last-of-type {',
+    'body[data-ds-dark-theme] .dsh-stop-while-running:hover {',
+    '  background: var(--dsw-static-red-500);',
+    '  filter: brightness(1.08);',
+    '}',
+    // Push the stock primary (Send) to the right only while this button is
+    // mounted; the anchor chain is the slot seam plus our own class.
+    'div:has(> [data-slot="conversation.input.right"] .dsh-stop-while-running) > button:last-of-type {',
     '  order: 2;',
     '}',
     // Stop = danger-red in EVERY state, anchored on the stop glyph (<rect>;
     // the send glyph is a <path> so the blue Send state never matches). The
     // selector is scoped to the composer trailing row through the slot seam.
+    // Unchanged from 0.1.1 — this is the user preference that makes every
+    // stock stop (primary flip, subagent's separate Stop) read as red.
     'div:has(> [data-slot="conversation.input.right"]) > button:has(> svg > rect) {',
     '  background: var(--dsw-static-red-500);',
     '  color: #fff;',
@@ -71,9 +83,6 @@ export function sendWhileRunningCss(): string {
     'div:has(> [data-slot="conversation.input.right"]) > button:has(> svg > rect):hover:not(:disabled) {',
     '  background: var(--dsw-static-red-400);',
     '}',
-    // Dark theme: red-400 base (softer than red-500 on dark surfaces); hover
-    // lightens via a brightness step instead of another token (the static red
-    // scale has no shade between 400 and the near-white 100).
     'body[data-ds-dark-theme] div:has(> [data-slot="conversation.input.right"]) > button:has(> svg > rect) {',
     '  background: var(--dsw-static-red-400);',
     '}',
@@ -99,14 +108,14 @@ export interface StylesheetHost {
 }
 
 /**
- * Append the send-while-running stylesheet to a document head.
+ * Append the stop-while-running stylesheet to a document head.
  * @param doc - the document to style (injected for tests).
  * @returns the disposer removing the style element.
  */
-export function installSendWhileRunningCss(doc: StylesheetHost): () => void {
+export function installStopWhileRunningCss(doc: StylesheetHost): () => void {
   const style = doc.createElement('style')
-  style.setAttribute('data-dsh-send-while-running', '')
-  style.textContent = sendWhileRunningCss()
+  style.setAttribute('data-dsh-stop-while-running', '')
+  style.textContent = stopWhileRunningCss()
   doc.head.append(style)
   return () => { style.remove() }
 }

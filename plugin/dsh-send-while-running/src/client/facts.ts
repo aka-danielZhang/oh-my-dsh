@@ -1,7 +1,14 @@
 /**
- * Pure visibility/busy predicates for the send-while-running button, over
- * the minimal structural facts the InputZone owner share and the session
- * standard kit expose. Kept DOM-free so they unit-test directly.
+ * Pure visibility predicate for the stop-while-running button, over the
+ * minimal structural facts the InputZone owner share exposes. Kept DOM-free
+ * so it unit-tests directly.
+ *
+ * 0.2.0 pivot: the 0.1.2-alpha composer keeps the primary as SEND while a
+ * running ordinary session has draft content (`primaryStops` gained the
+ * `empty || blocked` term), so the composer offers NO stop affordance in
+ * exactly that state. This plugin now fills that gap: one extra Stop button
+ * beside the Send primary, hidden whenever the stock primary already IS a
+ * Stop.
  */
 
 /**
@@ -26,35 +33,30 @@ export interface InputFacts {
   readonly draft: string
   /** Ordered runtime-only draft image ids; bytes stay in the controller. */
   readonly imageIds: readonly unknown[]
-  /** Machine phase: 'plain' | 'adjudicating' | 'claimed' | 'submitting'. */
-  readonly phase: string
 }
 
 /**
- * When the extra Send button must be visible: exactly the state where the
- * stock composer primary has flipped to Stop for an ordinary session
- * (running, no subagent continuation address, not removed) AND the user has
- * something to send (non-blank draft or at least one draft image). A
- * continuable child session already keeps Send as its primary with an
- * independent Stop beside it, so it is excluded.
+ * When the extra Stop button must be visible: an ordinary session
+ * (running, no subagent continuation address, not removed) whose draft has
+ * content — the one state where the stock composer primary stays SEND and
+ * the trailing row offers no Stop at all (the draft's content keeps
+ * `primaryStops` false, and a continuable child's independent Stop only
+ * exists for subagent sessions, which are excluded here). When the draft
+ * empties, the stock primary flips back to Stop and this button stands
+ * down, so the two never duplicate.
+ *
+ * Known edge (accepted): while the composer is blocked (`routable ===
+ * false`) the stock primary is also a Stop regardless of the draft, and
+ * this seat cannot see the block — a running + blocked + non-empty-draft
+ * session would briefly show two Stops. A running turn implies the route
+ * was servable, so the overlap is transient at worst.
  * @param session - structural session facts.
  * @param input - structural input facts.
  * @returns true when the button should render.
  */
-export function sendButtonVisible(session: SessionFacts, input: InputFacts): boolean {
+export function stopButtonVisible(session: SessionFacts, input: InputFacts): boolean {
   if (!session.running) return false
   if (session.subagent !== null && session.subagent !== undefined) return false
   if (session.removed) return false
   return input.draft.trim() !== '' || input.imageIds.length > 0
-}
-
-/**
- * When the extra Send button must refuse clicks: the input machine is mid
- * admission (adjudicating a slash line or submitting). Mirrors the stock
- * primary's `machineBusy` disable term.
- * @param phase - the machine phase.
- * @returns true while an admission transaction is in flight.
- */
-export function sendButtonBusy(phase: string): boolean {
-  return phase === 'adjudicating' || phase === 'submitting'
 }

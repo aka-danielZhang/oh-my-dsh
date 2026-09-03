@@ -1,7 +1,7 @@
 {
   "name": "dsh-send-while-running",
-  "version": "0.1.1",
-  "description": "DSH web plugin: keeps a Send button beside the Stop button in the composer while the agent turn is running and the draft has content, so pointer users can queue follow-ups without the keyboard",
+  "version": "0.2.0",
+  "description": "DSH web plugin: keeps a Stop button beside the Send primary in the composer while the agent turn is running and the draft has content (the one state the 0.1.2 composer offers no stop), and recolors every stock Stop danger-red",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -29,7 +29,7 @@
       "tarball": "send-while-running.tar.gz",
       "dest": "plugins/dsh-send-while-running",
       "env": "DSH_DESKTOP_SEND_WHILE_RUNNING_PLUGIN",
-      "pin": "0.1.1"
+      "pin": "0.2.0"
     }
   },
   "scripts": {

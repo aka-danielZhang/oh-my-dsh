@@ -1,13 +1,13 @@
 /**
- * Dictionary namespace owned by this plugin: the send button's accessible
- * label, mirroring ui-conversation's 'input.send' copy in both locales.
+ * Dictionary namespace owned by this plugin: the stop button's accessible
+ * label, mirroring ui-conversation's 'input.stop' copy in both locales.
  */
 export const zh = {
-  'send.label': '发送消息',
+  'stop.label': '停止',
 } as const
 
 export const en = {
-  'send.label': 'Send message',
+  'stop.label': 'Stop',
 } as const
 
 export type SendWhileRunningKey = keyof typeof zh
