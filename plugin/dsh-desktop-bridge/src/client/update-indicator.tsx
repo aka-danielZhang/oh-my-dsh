@@ -322,7 +322,6 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement | null 
         onClose={() => { setDialogOpen(false) }}
         className="dsh-desktop-update-dialog"
         title={dialogTitle}
-        closeLabel={t('update.dialog.close')}
         headless
       >
         <div data-desktop-update-dialog-card="">

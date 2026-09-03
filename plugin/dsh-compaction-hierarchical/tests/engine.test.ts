@@ -26,6 +26,13 @@ const STRUCTURED = SUMMARY_SECTIONS.map(section => `## ${section}\n- retained`).
 
 type OverflowWhen = (options: GenerateOptions, index: number) => boolean
 
+/** alpha.5 TokenMeter registers session projections at construct time. */
+function testContext(): Context {
+  const ctx = new Context()
+  Object.assign(ctx, { sessionProjections: { register() {} } })
+  return ctx
+}
+
 class SummaryAdapter extends LlmAdapter {
   readonly calls: GenerateOptions[] = []
   readonly outcomes: ('overflow' | 'success')[] = []
@@ -97,7 +104,7 @@ function fixture(
   replayTools = false,
   overflowWhen: OverflowWhen = () => false,
 ) {
-  const ctx = new Context()
+  const ctx = testContext()
   void new LlmRuntime(ctx)
   void new TokenMeter(ctx)
   const adapter = new SummaryAdapter(2400, output, overflows, overflowWhen)
@@ -349,7 +356,7 @@ test('an oversized partial identifies the reduce round that cannot consume it', 
 })
 
 test('output reserve incompatible with the summary model fails before streaming', async () => {
-  const ctx = new Context()
+  const ctx = testContext()
   void new LlmRuntime(ctx)
   void new TokenMeter(ctx)
   const adapter = new SummaryAdapter(1000)
@@ -372,7 +379,7 @@ test('output reserve incompatible with the summary model fails before streaming'
 })
 
 test('a single map result does not require an unused reduce reserve', async () => {
-  const ctx = new Context()
+  const ctx = testContext()
   void new LlmRuntime(ctx)
   void new TokenMeter(ctx)
   const adapter = new SummaryAdapter(1000)
@@ -397,7 +404,7 @@ test('a single map result does not require an unused reduce reserve', async () =
 })
 
 test('a model-specific one-shot cap that cannot fit routes directly to hierarchy', async () => {
-  const ctx = new Context()
+  const ctx = testContext()
   void new LlmRuntime(ctx)
   void new TokenMeter(ctx)
   const adapter = new SummaryAdapter(2400)

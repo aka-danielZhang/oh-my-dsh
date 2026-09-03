@@ -6,14 +6,16 @@ import React from 'react'
 import { deriveThreadGroups } from '../grouping.ts'
 import type { ThreadLink } from '../thread-types.ts'
 import type { ThreadPanelFace } from './panel.tsx'
+import type { UseSessions, UseWorkspaces } from './session-hooks.ts'
 
 export interface ThreadSidebarViewInjected {
   threadFace: ThreadPanelFace
 }
 
 export type ThreadSidebarViewProps =
-  PropsRuntime<'sidebar.workspaces.sessionListView'>
+  Omit<PropsRuntime<'sidebar.workspaces.sessionListView'>, 'useSessions' | 'useWorkspaces'>
   & ThreadSidebarViewInjected
+  & { useSessions: UseSessions; useWorkspaces: UseWorkspaces }
 
 /** Injected hover stylesheet: token-based, installed once per client fiber. */
 export const THREAD_SIDEBAR_CSS = `
@@ -91,9 +93,9 @@ function SessionRow(props: {
  */
 export function ThreadSidebarView(props: ThreadSidebarViewProps): React.ReactElement {
   const [links, setLinks] = React.useState<readonly ThreadLink[] | null>(null)
-  const byId = props.useSessions(state => state.byId)
-  const currentId = props.useSessions(state => state.current)
-  const archived = props.useWorkspaces(state => state.archivedSessionIds)
+  const byId = props.useSessions((state) => state.byId)
+  const currentId = props.useSessions((state) => state.current)
+  const archived = props.useWorkspaces((state) => state.archivedSessionIds)
 
   React.useEffect(() => {
     let active = true

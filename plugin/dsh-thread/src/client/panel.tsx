@@ -1,4 +1,3 @@
-import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   IconBranchOutline16,
   IconChevronLeftOutline14,
@@ -12,6 +11,7 @@ import React from 'react'
 import { projectThreadPanel } from '../panel.ts'
 import { pageOfIndex, paginateList } from '../pagination.ts'
 import type { StateResult, ThreadArtifact } from '../thread-types.ts'
+import type { UseSessions } from './session-hooks.ts'
 
 export interface ThreadPanelFace {
   isPanelOpen(): boolean
@@ -24,7 +24,7 @@ export interface ThreadPanelProps {
   placement: React.CSSProperties
   sessionId: SessionId
   threadFace: ThreadPanelFace
-  useSessions: PropsRuntime<'shell.overlay'>['useSessions']
+  useSessions: UseSessions
 }
 
 /** Session rows per page inside the capsule; the rest page over. */
@@ -155,7 +155,7 @@ export function ThreadPanel(props: ThreadPanelProps): React.ReactElement {
   const [error, setError] = React.useState<string | null>(null)
   const [sessionPage, setSessionPage] = React.useState(1)
   const [artifactPage, setArtifactPage] = React.useState(1)
-  const sessions = props.useSessions(snapshot => snapshot.byId)
+  const sessions = props.useSessions((snapshot) => snapshot.byId)
 
   React.useEffect(() => {
     let active = true

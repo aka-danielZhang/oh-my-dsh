@@ -1,0 +1,325 @@
+diff --git a/docs/event-producer-consumer.md b/docs/event-producer-consumer.md
+index bdfb3f23e..3129e0b9a 100644
+--- a/docs/event-producer-consumer.md
++++ b/docs/event-producer-consumer.md
+@@ -20,7 +20,7 @@ This matrix shows which packages dispatch each harness-owned event and which pac
+ | `agent/request-error` | `waterfall` | [`packages/core/agent/src/runtime-types.ts:267`](../packages/core/agent/src/runtime-types.ts) | [`agent-loop`](../packages/core/agent-loop) (`waterfall`) | [`compaction-basic`](../packages/compaction/compaction-basic), [`llm-retry`](../packages/llm/llm-retry) |
+ | `agent/session-start` | `emit` | [`packages/core/agent/src/runtime-types.ts:224`](../packages/core/agent/src/runtime-types.ts) | [`agent-loop`](../packages/core/agent-loop) (`emitAgentEvent`) | `agent-team`, [`goal`](../packages/goal/goal), [`goal-round-driver`](../packages/goal/goal-round-driver), [`hooks-claude-code`](../packages/hooks/hooks-claude-code), [`hooks-codex`](../packages/hooks/hooks-codex) |
+ | `agent/status` | `emit` | [`packages/core/agent/src/runtime-types.ts:185`](../packages/core/agent/src/runtime-types.ts) | [`agent-loop`](../packages/core/agent-loop) (`emit`) | [`agent`](../packages/core/agent), `agent-team`, [`compaction-basic`](../packages/compaction/compaction-basic), [`goal-round-driver`](../packages/goal/goal-round-driver), [`schedule`](../packages/schedule/schedule), `server`, `session-controller` |
+-| `agent/turn-stopping` | `serial` | [`packages/core/agent/src/runtime-types.ts:285`](../packages/core/agent/src/runtime-types.ts) | [`agent-loop`](../packages/core/agent-loop) (`serial`) | [`hooks-claude-code`](../packages/hooks/hooks-claude-code), [`hooks-codex`](../packages/hooks/hooks-codex) |
++| `agent/turn-stopping` | `serial` | [`packages/core/agent/src/runtime-types.ts:285`](../packages/core/agent/src/runtime-types.ts) | [`agent-loop`](../packages/core/agent-loop) (`serial`) | [`hooks-claude-code`](../packages/hooks/hooks-claude-code), [`hooks-codex`](../packages/hooks/hooks-codex), [`todo-completion-guard`](../packages/guard/todo-completion-guard) |
+ | `api-session/activity` | `emit` | [`packages/api/session-controller/src/types.ts:542`](../packages/api/session-controller/src/types.ts) | `session-controller` (`emit`) | `remotes` |
+ | `api-session/added` | `emit` | [`packages/api/session-controller/src/types.ts:522`](../packages/api/session-controller/src/types.ts) | `session-controller` (`emit`) | `remotes` |
+ | `api-session/error` | `emit` | [`packages/api/session-controller/src/types.ts:549`](../packages/api/session-controller/src/types.ts) | `session-controller` (`emit`) | `remotes` |
+@@ -44,6 +44,7 @@ This matrix shows which packages dispatch each harness-owned event and which pac
+ | `goal/changed` | `emit` | [`packages/goal/goal/src/domain.ts:114`](../packages/goal/goal/src/domain.ts) | [`goal`](../packages/goal/goal) (`emit`) | [`goal-round-driver`](../packages/goal/goal-round-driver) |
+ | `llm/adapters-updated` | `emit` | [`packages/llm/llm/src/types.ts:23`](../packages/llm/llm/src/types.ts) | [`llm`](../packages/llm/llm) (`events.dispatch`) | [`acp`](../packages/acp/acp), [`llm`](../packages/llm/llm), `remotes` |
+ | `llm/stream` | `waterfall` | [`packages/llm/llm/src/index.ts:67`](../packages/llm/llm/src/index.ts) | [`llm`](../packages/llm/llm) (`waterfall`) | [`agent-loop`](../packages/core/agent-loop), [`llm`](../packages/llm/llm), [`llm-replay`](../packages/test-support/llm-replay), [`session-checkpoint-policy`](../packages/session/session-checkpoint-policy), [`session-title`](../packages/session/session-title) |
++| `mcp-client/status` | `emit` | [`packages/mcp/mcp-client/src/types.ts:32`](../packages/mcp/mcp-client/src/types.ts) | [`mcp-client`](../packages/mcp/mcp-client) (`emit`) | - |
+ | `session-telemetry/record` | `waterfall` | [`packages/session/session-telemetry/src/index.ts:43`](../packages/session/session-telemetry/src/index.ts) | [`session-telemetry`](../packages/session/session-telemetry) (`waterfall`) | - |
+ | `session/created` | `emit` | [`packages/core/session/src/index.ts:52`](../packages/core/session/src/index.ts) | [`session`](../packages/core/session) (`events.dispatch`) | [`compaction`](../packages/compaction/compaction), [`goal`](../packages/goal/goal), [`hook-protocol`](../packages/hooks/hook-protocol), [`llm-retry`](../packages/llm/llm-retry), [`permission-presets`](../packages/interaction/permission-presets), [`plan-mode`](../packages/plan/plan-mode), [`schedule`](../packages/schedule/schedule), `server`, [`session`](../packages/core/session), `session-controller`, [`session-log-deepseek`](../packages/session/session-log-deepseek), [`session-persistence`](../packages/session/session-persistence), [`session-projection`](../packages/session/session-projection), [`session-projection-cache`](../packages/session/session-projection-cache), [`session-telemetry`](../packages/session/session-telemetry), [`session-title`](../packages/session/session-title), [`time-context`](../packages/context/time-context), [`tool-todo`](../packages/todo/tool-todo), [`tool-workflow`](../packages/workflow/tool-workflow), [`tools`](../packages/core/tools), [`user-approval`](../packages/interaction/user-approval) |
+ | `session/disposed` | `emit` | [`packages/core/session/src/index.ts:62`](../packages/core/session/src/index.ts) | [`session`](../packages/core/session) (`events.dispatch`) | [`agent-loop`](../packages/core/agent-loop), `agent-team`, `session-controller`, [`session-persistence`](../packages/session/session-persistence), [`session-projection-cache`](../packages/session/session-projection-cache), [`session-telemetry`](../packages/session/session-telemetry), [`session-title`](../packages/session/session-title) |
+diff --git a/docs/event-producer-consumer.zh.md b/docs/event-producer-consumer.zh.md
+index 3fe1fe737..b82ee4172 100644
+--- a/docs/event-producer-consumer.zh.md
++++ b/docs/event-producer-consumer.zh.md
+@@ -22,7 +22,7 @@
+ | `agent/request-error` | `waterfall` | [`packages/core/agent/src/runtime-types.ts:267`](../packages/core/agent/src/runtime-types.ts) | [`agent-loop`](../packages/core/agent-loop) (`waterfall`) | [`compaction-basic`](../packages/compaction/compaction-basic), [`llm-retry`](../packages/llm/llm-retry) |
+ | `agent/session-start` | `emit` | [`packages/core/agent/src/runtime-types.ts:224`](../packages/core/agent/src/runtime-types.ts) | [`agent-loop`](../packages/core/agent-loop) (`emitAgentEvent`) | `agent-team`, [`goal`](../packages/goal/goal), [`goal-round-driver`](../packages/goal/goal-round-driver), [`hooks-claude-code`](../packages/hooks/hooks-claude-code), [`hooks-codex`](../packages/hooks/hooks-codex) |
+ | `agent/status` | `emit` | [`packages/core/agent/src/runtime-types.ts:185`](../packages/core/agent/src/runtime-types.ts) | [`agent-loop`](../packages/core/agent-loop) (`emit`) | [`agent`](../packages/core/agent), `agent-team`, [`compaction-basic`](../packages/compaction/compaction-basic), [`goal-round-driver`](../packages/goal/goal-round-driver), [`schedule`](../packages/schedule/schedule), `server`, `session-controller` |
+-| `agent/turn-stopping` | `serial` | [`packages/core/agent/src/runtime-types.ts:285`](../packages/core/agent/src/runtime-types.ts) | [`agent-loop`](../packages/core/agent-loop) (`serial`) | [`hooks-claude-code`](../packages/hooks/hooks-claude-code), [`hooks-codex`](../packages/hooks/hooks-codex) |
++| `agent/turn-stopping` | `serial` | [`packages/core/agent/src/runtime-types.ts:285`](../packages/core/agent/src/runtime-types.ts) | [`agent-loop`](../packages/core/agent-loop) (`serial`) | [`hooks-claude-code`](../packages/hooks/hooks-claude-code), [`hooks-codex`](../packages/hooks/hooks-codex), [`todo-completion-guard`](../packages/guard/todo-completion-guard) |
+ | `api-session/activity` | `emit` | [`packages/api/session-controller/src/types.ts:542`](../packages/api/session-controller/src/types.ts) | `session-controller` (`emit`) | `remotes` |
+ | `api-session/added` | `emit` | [`packages/api/session-controller/src/types.ts:522`](../packages/api/session-controller/src/types.ts) | `session-controller` (`emit`) | `remotes` |
+ | `api-session/error` | `emit` | [`packages/api/session-controller/src/types.ts:549`](../packages/api/session-controller/src/types.ts) | `session-controller` (`emit`) | `remotes` |
+@@ -46,6 +46,7 @@
+ | `goal/changed` | `emit` | [`packages/goal/goal/src/domain.ts:114`](../packages/goal/goal/src/domain.ts) | [`goal`](../packages/goal/goal) (`emit`) | [`goal-round-driver`](../packages/goal/goal-round-driver) |
+ | `llm/adapters-updated` | `emit` | [`packages/llm/llm/src/types.ts:23`](../packages/llm/llm/src/types.ts) | [`llm`](../packages/llm/llm) (`events.dispatch`) | [`acp`](../packages/acp/acp), [`llm`](../packages/llm/llm), `remotes` |
+ | `llm/stream` | `waterfall` | [`packages/llm/llm/src/index.ts:67`](../packages/llm/llm/src/index.ts) | [`llm`](../packages/llm/llm) (`waterfall`) | [`agent-loop`](../packages/core/agent-loop), [`llm`](../packages/llm/llm), [`llm-replay`](../packages/test-support/llm-replay), [`session-checkpoint-policy`](../packages/session/session-checkpoint-policy), [`session-title`](../packages/session/session-title) |
++| `mcp-client/status` | `emit` | [`packages/mcp/mcp-client/src/types.ts:32`](../packages/mcp/mcp-client/src/types.ts) | [`mcp-client`](../packages/mcp/mcp-client) (`emit`) | - |
+ | `session-telemetry/record` | `waterfall` | [`packages/session/session-telemetry/src/index.ts:43`](../packages/session/session-telemetry/src/index.ts) | [`session-telemetry`](../packages/session/session-telemetry) (`waterfall`) | - |
+ | `session/created` | `emit` | [`packages/core/session/src/index.ts:52`](../packages/core/session/src/index.ts) | [`session`](../packages/core/session) (`events.dispatch`) | [`compaction`](../packages/compaction/compaction), [`goal`](../packages/goal/goal), [`hook-protocol`](../packages/hooks/hook-protocol), [`llm-retry`](../packages/llm/llm-retry), [`permission-presets`](../packages/interaction/permission-presets), [`plan-mode`](../packages/plan/plan-mode), [`schedule`](../packages/schedule/schedule), `server`, [`session`](../packages/core/session), `session-controller`, [`session-log-deepseek`](../packages/session/session-log-deepseek), [`session-persistence`](../packages/session/session-persistence), [`session-projection`](../packages/session/session-projection), [`session-projection-cache`](../packages/session/session-projection-cache), [`session-telemetry`](../packages/session/session-telemetry), [`session-title`](../packages/session/session-title), [`time-context`](../packages/context/time-context), [`tool-todo`](../packages/todo/tool-todo), [`tool-workflow`](../packages/workflow/tool-workflow), [`tools`](../packages/core/tools), [`user-approval`](../packages/interaction/user-approval) |
+ | `session/disposed` | `emit` | [`packages/core/session/src/index.ts:62`](../packages/core/session/src/index.ts) | [`session`](../packages/core/session) (`events.dispatch`) | [`agent-loop`](../packages/core/agent-loop), `agent-team`, `session-controller`, [`session-persistence`](../packages/session/session-persistence), [`session-projection-cache`](../packages/session/session-projection-cache), [`session-telemetry`](../packages/session/session-telemetry), [`session-title`](../packages/session/session-title) |
+diff --git a/docs/subsystems/persistence.md b/docs/subsystems/persistence.md
+index b61ddee8d..6a9ebb787 100644
+--- a/docs/subsystems/persistence.md
++++ b/docs/subsystems/persistence.md
+@@ -330,6 +330,9 @@ ensureMaterialized(_session: Session): Promise<void>
+  * seq contracts: the first event's `seq` MUST equal the stored next-seq
+  * (after `load` has durably closed any interrupted turn). Rejects non-JSON-
+  * serializable `event.data` with an error naming the offending event type.
++ * Coordinator-backed implementations also reject when the durable log
++ * advanced since this process last observed it — another harness process
++ * sharing the sessions root — rather than interleave duplicate seqs.
+  * A seeded session's first materializing batch must reach its complete
+  * inherited prefix.
+  * @param id - the session the batch belongs to.
+diff --git a/docs/subsystems/persistence.zh.md b/docs/subsystems/persistence.zh.md
+index 08cc35d98..e66a037d1 100644
+--- a/docs/subsystems/persistence.zh.md
++++ b/docs/subsystems/persistence.zh.md
+@@ -330,6 +330,9 @@ ensureMaterialized(_session: Session): Promise<void>
+  * seq contracts: the first event's `seq` MUST equal the stored next-seq
+  * (after `load` has durably closed any interrupted turn). Rejects non-JSON-
+  * serializable `event.data` with an error naming the offending event type.
++ * Coordinator-backed implementations also reject when the durable log
++ * advanced since this process last observed it — another harness process
++ * sharing the sessions root — rather than interleave duplicate seqs.
+  * A seeded session's first materializing batch must reach its complete
+  * inherited prefix.
+  * @param id - the session the batch belongs to.
+diff --git a/packages/bundle/base/cordis.patch.yml b/packages/bundle/base/cordis.patch.yml
+index 94b5d2320..602359060 100644
+--- a/packages/bundle/base/cordis.patch.yml
++++ b/packages/bundle/base/cordis.patch.yml
+@@ -433,6 +433,10 @@
+         thresholds: [3, 5, 8]
+         argumentsPreviewChars: 500
+ 
++    # One advisory steer when a turn closes on an unfinished todo list.
++    - id: todo-completion-guard
++      name: '@deepseek-ai/dsh-todo-completion-guard'
++
+     # The shared base enables the stable model-facing web_search and web_fetch
+     # tools. The Web app disables this host row and composes both tools per agent
+     # preset; products with a stricter network policy override tool-web. DeepSeek
+diff --git a/packages/extensions/tool-cordis/src/api-catalog.ts b/packages/extensions/tool-cordis/src/api-catalog.ts
+index 3c81eb2b3..9988b15bd 100644
+--- a/packages/extensions/tool-cordis/src/api-catalog.ts
++++ b/packages/extensions/tool-cordis/src/api-catalog.ts
+@@ -83,8 +83,8 @@ export interface TypeApiEntry {
+ export const SERVICE_API: readonly ServiceApiEntry[] = [
+   {
+     key: 'agentDefaultModel',
+-    summary: 'Owns the default model selection independently of any Host or transport.',
+-    description: 'Owns the default model selection independently of any Host or transport. The composition entry remains usable without a settings provider; when one is mounted, its user layer is read live.',
++    summary: 'Owns the default model selection and the per-route reasoning-effort memory, each independently of any Host or transport.',
++    description: 'Owns the default model selection and the per-route reasoning-effort memory, each independently of any Host or transport. The composition entries remain usable without a settings provider; when one is mounted, the user layer of each namespace is read live.',
+     methods: [
+       {
+         signature: 'currentSelection(): ModelSelection',
+@@ -98,6 +98,18 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
+         parameters: [{ name: 'next', description: 'resolved selection accepted by an entry point.' }],
+         returns: 'fulfillment after the optional settings write settles.',
+       },
++      {
++        signature: 'recallEffort(provider: string, model: string): ReasoningEffortId | undefined',
++        description: 'Recall the effort last explicitly chosen on one provider/model route. A hand-edited document may carry duplicate entries; the last match wins, matching the append order rememberEffort maintains.',
++        parameters: [{ name: 'provider', description: 'registered provider route.' }, { name: 'model', description: 'provider-owned model id.' }],
++        returns: 'the remembered effort, or undefined when the route has none.',
++      },
++      {
++        signature: 'async rememberEffort(provider: string, model: string, effort: ReasoningEffortId | undefined): Promise<void>',
++        description: 'Record the remembered effort for one route, or clear it when `effort` is undefined. A deployment without a settings provider keeps its composition entry, so the call fulfills with no stored effect.',
++        parameters: [{ name: 'provider', description: 'registered provider route.' }, { name: 'model', description: 'provider-owned model id.' }, { name: 'effort', description: 'the explicitly chosen effort, or undefined to clear.' }],
++        returns: 'fulfillment after the optional settings write settles.',
++      },
+     ],
+   },
+   {
+@@ -1493,7 +1505,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
+       },
+       {
+         signature: 'abstract append(id: SessionId, events: readonly SessionEvent[]): Promise<void>',
+-        description: 'Durably persist a batch of events. Honors the append-only and contiguous- seq contracts: the first event\'s `seq` MUST equal the stored next-seq (after `load` has durably closed any interrupted turn). Rejects non-JSON- serializable `event.data` with an error naming the offending event type. A seeded session\'s first materializing batch must reach its complete inherited prefix.',
++        description: 'Durably persist a batch of events. Honors the append-only and contiguous- seq contracts: the first event\'s `seq` MUST equal the stored next-seq (after `load` has durably closed any interrupted turn). Rejects non-JSON- serializable `event.data` with an error naming the offending event type. Coordinator-backed implementations also reject when the durable log advanced since this process last observed it — another harness process sharing the sessions root — rather than interleave duplicate seqs. A seeded session\'s first materializing batch must reach its complete inherited prefix.',
+         parameters: [{ name: 'id', description: 'the session the batch belongs to.' }, { name: 'events', description: 'the contiguous batch to persist, in seq order.' }],
+       },
+       {
+@@ -3170,6 +3182,14 @@ export const EVENT_API: readonly EventApiEntry[] = [
+     description: 'Waterfall around every streaming model call (retry, replay, routing). Bound to the LlmRuntime; call `next()` to reach the resolved adapter\'s stream, or yield your own chunks to short-circuit.',
+     parameters: [{ name: 'options', description: 'the full request. A LOOP-built request carries the process-local {@link markAgentLoopRequest} identity and arrives deep-frozen (mutation throws): its content is a pure function of the session log (the reconstructability Agent Note), so listeners read it, never rewrite it. Hand-built calls do not carry that marker; their messages already obey the immutable creation contract.' }],
+   },
++  {
++    name: 'mcp-client/status',
++    mode: 'emit',
++    signature: '\'mcp-client/status\'(serverName: string, status: McpClientStatus, toolCount: number): void',
++    summary: 'One MCP server connection reached a new committed state, or its live tool registration count changed.',
++    description: 'One MCP server connection reached a new committed state, or its live tool registration count changed. Emitted only after the supervisor mutated its state, never before. The emitting fiber\'s context and every ancestor context observe this through the shared event bus; `serverName` disambiguates concurrent instances. Listener failures are contained and logged by the emitter, so an observer defect cannot disrupt the supervisor\'s own state machine.',
++    parameters: [{ name: 'serverName', description: 'the configured namespace of the emitting instance.' }, { name: 'status', description: 'the connection state at this commit point.' }, { name: 'toolCount', description: 'number of tools this server currently has registered on `ctx.tools`.' }],
++  },
+   {
+     name: 'session-telemetry/record',
+     mode: 'waterfall',
+@@ -4378,6 +4398,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
+     name: 'ManualCompactAgentContext',
+     declaration: 'export interface ManualCompactAgentContext extends CompactionAgentContext {\n    runMaintenance<T>(task: (signal: AbortSignal) => Promise<T>): Promise<T>;\n}',
+   },
++  {
++    name: 'McpClientStatus',
++    declaration: 'export type McpClientStatus = \'connecting\' | \'connected\' | \'reconnecting\' | \'failed\' | \'disposed\';',
++  },
+   {
+     name: 'Message',
+     declaration: 'export interface Message {\n    readonly id: MessageId;\n    readonly role: \'system\' | \'user\' | \'assistant\';\n    readonly content: ContentBlock[];\n    readonly source: MessageSource;\n}',
+diff --git a/packages/session/session-persistence/src/coordinator.ts b/packages/session/session-persistence/src/coordinator.ts
+index c16fae6d4..f4f1ea277 100644
+--- a/packages/session/session-persistence/src/coordinator.ts
++++ b/packages/session/session-persistence/src/coordinator.ts
+@@ -160,6 +160,9 @@ export interface PersistenceBackend<TornMarker = unknown> {
+   /**
+    * Read the current source-qualified revision for one stored session without
+    * loading its event log. Returns `undefined` when the identity is absent.
++   * Besides validating retained preparations, the coordinator compares it
++   * before and after every append so a log advanced by an external writer (a
++   * second harness process sharing the sessions root) rejects loudly.
+    * @param id - persisted session id to observe.
+    * @param signal - optional cancellation for backend read work.
+    */
+@@ -196,7 +199,9 @@ export interface PersistenceBackend<TornMarker = unknown> {
+    * Durably append a CONTIGUOUS batch, lazily materializing the session first
+    * when `!isMaterialized`. The materialize-write and the first event batch MUST
+    * commit ATOMICALLY (a crash between them must not leave a materialized-but-
+-   * empty session). Returns once the batch is durable.
++   * empty session). Returns once the batch is durable. A rejection must leave
++   * the stored log unchanged (roll partial work back): the coordinator keeps
++   * its cursor across the failure and retries the same batch.
+    * The coordinator calls this only after a first batch reaches the declared
+    * inherited prefix length.
+    */
+@@ -246,6 +251,15 @@ interface SessionState {
+   storage: SessionStorageMetadata
+   /** The next seq the backend expects to append (the stored log length). */
+   cursor: SessionLogOffsetType
++  /**
++   * The durable revision at which `cursor` was last confirmed correct,
++   * refreshed best-effort after every successful append (a failed refresh
++   * deletes it, degrading the guard to the in-memory cursor). Re-checked
++   * before each append so a log advanced by a writer outside this process
++   * rejects loudly instead of interleaving duplicate seqs into the committed
++   * region.
++   */
++  revision?: SessionPersistenceRevision
+   /**
+    * Whether lazy creation has produced a durable artifact. The first append
+    * atomically materializes the header with events; reclaim logic uses this to
+@@ -787,19 +801,80 @@ export class PersistenceCoordinator<TornMarker = unknown> {
+       }
+     }
+ 
++    // Single-writer guard across processes: the in-memory cursor only says
++    // where THIS coordinator's next write goes, while another harness process
++    // sharing the sessions root may have advanced the durable log since the
++    // cursor was established — classically a second process resuming the id
++    // (persisting its session/end-seed marker) while this process's stale live
++    // Session keeps appending. Interleaving would duplicate seqs inside the
++    // committed region, which every later load rejects as corruption. Refuse
++    // loudly instead. A check-then-write TOCTOU window of one batch remains;
++    // full exclusion would require a cross-process lock.
++    if (state.materialized && state.revision !== undefined) {
++      const current = await this.backend.readStoredRevision(id)
++      if (current !== state.revision) {
++        throw new Error(
++          `session "${id}" log was advanced by another writer (expected revision ${String(state.revision)}, `
++          + `found ${String(current)}): refusing to append — another harness process is sharing this `
++          + 'sessions root; continue the session in the process that owns it, or restart it here',
++        )
++      }
++    }
++
+     const nextCursor = SessionLogOffset(state.cursor + events.length)
+     if (!state.materialized && nextCursor < state.storage.inheritedEventCount) {
+       throw new Error(`session "${id}" cannot materialize before its inherited prefix is complete`)
+     }
+ 
+-    await this.backend.appendBatch(state.storage, events, state.materialized)
++    let appended = false
++    try {
++      await this.backend.appendBatch(state.storage, events, state.materialized)
++      appended = true
++    } finally {
++      if (!appended && state.revision !== undefined) {
++        // A rejected appendBatch leaves the durable log at its pre-attempt
++        // bytes (the backend rolls partial work back), but the failed attempt
++        // still perturbs revision metadata (e.g. a rollback truncate's mtime).
++        // Re-establish the baseline so the legitimate cursor-preserving RETRY
++        // is not refused above as a foreign write. A foreign append landing
++        // inside the failed attempt remains the accepted TOCTOU window.
++        try {
++          await this.refreshRevision(id, state)
++        } catch {
++          // Best-effort refresh: the original appendBatch failure is the one
++          // callers must see; a stale baseline only makes the next retry
++          // refuse conservatively.
++        }
++      }
++    }
+     // The durable write is the transaction: mark materialized + advance the
+     // cursor as soon as it commits (uniform across backends).
+     state.materialized = true
+     state.cursor = nextCursor
++    try {
++      await this.refreshRevision(id, state)
++    } catch {
++      // The batch is already durable, so a failed baseline re-read must not
++      // reject the append. Degrade the guard to the in-memory cursor (the same
++      // policy refreshRevision applies to an absent stored identity) instead
++      // of keeping a stale baseline that would falsely refuse every later
++      // append as a foreign write. The next confirmed read re-arms the guard.
++      delete state.revision
++    }
+     this.preparations.invalidate(id)
+   }
+ 
++  /**
++   * Re-read one state's durable-revision baseline. An absent stored identity
++   * degrades the append-time guard to its in-memory cursor until the next
++   * confirmed read.
++   */
++  private async refreshRevision(id: SessionId, state: SessionState): Promise<void> {
++    const current = await this.backend.readStoredRevision(id)
++    if (current === undefined) delete state.revision
++    else state.revision = current
++  }
++
+   /**
+    * Prepare and reserve the exact unpublished Session used by resume.
+    * Revision retries converge once the durable log remains unchanged for one
+@@ -1134,6 +1209,8 @@ export class PersistenceCoordinator<TornMarker = unknown> {
+     state.storage = source.inspection
+     state.cursor = cursor
+     state.materialized = true
++    // The freshness check just above pinned the durable log to source.revision.
++    state.revision = source.revision
+     this.states.set(id, state)
+     return {
+       source,
+@@ -1512,7 +1589,7 @@ export class PersistenceCoordinator<TornMarker = unknown> {
+     }
+     // Truncate-only repair (no closers): the open turn is NOT closed here.
+     if (tornMarker !== undefined) await this.backend.commitRepair(stored, tornMarker, [])
+-    this.states.set(session.header.id, {
++    const state: SessionState = {
+       storage: {
+         meta: { ...meta },
+         inheritedEventCount,
+@@ -1520,7 +1597,14 @@ export class PersistenceCoordinator<TornMarker = unknown> {
+       cursor: SessionLogOffset(storedEvents.length),
+       materialized: true,
+       owner: session,
+-    })
++      // Without a repair the durable log is exactly what loadStored just read.
++      ...tornMarker === undefined ? { revision: stored.revision } : {},
++    }
++    if (tornMarker !== undefined) {
++      // A repair rewrote the log, so re-read the revision it settled at.
++      await this.refreshRevision(session.header.id, state)
++    }
++    this.states.set(session.header.id, state)
+     const suffix = seed.slice(storedEvents.length)
+     if (suffix.length > 0) await this.appendCore(session.header.id, suffix)
+   }
+diff --git a/packages/session/session-persistence/src/index.ts b/packages/session/session-persistence/src/index.ts
+index d110703d3..889ce1c82 100644
+--- a/packages/session/session-persistence/src/index.ts
++++ b/packages/session/session-persistence/src/index.ts
+@@ -187,6 +187,9 @@ export abstract class SessionPersistence extends Service {
+    * seq contracts: the first event's `seq` MUST equal the stored next-seq
+    * (after `load` has durably closed any interrupted turn). Rejects non-JSON-
+    * serializable `event.data` with an error naming the offending event type.
++   * Coordinator-backed implementations also reject when the durable log
++   * advanced since this process last observed it — another harness process
++   * sharing the sessions root — rather than interleave duplicate seqs.
+    * A seeded session's first materializing batch must reach its complete
+    * inherited prefix.
+    * @param id - the session the batch belongs to.
