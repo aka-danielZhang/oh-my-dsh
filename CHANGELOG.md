@@ -2,6 +2,12 @@
 
 Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的，不在这里重复。发版时 `scripts/release-notes.mjs` 抽取对应 `## [version]`（没有则回退 `## [Unreleased]`）写入 GitHub Release 与 `latest-mac.yml` / `latest.yml` 的 `releaseNotes`。
 
+## [Unreleased]
+
+### Changed
+
+- Runtime 钉到 `v0.1.2-rc.1+zw.1`（`1b138a9e5b403a00f942cc90d3650d6584926cdc`，官方 `dsh-v0.1.2-rc.1`，fork [PR #13](https://github.com/aka-danielZhang/deepseek-harness/pull/13)）。0.1.2 用 `seq` / `eventAt()` / `snapshotEvents()` 取代 `Session.events`，并区分 `SessionSeq` 与 `SessionLogOffset`；`dsh-thread` 已改读 `snapshotEvents()`。`@crazx/*@0.1.2-rc.1.zw.1` 已上 npm。
+
 ## [0.3.0-rc.30] - 2026-09-03
 
 ### Fixed
@@ -14,10 +20,6 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 
 - 修复从未创建过 Web Profile 的用户首次启动失败：Desktop 现在会先在事务 shadow home 中创建 `profiles/web`，再补 Profile scaffold 和安装随包插件，不再因写入不存在的 `cordis.patch.yml` 父目录而报 `ENOENT`。失败仍在 sidecar 启动前完整回滚，真实 DSH Home 不会留下半成品。
 - 修复 Thread 交接点击「在 Thread 中继续」报 `Cannot read properties of undefined (reading 'sessions')`：harness 0.1.2 移除了浏览器端 `connection.api` 门面，dsh-thread 0.2.0-rc.5 改走 typed Remote `ctx.remote.session.create/rename`（保留承接会话继承来源 preset 的契约），并把 devDeps 全量钉到 0.1.2-alpha.3 基线让 typecheck 重新守门。已在 rc.28 上卡住的交接草稿，升级后刷新页面重新点击即可继续。
-
-### Changed
-
-- Runtime 钉到 `v0.1.2-alpha.5+zw.1`（`53bfbd566e0ea2752da29937c556bc6f51859e5e`，官方 `dsh-v0.1.2-alpha.5`，fork [PR #12](https://github.com/aka-danielZhang/deepseek-harness/pull/12)）。alpha.4 用 `seq` / `eventAt()` / `snapshotEvents()` 取代 `Session.events`，并区分 `SessionSeq` 与 `SessionLogOffset`；`dsh-thread` 已改读 `snapshotEvents()`。alpha.5 修从 `0.1.1-rc.2` / `0.1.2-alpha.3` 升级时可能启动失败或会话列表丢标题。`@crazx/*@0.1.2-alpha.5.zw.1` 已上 npm。
 
 ## [0.3.0-rc.28] - 2026-09-02
 

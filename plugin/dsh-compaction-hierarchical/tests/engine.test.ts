@@ -26,7 +26,7 @@ const STRUCTURED = SUMMARY_SECTIONS.map(section => `## ${section}\n- retained`).
 
 type OverflowWhen = (options: GenerateOptions, index: number) => boolean
 
-/** alpha.5 TokenMeter registers session projections at construct time. */
+/** 0.1.2 TokenMeter registers session projections at construct time. */
 function testContext(): Context {
   const ctx = new Context()
   Object.assign(ctx, { sessionProjections: { register() {} } })
