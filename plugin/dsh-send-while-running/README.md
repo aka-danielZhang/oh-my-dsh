@@ -73,9 +73,14 @@ build contract lives in this package's `tsdown.config.ts`; keep
 `CLIENT_EXTERNALS` in sync with the harness `PLATFORM_MODULES` baseline
 when it moves. Zero `@deepseek-ai/*` value imports: the ui-conversation,
 locale, and client-runtime packages appear only as type-only imports
-(erased at build), so no runtime peer linkage is needed. The `sessions`
-runtime service is consumed at click time through `ctx.get` behind a
-structural type.
+(erased at build), so no runtime peer linkage is needed. The cancel path is
+typed end-to-end against those packages' real contracts —
+`ISessions`/`SessionId` from the client runtime, `IConversation` from
+ui-conversation (whose session-scope Context merge types
+`get('conversation')`) — mirroring the stock stop prop's
+`scopedConversation(sessions, sessionId).cancel()` helper, resolved lazily
+at click time through `ctx.get('sessions')` (not a declared hard
+dependency).
 
 ## Layout anchoring
 

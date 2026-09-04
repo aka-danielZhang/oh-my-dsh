@@ -14,7 +14,9 @@ test('host half exports a loadable surface entry', () => {
 test('client half exports a loadable plugin', () => {
   assert.equal(typeof clientApply, 'function')
   assert.ok(Array.isArray(inject) && inject.includes('slots'))
-  assert.ok(inject.includes('sessions'), 'interrupt path resolves through the sessions runtime')
+  // sessions is consumed lazily at click time through ctx.get, not declared
+  // as a mount-order hard dependency.
+  assert.equal(inject.includes('sessions'), false)
 })
 
 const idleSession: SessionFacts = { running: false, subagent: null, removed: false }

@@ -48,3 +48,15 @@
 若未来要在主会话上复现「模型座位整个没了且刷新才恢复」，那是另一条路径（`single` 槽位条目 crash 后
 abdicate 成死格，console 会有 `slot entry crashed in 'conversation.input.model'`），届时按
 `ui-model-selection` 的 `directoryFor` no-scope 抛错排查。
+
+## 0.2.0 定稿补记：中断路径全链路类型对齐 stock
+
+首版实现用手写结构类型鸭子匹配 `sessions.scope(id).get('conversation').cancel()`。定稿改为与
+stock stop prop 完全同构的**真类型路径**：`SessionId`/`ISessions` 自 `dsh-client-runtime/client`
+type-only 导入，`IConversation` 自 `dsh-client-ui-conversation/client` 导入（其会话作用域
+Context merge 让 `scope(id).get('conversation')` 直接拿到 `IConversation` 类型），`scopedConversation`
+辅助函数镜像 ui-conversation apply.ts 的同名 helper（差异一点：座位侧对 scope 不可解析取
+soft no-op 而非 throw——fail-invisible 姿态）。`cancel(): Promise<void>` 签名与 stock 一致、失败照吞。
+插件 `inject` 收回 `['slots','locale']`：sessions 在点击时惰性 `ctx.get`（不过度声明硬依赖，
+rail.ts 的惰性读取纪律）。类型基线仍是 devDeps 钉的 0.1.1-rc.2；该路径在 0.1.2-alpha.3 部署运行时
+行为同一（stock 自身 stop 接线即此路径，已从部署包内逐字核对）。
