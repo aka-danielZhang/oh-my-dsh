@@ -1,8 +1,12 @@
-# dsh-ohmymemo bundle patch: the row(s) mounted for every profile that installs
-# this plugin. Grow extra rows here as needed (see dsh-web-search-toggle
-# for a host-gateway + client pair). If the row should be preset-owned
-# instead (host service only some agent presets mount), empty this patch
-# to [] and ship a preset-snippet.yml.
+# dsh-ohmymemo bundle patch: the store row plus the two Phase 2 consumer
+# rows, mounted for every profile that installs this plugin. The store is a
+# cross-session shared host capability (never an agent preset realm); the
+# tools and context rows consume the provided `ohMyMemo` service and wait
+# for it through `inject`.
 - insert:
     - id: ohmymemo-store
       name: dsh-ohmymemo
+    - id: ohmymemo-tools
+      name: dsh-ohmymemo/tools
+    - id: ohmymemo-context
+      name: dsh-ohmymemo/context

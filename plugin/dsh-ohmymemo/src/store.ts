@@ -19,7 +19,7 @@
  * @module dsh-ohmymemo/store
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { ensureDir, hashFile, hashText, statFile, writeFileAtomic } from './atomic.ts'
 import { MemoryCatalog } from './catalog.ts'
@@ -542,7 +542,7 @@ export class OhMyMemoStore {
     return { id: next.id, revision: next.revision, status: next.status, scope: next.scope, path: rel }
   }
 
-  async supersede(input: SupersedeInput): Promise<MutationResult> {
+  async supersede(input: SupersedeInput): Promise<MutationResult & { supersededId: string }> {
     await this.ensureReady()
     return this.lock.withLock(() => this.supersedeLocked(input))
   }
@@ -670,6 +670,82 @@ export class OhMyMemoStore {
   async forget(request: ForgetRequest): Promise<ForgetResult> {
     await this.ensureReady()
     return this.lock.withLock(() => this.forgetLocked(request))
+  }
+
+  /** Read-only workspace scope resolution for search/capsule (never creates). */
+  resolveWorkspaceScopeForRead(cwd: string | undefined): string | undefined {
+    if (cwd === undefined || cwd.length === 0) return undefined
+    let canonicalPath: string
+    try {
+      canonicalPath = realpathSync(cwd)
+    } catch {
+      return undefined
+    }
+    const entry = this.catalogValue.scopeByPath(canonicalPath)
+    return entry !== undefined ? `workspace:${entry.wsId}` : undefined
+  }
+
+  /** Mark a record disputed, merging symmetric `contradicts` links (Phase 2 minimal dispute). */
+  async markDispute(input: { id: string; ifRevision: number; contradictsWith?: string[]; reason: string }): Promise<MutationResult> {
+    await this.ensureReady()
+    return this.lock.withLock(() => {
+      const current = this.readUnderLock(input.id)
+      if (current === undefined) {
+        throw new StoreError('OHMYMEMO_RECORD_INVALID', `record ${input.id} on disk is not a valid record — refusing to mutate`)
+      }
+      this.detectExternalEdit(current)
+      this.assertCas(current, input.ifRevision)
+      const next: MemoryRecord = {
+        ...current.record,
+        revision: current.record.revision + 1,
+        updated_at: this.now().toISOString(),
+        status: 'disputed',
+        contradicts: [...new Set([...current.record.contradicts, ...(input.contradictsWith ?? [])])],
+      }
+      return this.publishInPlace(current.record, next, input.reason)
+    })
+  }
+
+  /** Reactivate a disputed record (resolution without a replacement). */
+  async markActive(input: { id: string; ifRevision: number; reason: string }): Promise<MutationResult> {
+    await this.ensureReady()
+    return this.lock.withLock(() => {
+      const current = this.readUnderLock(input.id)
+      if (current === undefined) {
+        throw new StoreError('OHMYMEMO_RECORD_INVALID', `record ${input.id} on disk is not a valid record — refusing to mutate`)
+      }
+      if (current.record.status !== 'disputed') {
+        throw new StoreError('OHMYMEMO_BAD_REQUEST', `record ${input.id} is ${current.record.status}, only disputed records can be reactivated`)
+      }
+      this.detectExternalEdit(current)
+      this.assertCas(current, input.ifRevision)
+      const next: MemoryRecord = {
+        ...current.record,
+        revision: current.record.revision + 1,
+        updated_at: this.now().toISOString(),
+        status: 'active',
+      }
+      return this.publishInPlace(current.record, next, input.reason)
+    })
+  }
+
+  /** Shared tail for in-place status/field revisions (single write + journal). */
+  private publishInPlace(previous: MemoryRecord, next: MemoryRecord, reason: string): MutationResult {
+    const text = serializeRecord(next)
+    this.checkSize(text)
+    const rel = expectedRel(previous)
+    this.expectInternal(rel, hashText(text))
+    runTransaction(this.root, {
+      action: 'update',
+      ops: [
+        { op: 'write', path: rel, content: text, after_hash: hashText(text) },
+        { op: 'journal', entry: journalEntry(this.now(), 'updated', next, hashText(text), reason) },
+      ],
+      validateWrite: validateRecordText,
+    })
+    this.refreshEntry(rel)
+    this.emit({ type: 'upserted', id: next.id, revision: next.revision, hash: hashText(text), external: false })
+    return { id: next.id, revision: next.revision, status: next.status, scope: next.scope, path: rel }
   }
 
   private forgetLocked(request: ForgetRequest): ForgetResult {

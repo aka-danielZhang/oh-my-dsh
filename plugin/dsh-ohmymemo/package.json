@@ -1,12 +1,18 @@
 {
   "name": "dsh-ohmymemo",
   "version": "0.1.0",
-  "description": "OhMyMemo Phase 1 Markdown store: canonical one-memory-one-file Markdown tree under $DSH_HOME/ohmymemo with schema parsing, in-process catalog, watch/doctor, atomic publish, cross-process writer lock, revision/hash CAS, journal and transaction recovery",
+  "description": "OhMyMemo: persistent user memory for DSH — Phase 1 Markdown store medium contract plus Phase 2 explicit memory loop (ctx.ohMyMemo service, five memory_* tools, bounded views, pre-step context capsule)",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": {
       "default": "./lib/index.js"
+    },
+    "./tools": {
+      "default": "./lib/tools.js"
+    },
+    "./context": {
+      "default": "./lib/context.js"
     },
     "./src/*": "./src/*",
     "./package.json": "./package.json"
@@ -25,7 +31,7 @@
     "plugin:remove": "dsh plugin --profile web remove dsh-ohmymemo"
   },
   "files": [
-    "lib/index.js",
+    "lib/*.js",
     "cordis.patch.yml",
     "README.md"
   ],
@@ -47,10 +53,21 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-agent": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-llm": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-session": "0.1.2-alpha.3",
+    "@deepseek-ai/dsh-tools": "0.1.2-alpha.3",
     "@types/node": "^24.13.3",
     "tsdown": "^0.22.2",
     "tsx": "^4.19.2",
     "typescript": "^6.0.3"
   },
-  "packageManager": "pnpm@10.28.0"
+  "packageManager": "pnpm@10.28.0",
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.0-rc.7 <5",
+    "@deepseek-ai/dsh-agent": ">=0.1.0-rc.8 <1",
+    "@deepseek-ai/dsh-llm": ">=0.1.0-rc.8 <1",
+    "@deepseek-ai/dsh-session": ">=0.1.0-rc.8 <1",
+    "@deepseek-ai/dsh-tools": ">=0.1.0-rc.8 <1"
+  }
 }

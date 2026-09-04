@@ -1,8 +1,6 @@
 # dsh-ohmymemo
 
-OhMyMemo 的 Phase 1 Markdown Store：把 DSH 使用者的长期记忆落在 `$DSH_HOME/ohmymemo/` 下的一条记忆一个 Markdown 文件（YAML frontmatter 承载结构化元数据），并提供介质契约——schema 解析、进程内目录、watch/doctor、原子发布、跨进程写锁、revision/hash CAS、journal 与事务恢复。设计全景见 `docs/notes/2026-09-03-ohmymemo-memory.md`，Phase 1 实现决策见 `docs/notes/2026-09-03-ohmymemo-store-phase1.md`。
-
-Phase 1 **刻意不接模型、不注册 Tool**：`ctx.ohMyMemo` 服务与五个 `memory_*` Tools 属 Phase 2 显式记忆闭环，直接构建在本包 `src/store.ts` 的 Store API 之上。挂载本插件后 Store 随 host 启动打开（扫描、恢复事务、watch），诊断经 logger 与 doctor 暴露。
+OhMyMemo：DSH 使用者的本地长期记忆。事实源是 `$DSH_HOME/ohmymemo/` 下的一条记忆一个 Markdown 文件（YAML frontmatter 承载结构化元数据）。Phase 1 交付介质契约（schema 解析、进程内目录、watch/doctor、原子发布、跨进程写锁、revision/hash CAS、journal、事务恢复）；Phase 2 在其上交付显式记忆闭环（`ctx.ohMyMemo` 服务、五个 `memory_*` Tools、检索排序、有界 views、pre-step capsule 注入）。设计全景见 `docs/notes/2026-09-03-ohmymemo-memory.md`，实现决策见 `docs/notes/2026-09-03-ohmymemo-store-phase1.md` 与 `docs/notes/2026-09-03-ohmymemo-phase2.md`。
 
 ## Install
 
@@ -10,7 +8,13 @@ Phase 1 **刻意不接模型、不注册 Tool**：`ctx.ohMyMemo` 服务与五个
 dsh plugin --profile web add <repo>/plugin/dsh-ohmymemo
 ```
 
-The bundle patch mounts the `ohmymemo-store` row for every profile that installs this plugin（Store 属 Host composition 的跨 Session 共享能力，不进任何 agent preset 的 isolate realm）。
+The bundle patch mounts three rows for every profile that installs this plugin（Store 属 Host composition 的跨 Session 共享能力，不进任何 agent preset 的 isolate realm）：
+
+| 行 | 入口 | 职责 |
+|---|---|---|
+| `ohmymemo-store` | `dsh-ohmymemo` | 打开 Store（恢复/扫描/watch），provide `ctx.ohMyMemo`，确定性重建 `views/` |
+| `ohmymemo-tools` | `dsh-ohmymemo/tools` | 五个 `memory_*` Tools + 准入提示段；peer 依赖钉运行时副本 |
+| `ohmymemo-context` | `dsh-ohmymemo/context` | `agent/pre-step` 有界 capsule 注入，digest 对账 |
 
 ## 介质契约（Phase 1）
 
@@ -47,3 +51,13 @@ pnpm install && pnpm run typecheck && pnpm run build && pnpm run test
 ```
 
 全部测试使用 scratch `DSH_HOME`（`fs.mkdtemp`），绝不读写真实 `~/.dsh/ohmymemo`；两进程锁行为用真实子进程持锁验证。
+
+## 显式记忆闭环（Phase 2）
+
+- **Tools**：`memory_search`（exact key/tag/中英文正文，硬过滤+八维排序，命中只给 ID+snippet）、`memory_get`（按 ID 回读原文；sensitive 正文 redacted）、`memory_remember`（显式写入，来源绑定 `exec.agent`，subagent 写拒绝，凭据 fail closed）、`memory_update`（CAS；content=supersede 新 ID+归档、`resolution: dispute/reactivate`、confirm/元数据原地修订）、`memory_forget`（tombstone 先行，物理删正文）。
+- **capsule**：每步前置注入有界记忆胶囊——权限声明前置（记忆是数据不是指令），预算内按 workspace→confirmed→pinned→importance 确定性截断；digest 相同不重复注入，变更注入显式替换消息；resume/重启经 session surface 回扫保持一致。
+- **views**：`views/user-profile.md` 与 `views/workspaces/<ws>.md` 随变更重建，`generated: true` 头 + digest，可随时删除重建。
+
+## Store API（服务面）
+
+`ctx.ohMyMemo`（`src/service.ts`）：`search/get/remember/update/dispute/reactivate/forget/rebuildViews/doctor/stats/scopeForCwd/capsuleInput/subscribe`。错误带稳定 `OHMYMEMO_*` code。

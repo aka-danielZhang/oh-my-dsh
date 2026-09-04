@@ -2,7 +2,7 @@
 
 日期：2026-09-03
 
-状态：Phase 1 已实现（`plugin/dsh-ohmymemo`，见 `2026-09-03-ohmymemo-store-phase1.md`）；Phase 2–4 未开始
+状态：Phase 1 与 Phase 2 已实现（`plugin/dsh-ohmymemo`，见 `2026-09-03-ohmymemo-store-phase1.md` 与 `2026-09-03-ohmymemo-phase2.md`）；Phase 3–4 未开始
 
 计划包：`plugin/dsh-ohmymemo`
 
