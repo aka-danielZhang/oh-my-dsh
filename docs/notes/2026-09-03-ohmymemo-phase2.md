@@ -2,7 +2,7 @@
 
 日期：2026-09-03
 
-状态：已实现（`plugin/dsh-ohmymemo` 0.1.0，分支 `feature/ohmymemo`）；Phase 3 候选治理未开始
+状态：已实现（`plugin/dsh-ohmymemo` 0.1.0，分支 `feature/ohmymemo`）；后续梦境候选提取与只读 UI 首段见 `2026-09-04-ohmymemo-dream-memory-and-ui.md`
 
 前置：`2026-09-03-ohmymemo-store-phase1.md`（Phase 1 介质契约）；设计输入 `2026-09-03-ohmymemo-memory.md`（Phase 2 范围＝「实施阶段 · Phase 2」）
 
@@ -47,7 +47,7 @@ src/context.ts   ohmymemo-context 行：agent/pre-step 注入 + 对账
 
 ## 已知边界（留待后续阶段）
 
-- 候选（candidate）生成/确认/拒绝、TTL 与增量提取游标＝Phase 3；本阶段 `memory_remember` 只写 active（准入靠工具描述+提示段+Store 硬门）。
+- 本阶段 `memory_remember` 只写 active（准入靠工具描述+提示段+Store 硬门）；后续已增加定时 candidate 生成与增量游标，但确认/拒绝、TTL 和完整冲突治理仍未实现。
 - dispute 的对称链接跨两次锁窗口，崩溃中窗由 doctor 兜底；原子化需 Phase 3 的多文件对称事务。
-- capsule 与 tools 提示段为中文文案（v1 与仓内其余插件一致）；接 `ctx.locale` 双语随 UI 阶段。
+- capsule 与 tools 的模型可见提示段仍为中文；后续 Client UI 文案已独立接入 `ctx.locale` 的中英文 typed dictionary。
 - 检索是进程内线性扫描（v1 规模刻意为之）；FTS/embedding 缓存按设计属 Phase 4。

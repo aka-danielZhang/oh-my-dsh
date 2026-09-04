@@ -112,6 +112,9 @@ test('reject decisions and aborted signals pass through untouched', async () => 
   aborted.abort()
   const passthrough = await handler({ agent: fakeAgent(), turn: 1, step: 1, signal: aborted.signal }, async () => ({ kind: 'enter', messages: [] }))
   assert.deepEqual((passthrough as { messages: unknown[] }).messages, [])
+  const maintenance = fakeAgent()
+  maintenance.id = 'ohmymemo-maintenance-test'
+  assert.equal((await step(harness, maintenance)).messages.length, 1)
   store.close()
 })
 

@@ -98,6 +98,8 @@ export interface StoreUserConfig {
   capture_mode: string
   remember_direct_facts: boolean
   allow_inference_candidates: boolean
+  /** Host-local wall-clock time for the daily dream-memory run (`HH:mm`). */
+  dream_schedule_local_time: string
   auto_consolidation: boolean
   watch: boolean
   max_record_bytes: number
@@ -174,3 +176,4 @@ export type MemoryChange =
   | { type: 'removed'; id: string; external: boolean }
   | { type: 'scope-registered'; wsId: string }
   | { type: 'tombstoned'; key: string; scope: string }
+  | { type: 'config-updated'; hash: string; external: boolean }

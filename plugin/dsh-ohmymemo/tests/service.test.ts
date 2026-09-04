@@ -3,6 +3,8 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { writeFileAtomic } from '../src/atomic.ts'
+import { serializeTombstone } from '../src/schema.ts'
 import { createOhMyMemoService } from '../src/service.ts'
 import { OhMyMemoStore } from '../src/store.ts'
 import { scratchRoot } from './helpers/scratch.ts'
@@ -41,16 +43,72 @@ test('get re-reads from disk and redacts sensitive bodies', async () => {
   assert.ok(!JSON.stringify(b).includes('健康状况'), 'sensitive body never leaves the store')
 })
 
+test('a published tombstone is a read barrier even while the body lingers', async () => {
+  const root = scratchRoot()
+  const { service } = await openService(root)
+  const created = await service.remember({ content: '延迟删除期间的残留正文。', kind: 'semantic', scope: 'user', key: 'preference.deferred', pinned: true })
+
+  // Another process published the tombstone first; body deletion has not
+  // happened yet (deferred/conflicted recovery) — the record must not be
+  // recallable through any outward path.
+  const tombstone = {
+    schema: 'ohmymemo-tombstone/v1' as const,
+    id: 'tomb_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0',
+    scope: 'user',
+    key: 'preference.deferred',
+    memory_ids: [created.id],
+    forgotten_at: '2026-09-03T10:05:00.000Z',
+    reason: 'user-request',
+  }
+  writeFileAtomic(join(root, 'tombstones', `${tombstone.id}.yaml`), serializeTombstone(tombstone))
+
+  const search = await service.search({ query: '延迟删除' })
+  assert.equal(search.hits.length, 0, 'search never recalls a tombstoned body')
+  assert.deepEqual(await service.get([created.id]), [], 'get refuses the tombstoned id')
+  assert.equal(service.capsuleInput(undefined).entries.some(entry => entry.record.id === created.id), false, 'capsule omits it')
+  const tree = service.displayTree(100, 64_000)
+  assert.equal(tree.files.some(file => file.path.includes(created.id)), false, 'browser hides the residue file')
+  assert.equal(service.hasMemoryKey('user', 'semantic', 'preference.deferred'), true, 'writers still see the key occupied and hit the barrier')
+})
+
+test('sensitive provenance keeps locators but never quote text', async () => {
+  const { service } = await openService()
+  const created = await service.remember({
+    content: '敏感偏好。',
+    kind: 'semantic',
+    scope: 'user',
+    key: 'sensitive.quote',
+    privacy: 'sensitive',
+    pinned: false,
+    sources: [{
+      type: 'cross_session_inference',
+      session_id: 'sess_x',
+      event_seq: 7,
+      quote_hash: 'sha256:' + 'a'.repeat(64),
+      quote_preview: '我的敏感原话是这句话',
+      observed_at: '2026-09-04T01:02:03.000Z',
+    }],
+  })
+  const [view] = await service.get([created.id])
+  assert.equal(view?.redacted, true)
+  assert.equal(view?.sources[0]?.quote_preview, undefined, 'quote text never leaves the store')
+  assert.equal(view?.sources[0]?.quote_hash, 'sha256:' + 'a'.repeat(64), 'locator hash survives')
+  assert.equal(view?.sources[0]?.session_id, 'sess_x')
+  assert.ok(!JSON.stringify(view).includes('敏感原话'), 'no direct-human quote leaks through provenance')
+})
+
 test('update resolutions: replace supersedes, dispute symmetrizes, reactivate restores', async () => {
   const { service } = await openService()
   const first = await service.remember({ content: 'v1', kind: 'semantic', scope: 'user', key: 'preference.x', pinned: true })
   const second = await service.remember({ content: 'v2', kind: 'semantic', scope: 'user', key: 'preference.y', pinned: true })
 
-  const replaced = await service.update({ id: first.id, ifRevision: 1, content: 'v1 修正版', reason: 'user correction' })
+  const firstHash = (await service.get([first.id]))[0]!.hash
+  const replaced = await service.update({ id: first.id, ifRevision: 1, ifHash: firstHash, content: 'v1 修正版', reason: 'user correction' })
   assert.notEqual(replaced.id, first.id)
   assert.equal(replaced.supersededId, first.id)
 
-  const disputed = await service.update({ id: second.id, ifRevision: 1, resolution: 'dispute', contradictsWith: [replaced.id], reason: 'unclear conflict' })
+  const secondHash = (await service.get([second.id]))[0]!.hash
+  const disputed = await service.update({ id: second.id, ifRevision: 1, ifHash: secondHash, resolution: 'dispute', contradictsWith: [replaced.id], reason: 'unclear conflict' })
   assert.equal(disputed.status, 'disputed')
   const [view] = await service.get([second.id])
   assert.deepEqual(view?.contradicts, [replaced.id])
@@ -58,7 +116,8 @@ test('update resolutions: replace supersedes, dispute symmetrizes, reactivate re
   assert.equal(other?.status, 'disputed', 'counterpart is disputed too (symmetric link)')
   assert.ok(other?.contradicts.includes(second.id))
 
-  const reactivated = await service.update({ id: second.id, ifRevision: 2, resolution: 'reactivate', reason: 'user resolved it' })
+  const reactivatedHash = (await service.get([second.id]))[0]!.hash
+  const reactivated = await service.update({ id: second.id, ifRevision: 2, ifHash: reactivatedHash, resolution: 'reactivate', reason: 'user resolved it' })
   assert.equal(reactivated.status, 'active')
 })
 

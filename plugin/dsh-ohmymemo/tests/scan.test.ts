@@ -61,8 +61,13 @@ test('scanStore builds the catalog, scope registry and tombstones from a valid t
   assert.equal(result.catalog.tombstones().size, 1)
   assert.equal(result.catalog.tombstoneFor('user', 'preference.old-thing')?.memory_ids[0], MEM_B)
   assert.equal(result.diagnostics.filter((diagnostic) => diagnostic.severity === 'error').length, 0)
+  // The tombstone blocks recall of the lingering body (deferred deletion residue):
+  // the record stays visible to doctor via allEntries(), but no reader sees it.
+  assert.equal(result.catalog.get(MEM_B), undefined, 'tombstoned id is not readable')
+  assert.equal(result.catalog.readableEntries().length, 1)
+  assert.equal(result.catalog.allEntries().length, 2, 'doctor still sees the residue on disk')
   const stats = result.catalog.stats()
-  assert.equal(stats.active, 2)
+  assert.equal(stats.active, 1, 'only the non-tombstoned record counts as active')
   // normalized body index present for recall
   assert.ok(result.catalog.get(MEM_A)!.normalizedBody.includes('中文'))
 })

@@ -42,9 +42,22 @@ export class MemoryCatalog {
   private readonly tombstoneById = new Map<string, TombstoneEntry>()
   private readonly scopeByWs = new Map<string, ScopeEntry>()
 
-  /** All entries, including quarantined copies. */
+  /** All entries, including quarantined and tombstoned residue (doctor/internal use). */
   allEntries(): CatalogEntry[] {
     return [...this.byPath.values()]
+  }
+
+  /** Entries that remain readable after applying tombstone memory-id barriers. */
+  readableEntries(): CatalogEntry[] {
+    return [...this.byPath.values()].filter(entry => !this.isTombstoned(entry.record.id))
+  }
+
+  /** Whether a tombstone explicitly blocks this historical memory id. */
+  isTombstoned(id: string): boolean {
+    for (const entry of this.tombstoneById.values()) {
+      if (entry.tombstone.memory_ids.includes(id)) return true
+    }
+    return false
   }
 
   /** Representative entry per id (duplicates collapse; see quarantine). */
@@ -61,14 +74,14 @@ export class MemoryCatalog {
   }
 
   get(id: string): CatalogEntry | undefined {
-    return this.primary.get(id)
+    return this.isTombstoned(id) ? undefined : this.primary.get(id)
   }
 
   /** Entries eligible for ordinary recall: unquarantined, active or disputed. */
   activeEntries(): CatalogEntry[] {
     const out: CatalogEntry[] = []
     for (const entry of this.byPath.values()) {
-      if (entry.quarantine !== undefined) continue
+      if (entry.quarantine !== undefined || this.isTombstoned(entry.record.id)) continue
       if (entry.record.status !== 'active' && entry.record.status !== 'disputed') continue
       out.push(entry)
     }
@@ -80,7 +93,7 @@ export class MemoryCatalog {
     const wanted = conflictKey(scope, kind, key)
     const out: CatalogEntry[] = []
     for (const entry of this.byPath.values()) {
-      if (entry.quarantine !== undefined) continue
+      if (entry.quarantine !== undefined || this.isTombstoned(entry.record.id)) continue
       if (entry.record.status !== 'active' && entry.record.status !== 'disputed') continue
       if (conflictKey(entry.record.scope, entry.record.kind, entry.record.key) === wanted) out.push(entry)
     }
@@ -244,6 +257,7 @@ export class MemoryCatalog {
   stats(): CatalogStats {
     const stats: CatalogStats = { active: 0, candidate: 0, disputed: 0, superseded: 0, quarantined: 0, tombstones: this.tombstoneById.size, scopes: this.scopeByWs.size }
     for (const entry of this.byPath.values()) {
+      if (this.isTombstoned(entry.record.id)) continue
       if (entry.quarantine !== undefined) {
         stats.quarantined += 1
         continue

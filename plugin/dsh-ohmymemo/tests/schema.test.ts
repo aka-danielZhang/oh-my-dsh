@@ -194,11 +194,13 @@ test('scope file round-trips', () => {
 })
 
 test('store config falls back per-field on invalid values and warns on unknown fields', () => {
-  const text = ['schema: ohmymemo-config/v1', 'max_record_bytes: banana', 'future_knob: yes', 'watch: false'].join('\n')
+  const text = ['schema: ohmymemo-config/v1', 'max_record_bytes: banana', 'dream_schedule_local_time: 27:90', 'future_knob: yes', 'watch: false'].join('\n')
   const { config, issues } = parseStoreConfig(text)
   assert.equal(config.max_record_bytes, defaultStoreConfig().max_record_bytes)
+  assert.equal(config.dream_schedule_local_time, '02:00')
   assert.equal(config.watch, false)
   assert.ok(issues.some((issue) => issue.field === 'max_record_bytes'))
+  assert.ok(issues.some((issue) => issue.field === 'dream_schedule_local_time'))
   assert.ok(issues.some((issue) => issue.field === 'future_knob'))
   // defaults serialize and reparse cleanly
   const defaults = defaultStoreConfig()

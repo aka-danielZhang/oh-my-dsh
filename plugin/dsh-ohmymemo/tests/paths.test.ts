@@ -67,8 +67,9 @@ test('parseLocation classifies every area and rejects malformed paths', () => {
   assert.equal(parseLocation(`archive/${WS}/semantic/${MEM}.md`).type, 'unknown')
 })
 
-test('isWatchRelevant only reacts to records, tombstones and scope files', () => {
+test('isWatchRelevant reacts to canonical records, policy, tombstones and scope files', () => {
   assert.equal(isWatchRelevant(parseLocation(`scopes/user/semantic/${MEM}.md`)), true)
+  assert.equal(isWatchRelevant(parseLocation('config.yaml')), true)
   assert.equal(isWatchRelevant(parseLocation(`tombstones/${TOMB}.yaml`)), true)
   assert.equal(isWatchRelevant(parseLocation(`scopes/workspaces/${WS}/scope.yaml`)), true)
   assert.equal(isWatchRelevant(parseLocation('journal/2026/09.jsonl')), false)

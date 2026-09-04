@@ -14,6 +14,8 @@ import { dirname, join } from 'node:path'
 /** Actions the journal records. */
 export type JournalAction =
   | 'created'
+  | 'candidate-created'
+  | 'config-updated'
   | 'updated'
   | 'superseded'
   | 'promoted'

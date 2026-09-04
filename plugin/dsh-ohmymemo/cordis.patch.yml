@@ -1,8 +1,6 @@
-# dsh-ohmymemo bundle patch: the store row plus the two Phase 2 consumer
-# rows, mounted for every profile that installs this plugin. The store is a
-# cross-session shared host capability (never an agent preset realm); the
-# tools and context rows consume the provided `ohMyMemo` service and wait
-# for it through `inject`.
+# dsh-ohmymemo bundle patch: one shared Markdown Store, its explicit model
+# consumers, and the global dream-memory/UI gateway. All rows live in the Host
+# composition because memory policy and nightly work span Sessions.
 - insert:
     - id: ohmymemo-store
       name: dsh-ohmymemo
@@ -10,3 +8,7 @@
       name: dsh-ohmymemo/tools
     - id: ohmymemo-context
       name: dsh-ohmymemo/context
+    - id: ohmymemo-manager
+      name: dsh-ohmymemo/manager
+    - id: ohmymemo-api
+      name: dsh-ohmymemo/api

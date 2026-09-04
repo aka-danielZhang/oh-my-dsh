@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import { test } from 'node:test'
 import { hashText, writeFileAtomic } from '../src/atomic.ts'
 import { readJournal } from '../src/journal.ts'
@@ -84,7 +84,7 @@ test('recovery aborts a transaction that never reached disk', () => {
     id: 'txn_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0',
     action: 'create',
     phase: 'prepared',
-    targets: [{ path: 'scopes/user/semantic/mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0.md' }],
+    targets: [{ path: 'scopes/user/semantic/mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0.md', after_hash: hashText('never written') }],
     ops: [{ op: 'write', path: 'scopes/user/semantic/mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0.md', after_hash: hashText('never written') }],
     created_at: '2026-09-03T10:00:00.000Z',
   }
@@ -94,6 +94,68 @@ test('recovery aborts a transaction that never reached disk', () => {
   assert.equal(existsSync(absOf(root, 'scopes/user/semantic/mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0.md')), false)
   assert.ok(readJournal(root).some((entry) => entry.action === 'transaction-aborted'))
   assert.deepEqual(readTxnMarkers(root).markers, [])
+})
+
+test('recovery aborts a prepared overwrite while its before hash is still present', () => {
+  const root = scratchRoot()
+  const path = 'config.yaml'
+  const before = 'schema: ohmymemo-config/v1\nallow_inference_candidates: false\n'
+  const after = 'schema: ohmymemo-config/v1\nallow_inference_candidates: true\n'
+  writeFileAtomic(absOf(root, path), before)
+  const marker: TransactionMarker = {
+    schema: 'ohmymemo-transaction/v1',
+    id: 'txn_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0',
+    action: 'config-update',
+    phase: 'prepared',
+    targets: [{ path, before_hash: hashText(before), after_hash: hashText(after) }],
+    ops: [{ op: 'write', path, before_hash: hashText(before), after_hash: hashText(after) }],
+    created_at: '2026-09-03T10:00:00.000Z',
+  }
+  writeTxnMarker(root, marker)
+  const report = recoverTransactions(root)
+  assert.deepEqual(report.aborted, [marker.id])
+  assert.equal(readFileSync(absOf(root, path), 'utf8'), before)
+  assert.deepEqual(readTxnMarkers(root).markers, [])
+})
+
+test('live overwrite refuses a stale before hash without changing the target', () => {
+  const root = scratchRoot()
+  const path = 'config.yaml'
+  const before = 'before\n'
+  const after = 'after\n'
+  writeFileAtomic(absOf(root, path), before)
+  assert.throws(() => runTransaction(root, {
+    action: 'config-update',
+    ops: [{ op: 'write', path, content: after, before_hash: hashText('different\n'), after_hash: hashText(after) }],
+  }), /precondition failed/u)
+  assert.equal(readFileSync(absOf(root, path), 'utf8'), before)
+  assert.deepEqual(readTxnMarkers(root), { markers: [], damaged: [] })
+})
+
+test('recovery quarantines traversal markers without touching files outside the Store', (t) => {
+  const root = scratchRoot()
+  const victimName = `${basename(root)}-transaction-victim.txt`
+  const outside = join(root, '..', victimName)
+  t.after(() => { rmSync(outside, { force: true }) })
+  writeFileAtomic(outside, 'keep me\n')
+  const id = 'txn_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0'
+  const markerPath = absOf(root, `.state/transactions/${id}.yaml`)
+  const malicious = {
+    schema: 'ohmymemo-transaction/v1',
+    id,
+    action: 'forget',
+    phase: 'canonical-written',
+    targets: [{ path: `../${victimName}`, before_hash: hashText('keep me\n') }],
+    ops: [{ op: 'delete', path: `../${victimName}`, hash: hashText('keep me\n') }],
+    created_at: '2026-09-03T10:00:00.000Z',
+  }
+  writeFileAtomic(markerPath, JSON.stringify(malicious))
+
+  const report = recoverTransactions(root)
+  assert.equal(report.conflicts.length, 1)
+  assert.match(report.conflicts[0]!.message, /unreadable transaction marker/u)
+  assert.equal(readFileSync(outside, 'utf8'), 'keep me\n')
+  assert.equal(existsSync(markerPath), true)
 })
 
 test('recovery finalizes a transaction whose work is already complete', () => {
@@ -175,7 +237,7 @@ test('write-derived ops re-derive deterministic content from disk (supersede res
     id: 'txn_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0',
     action: 'supersede',
     phase: 'canonical-written',
-    targets: [{ path: newRel, after_hash: hashText(newText) }, { path: archiveRel, after_hash: hashText(derivedText) }],
+    targets: [{ path: newRel, after_hash: hashText(newText) }, { path: archiveRel, before_hash: hashText(oldText), after_hash: hashText(derivedText) }, { path: oldRel, before_hash: hashText(oldText) }],
     ops: [
       { op: 'write', path: newRel, after_hash: hashText(newText) },
       { op: 'write-derived', from: oldRel, to: archiveRel, before_hash: hashText(oldText), after_hash: hashText(derivedText), derive: { status: 'superseded', updated_at: at } },

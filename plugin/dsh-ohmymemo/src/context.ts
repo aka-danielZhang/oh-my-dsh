@@ -21,6 +21,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { composeCapsule, lastCapsuleDigest, replacementPreface } from './capsule.ts'
+import { DREAM_MAINTENANCE_SESSION_PREFIX } from './dream.ts'
 import type { OhMyMemoService } from './service.ts'
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -68,6 +69,7 @@ export function apply(ctx: Context): void {
   ctx.on('agent/pre-step', async ({ agent, signal }, next): Promise<PreStepDecision> => {
     const decision = await next()
     if (decision.kind !== 'enter' || signal.aborted) return decision
+    if (String(agent.id).startsWith(DREAM_MAINTENANCE_SESSION_PREFIX)) return decision
 
     const session = surfaceOf(agent)
     const cwd = session === undefined ? undefined : (agent as unknown as { session?: { header?: { cwd?: string } } }).session?.header?.cwd

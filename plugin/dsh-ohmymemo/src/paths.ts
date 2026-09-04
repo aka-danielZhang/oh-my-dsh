@@ -215,5 +215,8 @@ export function parseLocation(relPath: string): Location {
 
 /** Whether a location refers to something the watcher must react to. */
 export function isWatchRelevant(location: Location): boolean {
-  return location.type === 'record' || location.type === 'tombstone' || location.type === 'scope-file'
+  return location.type === 'record'
+    || location.type === 'tombstone'
+    || location.type === 'scope-file'
+    || location.type === 'store-config'
 }

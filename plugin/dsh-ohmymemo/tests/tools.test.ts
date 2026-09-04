@@ -111,10 +111,10 @@ test('search → get → update(CAS) → forget round-trip through the tools', a
   assert.equal(found.hits.length, 1)
   const id = found.hits[0]!.id
 
-  const records = (await get.execute({ ids: [id] }, exec(AGENT))) as { records: Array<{ body: string; revision: number }> }
+  const records = (await get.execute({ ids: [id] }, exec(AGENT))) as { records: Array<{ body: string; revision: number; hash: string }> }
   assert.match(records.records[0]!.body, /lapsang/)
 
-  const updated = (await update.execute({ id, ifRevision: records.records[0]!.revision, confirm: true, reason: 'confirm' }, exec(AGENT))) as { id: string; revision: number }
+  const updated = (await update.execute({ id, ifRevision: records.records[0]!.revision, ifHash: records.records[0]!.hash, confirm: true, reason: 'confirm' }, exec(AGENT))) as { id: string; revision: number }
   assert.equal(updated.revision, 2)
 
   const forgotten = (await forget.execute({ id: updated.id, reason: 'user asked' }, exec(AGENT))) as { forgottenIds: string[] }
@@ -123,14 +123,17 @@ test('search → get → update(CAS) → forget round-trip through the tools', a
   assert.deepEqual(after.hits, [])
 })
 
-test('update with stale revision fails with the store CAS error', async () => {
+test('update with stale revision or hand-edited hash fails with the store CAS error', async () => {
   const { harness: ctx } = await setup()
   const remember = ctx.registered.find((tool) => tool.name === 'memory_remember')!
+  const get = ctx.registered.find((tool) => tool.name === 'memory_get')!
   const update = ctx.registered.find((tool) => tool.name === 'memory_update')!
   const created = (await remember.execute({ content: 'v1', kind: 'semantic', key: 'a.b' }, exec(AGENT))) as { id: string }
-  await update.execute({ id: created.id, ifRevision: 1, confirm: true, reason: 'r' }, exec(AGENT))
+  const got = (await get.execute({ ids: [created.id] }, exec(AGENT))) as { records: Array<{ revision: number; hash: string }> }
+  const view = got.records[0]!
+  await update.execute({ id: created.id, ifRevision: view.revision, ifHash: view.hash, confirm: true, reason: 'r' }, exec(AGENT))
   await assert.rejects(
-    () => update.execute({ id: created.id, ifRevision: 1, confirm: true, reason: 'stale' }, exec(AGENT)),
+    () => update.execute({ id: created.id, ifRevision: view.revision, ifHash: view.hash, confirm: true, reason: 'stale' }, exec(AGENT)),
     (error: unknown) => {
       assert.match((error as { code?: string }).code ?? (error as Error).message, /OHMYMEMO_CAS_REVISION|revision mismatch/)
       return true

@@ -86,6 +86,7 @@ function minimalConfig(): Parameters<typeof budgetFrom>[0] {
     capture_mode: 'direct',
     remember_direct_facts: true,
     allow_inference_candidates: false,
+    dream_schedule_local_time: '02:00',
     auto_consolidation: false,
     watch: true,
     max_record_bytes: 16384,

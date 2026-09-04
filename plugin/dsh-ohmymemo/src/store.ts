@@ -32,6 +32,7 @@ import {
   archiveRecordPath,
   canonicalRecordPath,
   candidateRecordPath,
+  parseLocation,
   tombstonePath,
   WRITER_LOCK_REL,
 } from './paths.ts'
@@ -92,11 +93,30 @@ export interface CreateInput {
   registry?: WorkspaceRegistryLike
 }
 
-/** In-place revision update input (CAS on ifRevision and optional ifHash). */
+/** Automated candidate input; candidates remain outside active recall until promotion. */
+export interface CreateCandidateInput extends CreateInput {
+  reason: string
+  expiresAt?: string
+}
+
+/** CAS-protected mutation of the user-editable store policy. */
+export interface UpdateConfigInput {
+  ifHash: string
+  patch: Partial<Pick<StoreUserConfig, 'allow_inference_candidates' | 'dream_schedule_local_time'>>
+}
+
+/** Immutable config view paired with the current file hash. */
+export interface StoreConfigSnapshot {
+  config: StoreUserConfig
+  hash: string
+}
+
+/** In-place revision update input (mandatory revision+hash CAS). */
 export interface UpdateInput {
   id: string
   ifRevision: number
-  ifHash?: string
+  /** Content hash the caller read (a same-revision hand edit must not be overwritten). */
+  ifHash: string
   content?: string
   key?: string
   importance?: number
@@ -109,6 +129,7 @@ export interface UpdateInput {
 export interface SupersedeInput {
   id: string
   ifRevision: number
+  ifHash: string
   content: string
   key?: string
   importance?: number
@@ -120,6 +141,7 @@ export interface SupersedeInput {
 export interface PromoteInput {
   id: string
   ifRevision: number
+  ifHash: string
   confirm: boolean
   reason: string
 }
@@ -156,6 +178,7 @@ export class OhMyMemoStore {
   private readonly now: () => Date
   private readonly idNow: () => number
   private readonly lock: WriterLock
+  private readonly maintenanceLock: WriterLock
   private readonly watchRequested: boolean
   private readonly watchDebounceMs: number
 
@@ -181,11 +204,20 @@ export class OhMyMemoStore {
     this.lock = new WriterLock(join(this.root, ...WRITER_LOCK_REL.split('/')), {
       timeoutMs: options.lockTimeoutMs ?? 5_000,
     })
+    this.maintenanceLock = new WriterLock(join(this.root, '.state', 'locks', 'dream-memory.lock'), {
+      timeoutMs: options.lockTimeoutMs ?? 5_000,
+    })
   }
 
   // -------------------------------------------------------------- state ----
 
   get catalog(): MemoryCatalog {
+    return this.catalogValue
+  }
+
+  /** Refresh fail-closed tombstone barriers before exposing a read catalog. */
+  readCatalog(): MemoryCatalog {
+    this.refreshTombstoneBarriers()
     return this.catalogValue
   }
 
@@ -210,6 +242,7 @@ export class OhMyMemoStore {
   }
 
   catalogStats(): ReturnType<MemoryCatalog['stats']> {
+    this.refreshTombstoneBarriers()
     return this.catalogValue.stats()
   }
 
@@ -218,6 +251,12 @@ export class OhMyMemoStore {
     return () => {
       this.listeners.delete(listener)
     }
+  }
+
+  /** Hold the store-specific cross-process lease for one maintenance run. */
+  async withMaintenanceLease<T>(run: () => Promise<T>): Promise<T> {
+    await this.ensureReady()
+    return this.maintenanceLock.withLock(run)
   }
 
   // --------------------------------------------------------------- open ----
@@ -346,6 +385,18 @@ export class OhMyMemoStore {
     }
   }
 
+  private applyRuntimeConfig(next: StoreUserConfig): void {
+    const previous = this.configValue
+    this.configValue = next
+    if (previous.max_record_bytes !== next.max_record_bytes) this.rescan()
+    if (!this.watchRequested) return
+    if (next.watch && this.watcher === undefined) this.startWatcher()
+    if (!next.watch && this.watcher !== undefined) {
+      this.watcher.stop()
+      this.watcher = undefined
+    }
+  }
+
   private startWatcher(): void {
     this.watcher = new StoreWatcher(
       this.root,
@@ -366,8 +417,14 @@ export class OhMyMemoStore {
   close(): void {
     this.watcher?.stop()
     this.watcher = undefined
-    while (this.lock.held) this.lock.release()
     this.listeners.clear()
+    // Locks are never force-released here. An in-flight withWriterLock /
+    // withMaintenanceLease callback still owns its critical section and
+    // releases in its own finally; ripping the lock out mid-callback would
+    // let another process interleave with the exact mutation we are still
+    // performing. A process that exits mid-hold leaves its lock directory
+    // behind, and other processes steal it only after proving this pid dead
+    // or reused — the designed stale-holder path.
   }
 
   private async ensureReady(): Promise<void> {
@@ -381,13 +438,30 @@ export class OhMyMemoStore {
 
   /** Re-read one record from disk by id (the read path trusts files, not the catalog). */
   readRecord(id: string): { record: MemoryRecord; hash: string; absPath: string } | undefined {
+    this.refreshTombstoneBarriers()
     const entry = this.catalogValue.get(id)
     if (entry === undefined) return undefined
     const hash = hashFile(entry.absPath)
     if (hash === undefined) return undefined
     const { record } = parseRecord(readFileSync(entry.absPath, 'utf8'))
-    if (record === undefined || record.id !== id) return undefined
+    this.refreshTombstoneBarriers()
+    if (record === undefined || record.id !== id || this.catalogValue.isTombstoned(id)) return undefined
     return { record, hash, absPath: entry.absPath }
+  }
+
+  /** Re-read config.yaml and return a detached policy plus its CAS hash. */
+  configSnapshot(): StoreConfigSnapshot {
+    const abs = join(this.root, 'config.yaml')
+    let text: string
+    try {
+      text = readFileSync(abs, 'utf8')
+    } catch (error) {
+      if ((error as { code?: string }).code !== 'ENOENT') throw error
+      return { config: defaultStoreConfig(), hash: '' }
+    }
+    const hash = hashText(text)
+    const parsed = parseStoreConfig(text)
+    return { config: structuredClone(parsed.config), hash }
   }
 
   doctor(): Diagnostic[] {
@@ -408,10 +482,18 @@ export class OhMyMemoStore {
 
   async create(input: CreateInput): Promise<MutationResult> {
     await this.ensureReady()
-    return this.lock.withLock(() => this.createLocked(input))
+    return this.withWriterLock(() => this.createLocked(input))
   }
 
-  private createLocked(input: CreateInput): MutationResult {
+  async createCandidate(input: CreateCandidateInput): Promise<MutationResult> {
+    await this.ensureReady()
+    return this.withWriterLock(() => this.createLocked(input, {
+      reason: input.reason,
+      expiresAt: input.expiresAt,
+    }))
+  }
+
+  private createLocked(input: CreateInput, candidate?: { reason: string; expiresAt?: string }): MutationResult {
     const content = input.content.replace(/\n+$/, '')
     if (content.trim().length === 0) {
       throw new StoreError('OHMYMEMO_EMPTY_CONTENT', 'record content must not be empty')
@@ -433,13 +515,22 @@ export class OhMyMemoStore {
     if (barrier !== undefined && input.overrideTombstone !== true) {
       throw new StoreError('OHMYMEMO_TOMBSTONE_BARRIER', `key ${scopeValue}/${key} has an active forget tombstone — refusing to re-create (explicit re-remember required)`, { tombstone: barrier.id })
     }
-    if (cardinality === 'single') {
+    if (candidate === undefined && cardinality === 'single') {
       const existing = this.catalogValue.byConflictKey(scopeValue, input.kind, key)
       if (existing.length > 0) {
         throw new StoreError('OHMYMEMO_SINGLE_KEY_CONFLICT', `key ${scopeValue}/${input.kind}/${key} already has an active record (${existing.map((entry) => entry.record.id).join(', ')}) — update or supersede it instead`)
       }
+    } else if (candidate !== undefined) {
+      const duplicate = this.catalogValue.allEntries().find((entry) =>
+        entry.record.scope === scopeValue && entry.record.kind === input.kind && entry.record.key === key)
+      if (duplicate !== undefined) {
+        throw new StoreError('OHMYMEMO_SINGLE_KEY_CONFLICT', `candidate key ${scopeValue}/${input.kind}/${key} already exists (${duplicate.record.id})`)
+      }
     }
 
+    const candidateExpiresAt = candidate === undefined
+      ? undefined
+      : candidate.expiresAt ?? new Date(this.now().getTime() + this.configValue.candidate_retention_days * 86_400_000).toISOString()
     const record: MemoryRecord = {
       schema: 'ohmymemo/v1',
       id,
@@ -448,7 +539,7 @@ export class OhMyMemoStore {
       kind: input.kind,
       key,
       cardinality,
-      status: 'active',
+      status: candidate === undefined ? 'active' : 'candidate',
       confidence: input.confidence ?? 1,
       importance: input.importance ?? 0.5,
       privacy: input.privacy ?? 'normal',
@@ -460,20 +551,24 @@ export class OhMyMemoStore {
       sources: input.sources ?? [{ type: 'user_statement', observed_at: at }],
       supersedes: [],
       contradicts: [],
+      ...(candidate === undefined ? {} : {
+        candidate_reason: candidate.reason,
+        candidate_expires_at: candidateExpiresAt,
+      }),
       body: content,
     }
     const text = serializeRecord(record)
     this.checkSize(text)
-    const rel = canonicalRecordPath(record)
+    const rel = candidate === undefined ? canonicalRecordPath(record) : candidateRecordPath(record.id)
     if (rel === undefined) {
       throw new StoreError('OHMYMEMO_INVALID_SCOPE', `scope ${scopeValue} has no canonical path`)
     }
     this.expectInternal(rel, hashText(text))
     runTransaction(this.root, {
-      action: 'create',
+      action: candidate === undefined ? 'create' : 'candidate-create',
       ops: [
         { op: 'write', path: rel, content: text, after_hash: hashText(text) },
-        { op: 'journal', entry: journalEntry(this.now(), 'created', record, hashText(text)) },
+        { op: 'journal', entry: journalEntry(this.now(), candidate === undefined ? 'created' : 'candidate-created', record, hashText(text)) },
       ],
       validateWrite: validateRecordText,
     })
@@ -482,9 +577,54 @@ export class OhMyMemoStore {
     return { id, revision: record.revision, status: record.status, scope: record.scope, path: rel }
   }
 
+  async updateConfig(input: UpdateConfigInput): Promise<StoreConfigSnapshot> {
+    await this.ensureReady()
+    return this.withWriterLock(() => {
+      const current = this.configSnapshot()
+      if (current.hash !== input.ifHash) {
+        throw new StoreError('OHMYMEMO_CONFIG_CAS_MISMATCH', 'config.yaml changed since it was read', {
+          expectedHash: input.ifHash,
+          actualHash: current.hash,
+        })
+      }
+      if (current.hash !== '') {
+        const source = parseStoreConfig(readFileSync(join(this.root, 'config.yaml'), 'utf8'))
+        if (source.issues.length > 0) {
+          throw new StoreError('OHMYMEMO_CONFIG_INVALID', `config.yaml contains unowned or invalid fields: ${source.issues.map(issue => issue.message).join('; ')}`)
+        }
+      }
+      const next = { ...current.config, ...input.patch }
+      const text = serializeStoreConfig(next)
+      const validated = parseStoreConfig(text)
+      if (validated.issues.length > 0) {
+        throw new StoreError('OHMYMEMO_CONFIG_INVALID', `refusing invalid config: ${validated.issues.map((issue) => issue.message).join('; ')}`)
+      }
+      const nextHash = hashText(text)
+      if (nextHash === current.hash) return current
+      this.expectInternal('config.yaml', nextHash)
+      runTransaction(this.root, {
+        action: 'config-update',
+        ops: [
+          { op: 'write', path: 'config.yaml', content: text, ...(current.hash === '' ? {} : { before_hash: current.hash }), after_hash: nextHash },
+          { op: 'journal', entry: {
+            at: this.now().toISOString(),
+            action: 'config-updated',
+            ...(current.hash === '' ? {} : { old_hash: current.hash }),
+            new_hash: nextHash,
+            path: 'config.yaml',
+          } },
+        ],
+        validateWrite: validateConfigText,
+      })
+      this.applyRuntimeConfig(validated.config)
+      this.emit({ type: 'config-updated', hash: nextHash, external: false })
+      return { config: structuredClone(validated.config), hash: nextHash }
+    })
+  }
+
   async update(input: UpdateInput): Promise<MutationResult> {
     await this.ensureReady()
-    return this.lock.withLock(() => this.updateLocked(input))
+    return this.withWriterLock(() => this.updateLocked(input))
   }
 
   private updateLocked(input: UpdateInput): MutationResult {
@@ -532,7 +672,7 @@ export class OhMyMemoStore {
     runTransaction(this.root, {
       action: 'update',
       ops: [
-        { op: 'write', path: rel, content: text, after_hash: hashText(text) },
+        { op: 'write', path: rel, content: text, before_hash: current.hash, after_hash: hashText(text) },
         { op: 'journal', entry: journalEntry(this.now(), 'updated', next, hashText(text), input.reason) },
       ],
       validateWrite: validateRecordText,
@@ -544,7 +684,7 @@ export class OhMyMemoStore {
 
   async supersede(input: SupersedeInput): Promise<MutationResult & { supersededId: string }> {
     await this.ensureReady()
-    return this.lock.withLock(() => this.supersedeLocked(input))
+    return this.withWriterLock(() => this.supersedeLocked(input))
   }
 
   private supersedeLocked(input: SupersedeInput): MutationResult & { supersededId: string } {
@@ -553,7 +693,7 @@ export class OhMyMemoStore {
       throw new StoreError('OHMYMEMO_RECORD_INVALID', `record ${input.id} on disk is not a valid record — refusing to mutate`)
     }
     this.detectExternalEdit(current)
-    this.assertCas(current, input.ifRevision)
+    this.assertCas(current, input.ifRevision, input.ifHash)
 
     const content = input.content.replace(/\n+$/, '')
     if (content.trim().length === 0) throw new StoreError('OHMYMEMO_EMPTY_CONTENT', 'record content must not be empty')
@@ -616,7 +756,7 @@ export class OhMyMemoStore {
 
   async promote(input: PromoteInput): Promise<MutationResult> {
     await this.ensureReady()
-    return this.lock.withLock(() => this.promoteLocked(input))
+    return this.withWriterLock(() => this.promoteLocked(input))
   }
 
   private promoteLocked(input: PromoteInput): MutationResult {
@@ -628,7 +768,7 @@ export class OhMyMemoStore {
       throw new StoreError('OHMYMEMO_NOT_CANDIDATE', `record ${input.id} has status ${current.record.status}, only candidates can be promoted`)
     }
     this.detectExternalEdit(current)
-    this.assertCas(current, input.ifRevision)
+    this.assertCas(current, input.ifRevision, input.ifHash)
 
     const at = this.now().toISOString()
     const candidateRel = candidateRecordPath(input.id)
@@ -669,7 +809,7 @@ export class OhMyMemoStore {
 
   async forget(request: ForgetRequest): Promise<ForgetResult> {
     await this.ensureReady()
-    return this.lock.withLock(() => this.forgetLocked(request))
+    return this.withWriterLock(() => this.forgetLocked(request))
   }
 
   /** Read-only workspace scope resolution for search/capsule (never creates). */
@@ -686,15 +826,15 @@ export class OhMyMemoStore {
   }
 
   /** Mark a record disputed, merging symmetric `contradicts` links (Phase 2 minimal dispute). */
-  async markDispute(input: { id: string; ifRevision: number; contradictsWith?: string[]; reason: string }): Promise<MutationResult> {
+  async markDispute(input: { id: string; ifRevision: number; ifHash: string; contradictsWith?: string[]; reason: string }): Promise<MutationResult> {
     await this.ensureReady()
-    return this.lock.withLock(() => {
+    return this.withWriterLock(() => {
       const current = this.readUnderLock(input.id)
       if (current === undefined) {
         throw new StoreError('OHMYMEMO_RECORD_INVALID', `record ${input.id} on disk is not a valid record — refusing to mutate`)
       }
       this.detectExternalEdit(current)
-      this.assertCas(current, input.ifRevision)
+      this.assertCas(current, input.ifRevision, input.ifHash)
       const next: MemoryRecord = {
         ...current.record,
         revision: current.record.revision + 1,
@@ -702,14 +842,14 @@ export class OhMyMemoStore {
         status: 'disputed',
         contradicts: [...new Set([...current.record.contradicts, ...(input.contradictsWith ?? [])])],
       }
-      return this.publishInPlace(current.record, next, input.reason)
+      return this.publishInPlace(current, next, input.reason)
     })
   }
 
   /** Reactivate a disputed record (resolution without a replacement). */
-  async markActive(input: { id: string; ifRevision: number; reason: string }): Promise<MutationResult> {
+  async markActive(input: { id: string; ifRevision: number; ifHash: string; reason: string }): Promise<MutationResult> {
     await this.ensureReady()
-    return this.lock.withLock(() => {
+    return this.withWriterLock(() => {
       const current = this.readUnderLock(input.id)
       if (current === undefined) {
         throw new StoreError('OHMYMEMO_RECORD_INVALID', `record ${input.id} on disk is not a valid record — refusing to mutate`)
@@ -718,27 +858,27 @@ export class OhMyMemoStore {
         throw new StoreError('OHMYMEMO_BAD_REQUEST', `record ${input.id} is ${current.record.status}, only disputed records can be reactivated`)
       }
       this.detectExternalEdit(current)
-      this.assertCas(current, input.ifRevision)
+      this.assertCas(current, input.ifRevision, input.ifHash)
       const next: MemoryRecord = {
         ...current.record,
         revision: current.record.revision + 1,
         updated_at: this.now().toISOString(),
         status: 'active',
       }
-      return this.publishInPlace(current.record, next, input.reason)
+      return this.publishInPlace(current, next, input.reason)
     })
   }
 
   /** Shared tail for in-place status/field revisions (single write + journal). */
-  private publishInPlace(previous: MemoryRecord, next: MemoryRecord, reason: string): MutationResult {
+  private publishInPlace(previous: { record: MemoryRecord; hash: string }, next: MemoryRecord, reason: string): MutationResult {
     const text = serializeRecord(next)
     this.checkSize(text)
-    const rel = expectedRel(previous)
+    const rel = expectedRel(previous.record)
     this.expectInternal(rel, hashText(text))
     runTransaction(this.root, {
       action: 'update',
       ops: [
-        { op: 'write', path: rel, content: text, after_hash: hashText(text) },
+        { op: 'write', path: rel, content: text, before_hash: previous.hash, after_hash: hashText(text) },
         { op: 'journal', entry: journalEntry(this.now(), 'updated', next, hashText(text), reason) },
       ],
       validateWrite: validateRecordText,
@@ -834,6 +974,44 @@ export class OhMyMemoStore {
 
   // ------------------------------------------------------------ helpers ----
 
+  private withWriterLock<T>(run: () => T | Promise<T>): Promise<T> {
+    return this.lock.withLock(() => {
+      this.reconcileCatalogUnderLock()
+      return run()
+    })
+  }
+
+  /** Fold interrupted and cross-process writes before any policy or CAS decision. */
+  private reconcileCatalogUnderLock(): void {
+    const report = recoverTransactions(this.root, this.now)
+    this.baseDiagnostics = this.baseDiagnostics.filter((diagnostic) =>
+      diagnostic.code !== 'recovery-deferred' && diagnostic.code !== 'transaction-conflict')
+    for (const conflict of report.conflicts) {
+      this.baseDiagnostics.push({
+        code: 'transaction-conflict',
+        severity: 'error',
+        message: `transaction ${conflict.id}: ${conflict.message}`,
+      })
+    }
+    if (report.conflicts.length > 0) {
+      throw new StoreError('OHMYMEMO_TRANSACTION_CONFLICT', 'unresolved transaction markers block memory mutations')
+    }
+    if (report.recovered.length + report.aborted.length > 0) {
+      this.logger?.warn?.(`dsh-ohmymemo: recovered ${report.recovered.length} transaction(s), aborted ${report.aborted.length}`)
+    }
+    // Another process may have rewritten config.yaml since our last look:
+    // re-read policy first so size/retention/watch decisions under this lock
+    // never enforce obsolete limits.
+    this.reloadConfigLocked()
+    this.handleWatchBatch(['scopes', 'inbox', 'archive', 'tombstones'])
+  }
+
+  /** Re-read config.yaml under the writer lock and apply runtime policy. */
+  private reloadConfigLocked(): void {
+    const snapshot = this.configSnapshot()
+    this.applyRuntimeConfig(snapshot.config)
+  }
+
   private resolveScopeValueLocked(input: CreateInput): string {
     if (input.scope === 'user') return 'user'
     if (input.cwd === undefined) {
@@ -887,11 +1065,11 @@ export class OhMyMemoStore {
     this.refreshEntry(current.relPath)
   }
 
-  private assertCas(current: { record: MemoryRecord; hash: string }, ifRevision: number, ifHash?: string): void {
+  private assertCas(current: { record: MemoryRecord; hash: string }, ifRevision: number, ifHash: string): void {
     if (current.record.revision !== ifRevision) {
       throw new StoreError('OHMYMEMO_CAS_REVISION', `revision mismatch: expected ${ifRevision}, disk has ${current.record.revision}`, { id: current.record.id, diskRevision: current.record.revision, diskHash: current.hash })
     }
-    if (ifHash !== undefined && current.hash !== ifHash) {
+    if (current.hash !== ifHash) {
       throw new StoreError('OHMYMEMO_CAS_HASH', `content hash mismatch: expected ${ifHash}, disk has ${current.hash}`, { id: current.record.id, diskRevision: current.record.revision, diskHash: current.hash })
     }
   }
@@ -918,6 +1096,11 @@ export class OhMyMemoStore {
 
   private refreshEntry(relPath: string): void {
     const result = refreshSubtree(this.root, relPath, this.catalogValue, { maxRecordBytes: this.configValue.max_record_bytes })
+    this.mergeFileDiagnostics(result.fileDiagnostics)
+  }
+
+  private refreshTombstoneBarriers(): void {
+    const result = refreshSubtree(this.root, 'tombstones', this.catalogValue, { maxRecordBytes: this.configValue.max_record_bytes })
     this.mergeFileDiagnostics(result.fileDiagnostics)
   }
 
@@ -950,6 +1133,10 @@ export class OhMyMemoStore {
       if (pending.expiresAt < nowMs) this.pendingInternal.delete(rel)
     }
     for (const rel of changed) {
+      if (parseLocation(rel).type === 'store-config') {
+        this.reloadConfigFromWatch(rel)
+        continue
+      }
       const before = this.snapshotUnder(rel)
       const result = refreshSubtree(this.root, rel, this.catalogValue, { maxRecordBytes: this.configValue.max_record_bytes })
       this.mergeFileDiagnostics(result.fileDiagnostics)
@@ -989,6 +1176,33 @@ export class OhMyMemoStore {
         this.emit({ type: 'removed', id, external: true })
       }
     }
+  }
+
+  private reloadConfigFromWatch(rel: string): void {
+    const abs = join(this.root, 'config.yaml')
+    const hash = hashFile(abs)
+    if (this.consumeInternal(rel, hash)) return
+    this.baseDiagnostics = this.baseDiagnostics.filter((diagnostic) => diagnostic.code !== 'config-invalid')
+    if (hash === undefined) {
+      this.applyRuntimeConfig(defaultStoreConfig())
+      this.baseDiagnostics.push({
+        code: 'config-invalid',
+        severity: 'warning',
+        message: 'config.yaml is missing; using defaults until it is restored',
+      })
+      this.emit({ type: 'config-updated', hash: '', external: true })
+      return
+    }
+    const parsed = parseStoreConfig(readFileSync(abs, 'utf8'))
+    this.applyRuntimeConfig(parsed.config)
+    for (const issue of parsed.issues) {
+      this.baseDiagnostics.push({
+        code: 'config-invalid',
+        severity: 'warning',
+        message: `config.yaml ${issue.field !== undefined ? `field "${issue.field}"` : ''}: ${issue.message}`,
+      })
+    }
+    this.emit({ type: 'config-updated', hash, external: true })
   }
 
   /** Catalog snapshot for paths under a prefix (for external-change journals). */
@@ -1040,6 +1254,13 @@ function validateRecordText(text: string): void {
   const { record, issues } = parseRecord(text)
   if (record === undefined) {
     throw new StoreError('OHMYMEMO_RECORD_INVALID', `refusing to publish unparsable record: ${issues.map((issue) => issue.message).join('; ')}`)
+  }
+}
+
+function validateConfigText(text: string): void {
+  const parsed = parseStoreConfig(text)
+  if (parsed.issues.length > 0) {
+    throw new StoreError('OHMYMEMO_CONFIG_INVALID', `refusing to publish invalid config: ${parsed.issues.map((issue) => issue.message).join('; ')}`)
   }
 }
 
