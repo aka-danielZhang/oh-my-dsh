@@ -1,0 +1,185 @@
+From aa77a4b147bb19410c3d645811ca54771c93eb98 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Thu, 3 Sep 2026 03:44:22 +0000
+Subject: [PATCH] fix(guard): read Session.snapshotEvents after alpha.4 log API
+
+0.1.2-alpha.4 removed Session.events. The fork-only todo-completion-guard
+still walked the live log at turn-stopping; switch it to snapshotEvents()
+and re-record pairing hashes for the merge.
+---
+ docs/event-producer-consumer.i18n.yaml                      | 4 ++--
+ docs/subsystems/compaction.i18n.yaml                        | 4 ++--
+ docs/subsystems/core.i18n.yaml                              | 4 ++--
+ docs/subsystems/persistence.i18n.yaml                       | 4 ++--
+ packages/compaction/compaction-basic/README.i18n.yaml       | 4 ++--
+ packages/core/agent-default-model/README.i18n.yaml          | 4 ++--
+ packages/guard/todo-completion-guard/src/index.ts           | 2 +-
+ .../tests/todo-completion-guard.spec.ts                     | 6 +++---
+ packages/host/frontend-static/README.i18n.yaml              | 2 +-
+ packages/mcp/mcp-client/README.i18n.yaml                    | 4 ++--
+ packages/session/session-persistence-jsonl/README.i18n.yaml | 2 +-
+ packages/session/session-persistence/README.i18n.yaml       | 4 ++--
+ 12 files changed, 22 insertions(+), 22 deletions(-)
+
+diff --git a/docs/event-producer-consumer.i18n.yaml b/docs/event-producer-consumer.i18n.yaml
+index 28dc25a1c..4753c4019 100644
+--- a/docs/event-producer-consumer.i18n.yaml
++++ b/docs/event-producer-consumer.i18n.yaml
+@@ -2,5 +2,5 @@
+ # side as of the last confirmed-consistent state. Both languages carry equal authority;
+ # after editing either side, bring the other along and re-record with:
+ #   pnpm run verify-translation-pairing --write docs/event-producer-consumer.md
+-event-producer-consumer.md: bdfb3f23e817dadebb090df154af8e1ebf018ee8
+-event-producer-consumer.zh.md: 3fe1fe737cb7e99bb8e3a8641dc7bbd7b11b74a4
++event-producer-consumer.md: 3129e0b9ab1be305cfc069bfcc451c9119f2ce6d
++event-producer-consumer.zh.md: b82ee41721603f901c9dda6827cb0ab46dd07a0c
+diff --git a/docs/subsystems/compaction.i18n.yaml b/docs/subsystems/compaction.i18n.yaml
+index 93a8216e4..3124a6a61 100644
+--- a/docs/subsystems/compaction.i18n.yaml
++++ b/docs/subsystems/compaction.i18n.yaml
+@@ -2,5 +2,5 @@
+ # side as of the last confirmed-consistent state. Both languages carry equal authority;
+ # after editing either side, bring the other along and re-record with:
+ #   pnpm run verify-translation-pairing --write docs/subsystems/compaction.md
+-compaction.md: b49957a5f476a02ccd12b791f287a9675073c0ae
+-compaction.zh.md: 4b4c6845b8ff48bce019b352a811f968628cbdbf
++compaction.md: 9dfffe845f12ed1d1c9e33296d73ae198a6feaf3
++compaction.zh.md: 5ab555b851b3f5cfa90e4bab43c4b51b5142e108
+diff --git a/docs/subsystems/core.i18n.yaml b/docs/subsystems/core.i18n.yaml
+index a60f0c783..0b6e6efc9 100644
+--- a/docs/subsystems/core.i18n.yaml
++++ b/docs/subsystems/core.i18n.yaml
+@@ -2,5 +2,5 @@
+ # side as of the last confirmed-consistent state. Both languages carry equal authority;
+ # after editing either side, bring the other along and re-record with:
+ #   pnpm run verify-translation-pairing --write docs/subsystems/core.md
+-core.md: a59a692573c2e2756e60626268314a8ade6c546e
+-core.zh.md: acea4966a30ab03c24f1aea9bcd2d33a6271a28d
++core.md: be50c0111a07164ee497e3d4efd3650f9440212b
++core.zh.md: fcef7ece03ca4b4ca3d6c19adaccb941103f9db6
+diff --git a/docs/subsystems/persistence.i18n.yaml b/docs/subsystems/persistence.i18n.yaml
+index ec456511f..7911774ea 100644
+--- a/docs/subsystems/persistence.i18n.yaml
++++ b/docs/subsystems/persistence.i18n.yaml
+@@ -2,5 +2,5 @@
+ # side as of the last confirmed-consistent state. Both languages carry equal authority;
+ # after editing either side, bring the other along and re-record with:
+ #   pnpm run verify-translation-pairing --write docs/subsystems/persistence.md
+-persistence.md: b61ddee8d12854b330b967a09a1a685d763f0041
+-persistence.zh.md: 08cc35d987360138ec096b70f8c6b11b5cba4c55
++persistence.md: 6a9ebb7873045a9b752f5ae6749e206707d80740
++persistence.zh.md: e66a037d1ebc91b167883aa1df9c428fd793c3f3
+diff --git a/packages/compaction/compaction-basic/README.i18n.yaml b/packages/compaction/compaction-basic/README.i18n.yaml
+index 001d9d1a0..3063e9678 100644
+--- a/packages/compaction/compaction-basic/README.i18n.yaml
++++ b/packages/compaction/compaction-basic/README.i18n.yaml
+@@ -2,5 +2,5 @@
+ # side as of the last confirmed-consistent state. Both languages carry equal authority;
+ # after editing either side, bring the other along and re-record with:
+ #   pnpm run verify-translation-pairing --write packages/compaction/compaction-basic/README.md
+-README.md: 026a54a3cc0d2bf45873acf4f607eb7b392e5dbf
+-README.zh.md: 60534f6ef1b065a0c19642c7d02315f66f2b19ca
++README.md: f57fcc16ab27d461e4371506af32d09c7db2a698
++README.zh.md: a71a63f1973d87096d1ea0d94353c6e74cdb10e2
+diff --git a/packages/core/agent-default-model/README.i18n.yaml b/packages/core/agent-default-model/README.i18n.yaml
+index 1bae31f6c..5a9abf76a 100644
+--- a/packages/core/agent-default-model/README.i18n.yaml
++++ b/packages/core/agent-default-model/README.i18n.yaml
+@@ -2,5 +2,5 @@
+ # side as of the last confirmed-consistent state. Both languages carry equal authority;
+ # after editing either side, bring the other along and re-record with:
+ #   pnpm run verify-translation-pairing --write packages/core/agent-default-model/README.md
+-README.md: b203826d2b5ae05026881fff99d4571b470c5fc8
+-README.zh.md: 24c2202302d8348701615619c3b68f086a0d5273
++README.md: 8b00e02b6e7d6a863299f3f66e63e729ceebd3cb
++README.zh.md: faa6d56a94046203fdaf14a2577e3279bdad8375
+diff --git a/packages/guard/todo-completion-guard/src/index.ts b/packages/guard/todo-completion-guard/src/index.ts
+index e6d67a2a0..f7dc4886d 100644
+--- a/packages/guard/todo-completion-guard/src/index.ts
++++ b/packages/guard/todo-completion-guard/src/index.ts
+@@ -88,7 +88,7 @@ export function apply(ctx: Context): void {
+ 
+   ctx.on('agent/turn-stopping', ({ agent, turn }) => {
+     if (lastReminded.get(agent) === turn) return
+-    const { todos, wallBounded } = inspectTurn(agent.session.events)
++    const { todos, wallBounded } = inspectTurn(agent.session.snapshotEvents())
+     // `pending` counts as unfinished too — a forgotten pending item is exactly
+     // the residue this guard exists for. A wall-bounded turn is left alone.
+     if (todos === null || wallBounded) return
+diff --git a/packages/guard/todo-completion-guard/tests/todo-completion-guard.spec.ts b/packages/guard/todo-completion-guard/tests/todo-completion-guard.spec.ts
+index d8d71fc97..1d6fd6205 100644
+--- a/packages/guard/todo-completion-guard/tests/todo-completion-guard.spec.ts
++++ b/packages/guard/todo-completion-guard/tests/todo-completion-guard.spec.ts
+@@ -44,7 +44,7 @@ function waitForIdle(ctx: Context, agent: Agent): Promise<void> {
+ 
+ /** Every guard-steered user message in the agent's log, flattened to joined text + source for terse assertions. */
+ function reminders(agent: Agent): { text: string; source: unknown }[] {
+-  return [...agent.session.events]
++  return [...agent.session.snapshotEvents()]
+     .filter((e): e is SessionEvent<'user/message'> => e.type === 'user/message' && e.data.source.kind === 'plugin')
+     .map(e => ({
+       text: e.data.content.map(block => block.type === 'text' ? block.text : '').join('|'),
+@@ -54,12 +54,12 @@ function reminders(agent: Agent): { text: string; source: unknown }[] {
+ 
+ /** The reason of the most recent turn/end event. */
+ function lastTurnEnd(agent: Agent): unknown {
+-  return agent.session.events.findLast(event => event.type === 'turn/end')?.data.reason
++  return agent.session.snapshotEvents().findLast(event => event.type === 'turn/end')?.data.reason
+ }
+ 
+ /** The most recent todo/write snapshot. */
+ function currentTodos(agent: Agent): unknown {
+-  return agent.session.events.findLast(event => event.type === 'todo/write')?.data.todos
++  return agent.session.snapshotEvents().findLast(event => event.type === 'todo/write')?.data.todos
+ }
+ 
+ function go(agent: Agent): void {
+diff --git a/packages/host/frontend-static/README.i18n.yaml b/packages/host/frontend-static/README.i18n.yaml
+index cd2094611..be90e20a5 100644
+--- a/packages/host/frontend-static/README.i18n.yaml
++++ b/packages/host/frontend-static/README.i18n.yaml
+@@ -2,5 +2,5 @@
+ # side as of the last confirmed-consistent state. Both languages carry equal authority;
+ # after editing either side, bring the other along and re-record with:
+ #   pnpm run verify-translation-pairing --write packages/host/frontend-static/README.md
+-README.md: 9d959a1031f7d4f8e7fec051504ad5773b33e618
++README.md: 895d41f6f3914ea9934d9dd502f06c9d8e806544
+ README.zh.md: 85ebaa7729541a61145dfe3b73cdaebfd6e11855
+diff --git a/packages/mcp/mcp-client/README.i18n.yaml b/packages/mcp/mcp-client/README.i18n.yaml
+index 44f33721e..bc6040e3b 100644
+--- a/packages/mcp/mcp-client/README.i18n.yaml
++++ b/packages/mcp/mcp-client/README.i18n.yaml
+@@ -2,5 +2,5 @@
+ # side as of the last confirmed-consistent state. Both languages carry equal authority;
+ # after editing either side, bring the other along and re-record with:
+ #   pnpm run verify-translation-pairing --write packages/mcp/mcp-client/README.md
+-README.md: f4979b6a2c9a7cfdbbb11cf7526688ce2549f184
+-README.zh.md: e18e05a2a74944ace14f4cca7807dd3456e32dd1
++README.md: 6c9e867604ebd138dbeed45a2f12c686693a6313
++README.zh.md: be7062b00569b42056a0ac0581b520a7d8b92935
+diff --git a/packages/session/session-persistence-jsonl/README.i18n.yaml b/packages/session/session-persistence-jsonl/README.i18n.yaml
+index 0a44d29f0..782b37f6b 100644
+--- a/packages/session/session-persistence-jsonl/README.i18n.yaml
++++ b/packages/session/session-persistence-jsonl/README.i18n.yaml
+@@ -2,5 +2,5 @@
+ # side as of the last confirmed-consistent state. Both languages carry equal authority;
+ # after editing either side, bring the other along and re-record with:
+ #   pnpm run verify-translation-pairing --write packages/session/session-persistence-jsonl/README.md
+-README.md: d3dfaf8affb142979ede69d86bbf0b1587e8c39c
++README.md: d9b8ce324b75e5e028ae2b52329b2a19279df4c3
+ README.zh.md: 15fc815523355674a1f325b604dd2655f56f7f58
+diff --git a/packages/session/session-persistence/README.i18n.yaml b/packages/session/session-persistence/README.i18n.yaml
+index 6cb47067f..186fa043e 100644
+--- a/packages/session/session-persistence/README.i18n.yaml
++++ b/packages/session/session-persistence/README.i18n.yaml
+@@ -2,5 +2,5 @@
+ # side as of the last confirmed-consistent state. Both languages carry equal authority;
+ # after editing either side, bring the other along and re-record with:
+ #   pnpm run verify-translation-pairing --write packages/session/session-persistence/README.md
+-README.md: 6d430173b985d7e32b615e0b42713a925bc8b344
+-README.zh.md: a3b6cd90fa4ccba2b28f0e81517bbabab0ce047e
++README.md: 44457cad08e386de686aabe1a31be27673a59c72
++README.zh.md: 33193b2982e5fd45496abd998a0b38ffdfb71170
+-- 
+2.43.0
+

@@ -365,7 +365,7 @@ export class ThreadGateway extends TypertRemoteService {
       if (!request.draftId.startsWith(`header-${request.sourceSessionId}-`)) return 'draft-not-found'
       const agent = this.ctx.agents.get(SessionId(request.sourceSessionId))
       if (agent === undefined) return 'source-not-live'
-      const boundary = [...agent.session.events].reverse().find(event => (
+      const boundary = agent.session.snapshotEvents().findLast(event => (
         event.type === 'turn/end' && isFinalThreadDraftReason(event.data.reason.kind)
       ))
       if (boundary?.type !== 'turn/end') return 'source-has-no-complete-turn'
@@ -431,7 +431,7 @@ export class ThreadGateway extends TypertRemoteService {
     const sourceSessionId = String(session.id)
     for (const [draftId, draft] of table.entries()) {
       if (draft.sourceSessionId !== sourceSessionId || draft.status !== 'waiting-boundary') continue
-      const next = sealThreadDraftBoundary(draft, session.events, Date.now())
+      const next = sealThreadDraftBoundary(draft, session.snapshotEvents(), Date.now())
       if (next !== draft) await table.put(draftId, next)
     }
   }
@@ -487,12 +487,13 @@ export class ThreadGateway extends TypertRemoteService {
         detail: { expectedCwd: link.targetCwd, actualCwd: agent.session.header.cwd ?? null },
       }
     }
+    const events = agent.session.snapshotEvents()
     const counts: Record<string, number> = {}
-    for (const event of agent.session.events) counts[event.type] = (counts[event.type] ?? 0) + 1
+    for (const event of events) counts[event.type] = (counts[event.type] ?? 0) + 1
     for (const type of FORBIDDEN_PRISTINE_EVENTS) {
       if ((counts[type] ?? 0) > 0) return { ok: false, error: 'target-not-pristine', detail: { offending: type } }
     }
-    const titles = agent.session.events.filter(event => event.type === 'session/title')
+    const titles = events.filter(event => event.type === 'session/title')
     if (link.titleState === 'applied') {
       const title = titles[0]
       if (titles.length !== 1 || title?.type !== 'session/title' || title.data.title !== link.title) {

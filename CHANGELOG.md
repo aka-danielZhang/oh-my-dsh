@@ -2,6 +2,12 @@
 
 Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的，不在这里重复。发版时 `scripts/release-notes.mjs` 抽取对应 `## [version]`（没有则回退 `## [Unreleased]`）写入 GitHub Release 与 `latest-mac.yml` / `latest.yml` 的 `releaseNotes`。
 
+## [Unreleased]
+
+### Changed
+
+- Runtime 钉到 `v0.1.2-rc.1+zw.1`（`1b138a9e5b403a00f942cc90d3650d6584926cdc`，官方 `dsh-v0.1.2-rc.1`，fork [PR #13](https://github.com/aka-danielZhang/deepseek-harness/pull/13)）。0.1.2 用 `seq` / `eventAt()` / `snapshotEvents()` 取代 `Session.events`，并区分 `SessionSeq` 与 `SessionLogOffset`；`dsh-thread` 已改读 `snapshotEvents()`。`@crazx/*@0.1.2-rc.1.zw.1` 已上 npm。
+
 ## [0.3.0-rc.30] - 2026-09-03
 
 ### Fixed

@@ -91,9 +91,9 @@ function SessionRow(props: {
  */
 export function ThreadSidebarView(props: ThreadSidebarViewProps): React.ReactElement {
   const [links, setLinks] = React.useState<readonly ThreadLink[] | null>(null)
-  const byId = props.useSessions(state => state.byId)
-  const currentId = props.useSessions(state => state.current)
-  const archived = props.useWorkspaces(state => state.archivedSessionIds)
+  const byId = props.useSessions((state) => state.byId)
+  const currentId = props.useSessions((state) => state.current)
+  const archived = props.useWorkspaces((state) => state.archivedSessionIds)
 
   React.useEffect(() => {
     let active = true

@@ -18,7 +18,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
-import { CallId } from '@deepseek-ai/dsh-llm'
+import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
 import FsLocal from '@deepseek-ai/dsh-fs-local'
@@ -57,7 +57,7 @@ let callCounter = 0
 function call(ctx: Context, name: string, args: unknown, session: { id: string; parentSession?: string; cwd?: string }) {
   return ctx.tools.execute({
     signal,
-    callId: CallId(`call-${++callCounter}`),
+    callId: ToolCallId(`call-${++callCounter}`),
     name,
     arguments: args,
     agent: { session: { header: session } } as never,
