@@ -1,0 +1,56 @@
+{
+  "name": "dsh-ohmymemo",
+  "version": "0.1.0",
+  "description": "OhMyMemo Phase 1 Markdown store: canonical one-memory-one-file Markdown tree under $DSH_HOME/ohmymemo with schema parsing, in-process catalog, watch/doctor, atomic publish, cross-process writer lock, revision/hash CAS, journal and transaction recovery",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsdown",
+    "watch": "tsdown --watch",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "plugin:add": "dsh plugin --profile web add file:.",
+    "plugin:remove": "dsh plugin --profile web remove dsh-ohmymemo"
+  },
+  "files": [
+    "lib/index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "memory",
+    "markdown-store"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "yaml": "^2.9.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aka-danielZhang/oh-my-dsh.git",
+    "directory": "plugin/dsh-ohmymemo"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@types/node": "^24.13.3",
+    "tsdown": "^0.22.2",
+    "tsx": "^4.19.2",
+    "typescript": "^6.0.3"
+  },
+  "packageManager": "pnpm@10.28.0"
+}
