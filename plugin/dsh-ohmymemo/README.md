@@ -71,10 +71,10 @@ pnpm install && pnpm run typecheck && pnpm run build && pnpm run test
 
 ## 梦境记忆与设置
 
-- **调度**：默认关闭；开启后按 Host 本地时区每天在 `dream_schedule_local_time` 运行，使用 one-shot timer 在每次边界重算下一次时间，覆盖 DST 与休眠漂移；36 小时默认补跑窗口只补最近一个漏过的边界。
+- **调度**：默认关闭；开启后按 Host 本地时区每天在 `dream_schedule_local_time` 运行（设置页可直接修改），使用 one-shot timer 在每次边界重算下一次时间，覆盖 DST 与休眠漂移；36 小时默认补跑窗口只补最近一个漏过的边界。提取模型与推理强度可在设置页选择（`dream_model_provider`/`dream_model`/`dream_effort`，留空跟随默认模型；强度以路由声明的档位为准）。
 - **单飞与取消**：进程内只允许一个 Run，跨进程另持有 `.state/locks/dream-memory.lock`；持锁后重新打开 manager storage domain，并把 interrupted-run 恢复、边界复核、认领、提取、审计与 cursor/state 提交包在同一次 lease 中。活动 Run 镜像到 Jobs 供状态和取消，不把 Jobs 当持久事实源。设置页提供“立即整理”与活动 Run 取消。
 - **来源**：只读取非 subagent、非维护 Session 中 `surfaceOp === 'append'` 且 `source.kind === 'user'` 的 direct-human `user/message`；排除 fork seed、replacement 节点、疑似凭据和维护 Session。每个 Session 使用可取消 observation，增量游标与 Run 审计持久化在 `dsh_ohmymemo_manager` storage domain，不进入 Markdown 浏览器。
-- **提取**：专用 root Agent 无可见 Tools，执行 guard 拒绝全部工具调用；输出必须整体通过 strict JSON、精确证据 quote 子串和 secret 检查，任一非法 item 使整轮失败且不推进游标。自动结果只写 `candidate` 且统一标记 `privacy: sensitive`，永不自动确认、置顶或覆盖 active 记忆。游标按「seq 连续已拟合前缀」推进：时间乱序导致低 seq 证据未进 prompt 时该 Session 游标原地不动，下次 Run 重新审视（候选键确定性去重保证幂等）；取消若赶在提交前到达，Run 以 `cancelled` 结算且不推进游标与调度边界。
+- **提取**：专用 root Agent 无可见 Tools，执行 guard 拒绝全部工具调用；输出必须整体通过 strict JSON、精确证据 quote 子串和 secret 检查，任一非法 item 使整轮失败且不推进游标。产品决策（2026-09-05）：自动结果**直接写为正式记忆**——`status: active`、`privacy: normal`、`pinned: true`，立即可被 search/capsule 召回，不经候选区、无需手动确认；证据落地、append-origin 过滤、secret fail-closed、同 key 去重与 tombstone 屏障仍是护栏。游标按「seq 连续已拟合前缀」推进：时间乱序导致低 seq 证据未进 prompt 时该 Session 游标原地不动，下次 Run 重新审视（同 key 去重保证幂等）；取消若赶在提交前到达，Run 以 `cancelled` 结算且不推进游标与调度边界。
 - **记忆空间**：设置顶级菜单“记忆”内部提供“概览/记忆空间”。浏览器只索引 allowlist 中的 canonical/candidate/archive/generated-view Markdown，Host 端解析 frontmatter、清理 generated header，并在敏感记录上只返回 redacted 正文；路径规范化、generation、symlink、文件类型和大小均 fail closed。设置页在挂载期间轮询概览，初载与轮询均为 single-flight，慢 RPC 不会造成请求堆积或状态卡死。
 
 ## Model Experience

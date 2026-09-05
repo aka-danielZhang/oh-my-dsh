@@ -100,6 +100,11 @@ export interface StoreUserConfig {
   allow_inference_candidates: boolean
   /** Host-local wall-clock time for the daily dream-memory run (`HH:mm`). */
   dream_schedule_local_time: string
+  /** Dream-extraction model override; empty strings follow the harness default. */
+  dream_model_provider: string
+  dream_model: string
+  /** Dream-extraction reasoning effort override; empty follows the route default. */
+  dream_effort: string
   auto_consolidation: boolean
   watch: boolean
   max_record_bytes: number

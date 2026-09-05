@@ -11,6 +11,7 @@ import z from '@deepseek-ai/schemastery'
 import type {} from '@crazx/dsh-agent-default-model'
 import type {} from '@deepseek-ai/cordis-plugin-timer'
 import { foldConsumedWork, installModelSelection } from '@deepseek-ai/dsh-agent'
+import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import type { JobId, JobOutcome } from '@deepseek-ai/dsh-jobs'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
@@ -30,6 +31,7 @@ import {
   type DreamSourceSession,
 } from './dream.ts'
 import type {
+  DreamModelsSnapshot,
   DreamRunAudit,
   DreamRunSummary,
   DreamRuntimeState,
@@ -41,6 +43,7 @@ import type {
   UpdateDreamSettingsRequest,
   CancelRunResult,
 } from './manager-contract.ts'
+import type { StoreUserConfig } from './types.ts'
 
 /** Tunable bounds for the global maintainer row. */
 export interface Config {
@@ -115,8 +118,8 @@ interface RunProgress {
   agentSessionId: string | null
   promptHash: string | null
   sourceSessions: DreamRunAudit['sourceSessions']
-  candidatesCreated: string[]
-  candidatesRejected: number
+  memoriesCreated: string[]
+  memoriesRejected: number
   cursors: Record<string, number>
 }
 
@@ -146,6 +149,7 @@ export class OhMyMemoManager extends TypertRemoteService {
     'ohMyMemo',
     'agents',
     'agentDefaultModel',
+    'llm',
     'sessionQuery',
     'sessions',
     'tools',
@@ -191,12 +195,16 @@ export class OhMyMemoManager extends TypertRemoteService {
     const stats = this.memo.stats()
     const watch = this.memo.watchStatus()
     const tree = this.memo.displayTree(this.config.maxBrowseFiles, this.config.maxFileReadBytes)
+    const route = this.dreamRoute(config.config)
     return {
       configRevision: config.hash,
       dream: {
         enabled: config.config.allow_inference_candidates,
         scheduleLocalTime: config.config.dream_schedule_local_time,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'local',
+        modelProvider: route.provider,
+        model: route.model,
+        effort: route.effort,
         status: this.state.status,
         activeJobId: this.state.activeJobId,
         lastAttemptAt: this.state.lastAttemptAt,
@@ -213,7 +221,7 @@ export class OhMyMemoManager extends TypertRemoteService {
     }
   }
 
-  /** CAS-update the operative dream-memory switch and/or local schedule time. */
+  /** CAS-update the operative dream-memory switch, schedule, or extraction model. */
   async updateDreamSettings(request: UpdateDreamSettingsRequest): Promise<MemoryOverview> {
     this.assertAccepting()
     await this.memo.updateConfig({
@@ -221,10 +229,50 @@ export class OhMyMemoManager extends TypertRemoteService {
       patch: {
         ...(request.enabled === undefined ? {} : { allow_inference_candidates: request.enabled }),
         ...(request.scheduleLocalTime === undefined ? {} : { dream_schedule_local_time: request.scheduleLocalTime }),
+        ...(request.modelProvider === undefined ? {} : { dream_model_provider: request.modelProvider }),
+        ...(request.model === undefined ? {} : { dream_model: request.model }),
+        ...(request.effort === undefined ? {} : { dream_effort: request.effort }),
       },
     })
     await this.operationTail
     return this.overview()
+  }
+
+  /** Model and reasoning-effort catalog for the dream-extraction pickers. */
+  async models(): Promise<DreamModelsSnapshot> {
+    const config = this.memo.configSnapshot().config
+    const fallback = this.ctx.agentDefaultModel.currentSelection()
+    const route = this.dreamRoute(config)
+    const options = [{ key: 'default', label: `跟随默认模型（${fallback.provider} / ${fallback.model}）` }]
+    let total = 0
+    for (const provider of this.ctx.llm.listProviders()) {
+      try {
+        const models = await this.ctx.llm.listModels(provider.id)
+        for (const item of models) {
+          if (total >= 40) break
+          if (typeof item.id !== 'string') continue
+          options.push({ key: `${provider.id}/${item.id}`, label: `${provider.id} / ${item.id}` })
+          total += 1
+        }
+      } catch {
+        // Provider listing failure skips that provider.
+      }
+      if (total >= 40) break
+    }
+    const efforts = [{ key: 'default', label: '跟随默认' }]
+    for (const entry of await this.routeEfforts(route.provider, route.model)) {
+      const info = entry as { id?: unknown; name?: unknown }
+      if (typeof info.id !== 'string') continue
+      efforts.push({ key: info.id, label: typeof info.name === 'string' ? info.name : info.id })
+    }
+    const modelOverride = config.dream_model_provider !== '' && config.dream_model !== ''
+    return {
+      defaultRoute: { provider: fallback.provider, model: fallback.model },
+      options,
+      efforts,
+      currentModelKey: modelOverride ? `${config.dream_model_provider}/${config.dream_model}` : 'default',
+      currentEffortKey: config.dream_effort === '' ? 'default' : config.dream_effort,
+    }
   }
 
   /** Return the bounded browser-facing Markdown file index. */
@@ -444,6 +492,27 @@ export class OhMyMemoManager extends TypertRemoteService {
     }
   }
 
+  /** Effective dream-extraction route: config override, else the harness default. */
+  private dreamRoute(config: StoreUserConfig): { provider: string; model: string; effort: string } {
+    const fallback = this.ctx.agentDefaultModel.currentSelection()
+    return {
+      provider: config.dream_model_provider !== '' ? config.dream_model_provider : fallback.provider,
+      model: config.dream_model !== '' ? config.dream_model : fallback.model,
+      effort: config.dream_effort !== '' ? config.dream_effort : fallback.reasoningEffort ?? '',
+    }
+  }
+
+  /** Effort ids the exact route exposes (empty when the route declares none). */
+  private async routeEfforts(provider: string, model: string): Promise<readonly unknown[]> {
+    try {
+      const info = await this.ctx.llm.resolveModelInfo(provider, model)
+      const reasoning = info === undefined || info === null ? undefined : info.reasoning
+      return reasoning === undefined || !Array.isArray(reasoning.efforts) ? [] : reasoning.efforts
+    } catch {
+      return []
+    }
+  }
+
   private async executeRun(request: RunRequest, controller: AbortController): Promise<SuccessfulRun> {
     const timeout = AbortSignal.timeout(this.config.runTimeoutMs)
     const signal = AbortSignal.any([controller.signal, timeout])
@@ -477,7 +546,10 @@ export class OhMyMemoManager extends TypertRemoteService {
       sourceMessages = promptInput.messageCount
       if (sourceMessages === 0) return { progress, sourceMessages }
 
-      const model = this.ctx.agentDefaultModel.currentSelection()
+      const configSnapshot = this.memo.configSnapshot().config
+      const fallback = this.ctx.agentDefaultModel.currentSelection()
+      const route = this.dreamRoute(configSnapshot)
+      const model = { ...fallback, ...modelOverrides(configSnapshot, fallback, await this.routeEfforts(route.provider, route.model)) }
       progress.provider = model.provider
       progress.model = model.model
       progress.promptHash = `sha256:${hashString(promptInput.prompt)}`
@@ -523,18 +595,22 @@ export class OhMyMemoManager extends TypertRemoteService {
           maxMemories: this.config.maxMemoriesPerRun,
           maxContentChars: this.config.maxCandidateContentChars,
         })
-        progress.candidatesRejected += parsed.rejected
+        progress.memoriesRejected += parsed.rejected
         for (const proposal of parsed.proposals) {
           signal.throwIfAborted()
           const scope = proposal.scope === 'user'
             ? 'user'
             : this.memo.scopeForCwd(proposal.evidence.cwd)
           if (scope === undefined || this.memo.hasMemoryKey(scope, proposal.kind, proposal.key)) {
-            progress.candidatesRejected += 1
+            progress.memoriesRejected += 1
             continue
           }
           try {
-            const created = await this.memo.captureCandidate({
+            // Product decision: dream extraction writes directly as formal,
+            // recallable memories — no candidate gate, no manual promotion.
+            // Evidence grounding, append-origin filtering, secret fail-closed,
+            // key dedupe, and the tombstone barrier below remain the rails.
+            const created = await this.memo.remember({
               content: proposal.content,
               kind: proposal.kind,
               scope: proposal.scope,
@@ -542,8 +618,8 @@ export class OhMyMemoManager extends TypertRemoteService {
               key: proposal.key,
               cardinality: proposal.kind === 'episodic' ? 'multiple' : 'single',
               importance: proposal.importance,
-              pinned: false,
-              privacy: 'sensitive',
+              pinned: true,
+              privacy: 'normal',
               confirmed: false,
               confidence: this.config.candidateConfidence,
               tags: proposal.tags,
@@ -556,13 +632,12 @@ export class OhMyMemoManager extends TypertRemoteService {
                 quote_preview: proposal.quote,
                 observed_at: new Date(proposal.evidence.time).toISOString(),
               }],
-              reason: `dream-memory extraction ${request.runId}`,
             })
-            progress.candidatesCreated.push(created.id)
+            progress.memoriesCreated.push(created.id)
           } catch (error) {
-            if (!isCandidatePolicyRefusal(error)) throw error
-            progress.candidatesRejected += 1
-            this.logFailure('candidate policy rejection', error)
+            if (!isMemoryPolicyRefusal(error)) throw error
+            progress.memoriesRejected += 1
+            this.logFailure('memory policy rejection', error)
           }
         }
         return { progress, sourceMessages }
@@ -623,8 +698,8 @@ export class OhMyMemoManager extends TypertRemoteService {
       status: cancelled ? 'cancelled' : 'success',
       sourceSessions: result.progress.sourceSessions.length,
       sourceMessages: result.sourceMessages,
-      candidatesCreated: result.progress.candidatesCreated.length,
-      candidatesRejected: result.progress.candidatesRejected,
+      memoriesCreated: result.progress.memoriesCreated.length,
+      memoriesRejected: result.progress.memoriesRejected,
       detail: cancelled ? 'cancelled before commit' : null,
     }
     await this.persistAudit(auditFrom(request, result.progress, summary))
@@ -655,8 +730,8 @@ export class OhMyMemoManager extends TypertRemoteService {
     })
     return {
       status: summary.status === 'success' ? 'completed' : 'killed',
-      detail: `${summary.candidatesCreated} candidate(s) created`,
-      output: JSON.stringify({ runId: summary.runId, candidatesCreated: summary.candidatesCreated }),
+      detail: `${summary.memoriesCreated} memor(y/ies) created`,
+      output: JSON.stringify({ runId: summary.runId, memoriesCreated: summary.memoriesCreated }),
     }
   }
 
@@ -674,8 +749,8 @@ export class OhMyMemoManager extends TypertRemoteService {
       status: cancelled ? 'cancelled' : 'error',
       sourceSessions: progress.sourceSessions.length,
       sourceMessages,
-      candidatesCreated: progress.candidatesCreated.length,
-      candidatesRejected: progress.candidatesRejected,
+      memoriesCreated: progress.memoriesCreated.length,
+      memoriesRejected: progress.memoriesRejected,
       detail,
     }
     await this.persistAudit(auditFrom(request, progress, summary))
@@ -760,8 +835,8 @@ export class OhMyMemoManager extends TypertRemoteService {
       status: 'error',
       sourceSessions: 0,
       sourceMessages: 0,
-      candidatesCreated: 0,
-      candidatesRejected: 0,
+      memoriesCreated: 0,
+      memoriesRejected: 0,
       detail: 'previous process ended before the dream-memory run settled',
     }
     await this.replaceState({
@@ -831,8 +906,8 @@ function emptyProgress(): RunProgress {
     agentSessionId: null,
     promptHash: null,
     sourceSessions: [],
-    candidatesCreated: [],
-    candidatesRejected: 0,
+    memoriesCreated: [],
+    memoriesRejected: 0,
     cursors: {},
   }
 }
@@ -851,8 +926,8 @@ function auditFrom(request: RunRequest, progress: RunProgress, summary: DreamRun
     agentSessionId: progress.agentSessionId,
     promptHash: progress.promptHash,
     sourceSessions: progress.sourceSessions.map(item => ({ ...item })),
-    candidatesCreated: [...progress.candidatesCreated],
-    candidatesRejected: progress.candidatesRejected,
+    memoriesCreated: [...progress.memoriesCreated],
+    memoriesRejected: progress.memoriesRejected,
     detail: summary.detail,
   }
 }
@@ -883,7 +958,7 @@ function hashString(text: string): string {
   return createHash('sha256').update(text).digest('hex')
 }
 
-function isCandidatePolicyRefusal(error: unknown): boolean {
+function isMemoryPolicyRefusal(error: unknown): boolean {
   if (!(error instanceof StoreError)) return false
   return [
     'OHMYMEMO_BAD_REQUEST',
@@ -894,6 +969,22 @@ function isCandidatePolicyRefusal(error: unknown): boolean {
     'OHMYMEMO_SINGLE_KEY_CONFLICT',
     'OHMYMEMO_TOMBSTONE_BARRIER',
   ].includes(error.code)
+}
+
+/**
+ * Config-driven route overrides for one dream run. The configured effort is
+ * validated against the route's declared levels; an unknown id falls back to
+ * the route default rather than sending an invalid request.
+ */
+function modelOverrides(config: StoreUserConfig, fallback: ModelSelection, efforts: readonly unknown[]): Partial<ModelSelection> {
+  const patch: Partial<ModelSelection> = {}
+  if (config.dream_model_provider !== '') patch.provider = config.dream_model_provider
+  if (config.dream_model !== '') patch.model = config.dream_model
+  if (config.dream_effort !== '') {
+    const match = efforts.find(effort => String((effort as { id?: unknown }).id ?? effort) === config.dream_effort)
+    if (match !== undefined) patch.reasoningEffort = (match as { id: ModelSelection['reasoningEffort'] }).id
+  }
+  return patch
 }
 
 function errorMessage(error: unknown): string {

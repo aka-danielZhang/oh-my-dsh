@@ -44,6 +44,13 @@ Client apply 挂载 Typert Remote，以 `createSnapshotStore` 构造稳定 contr
 
 当前 DSH 没有同时提供 direct-user provenance 与分页/有界物理读取的 Session API；本轮只能把完整 corpus/selected-log 物化与后续有界处理区分并如实记录。Model-visible prompt 必须可从 Session 日志重建，而平台没有 maintenance Session 隐藏或删除契约，因此 `ohmymemo-maintenance-*` root Session 可能出现在普通历史并长期保留；本插件不绕过 Session Persistence 直接删文件。
 
+## 产品定版（2026-09-05，用户拍板）
+
+- **自动转正式**：梦境提取不再走候选区——结果直接写成 `status: active`、`privacy: normal`、`pinned: true` 的正式记忆，立即可被 search/capsule 召回，无需用户手动确认。证据落地（append-origin direct-human + 精确 quote）、secret fail-closed、同 key 去重、tombstone 屏障保留为护栏；`memory_update` 的 revision+hash 双 CAS 仍是修订防线。
+- **提取模型可选**：`config.yaml` 新增 `dream_model_provider`/`dream_model`/`dream_effort`（空串跟随默认模型）；设置页概览新增「提取模型/推理强度」两个选择器（`models()` Remote 列全供应商模型与路由声明的强度档位，选择经 config hash CAS 持久化）。配置的强度档位在运行时对照路由声明校验，未知档位回退路由默认。
+- 审计/摘要字段 `candidatesCreated/candidatesRejected` 更名 `memoriesCreated/memoriesRejected`；UI 文案同步（新增记忆/跳过条目）。
+- 每日时间本就可在设置页修改（`omm-time` 输入框 + config CAS）。
+
 ## 发布前加固（host 审查驱动）
 
 终审在可运行组合上复现了一组跨进程与竞态缺陷，全部在本轮修复并配回归测试：

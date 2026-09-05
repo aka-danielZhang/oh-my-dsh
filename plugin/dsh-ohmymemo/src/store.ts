@@ -102,7 +102,7 @@ export interface CreateCandidateInput extends CreateInput {
 /** CAS-protected mutation of the user-editable store policy. */
 export interface UpdateConfigInput {
   ifHash: string
-  patch: Partial<Pick<StoreUserConfig, 'allow_inference_candidates' | 'dream_schedule_local_time'>>
+  patch: Partial<Pick<StoreUserConfig, 'allow_inference_candidates' | 'dream_schedule_local_time' | 'dream_model_provider' | 'dream_model' | 'dream_effort'>>
 }
 
 /** Immutable config view paired with the current file hash. */

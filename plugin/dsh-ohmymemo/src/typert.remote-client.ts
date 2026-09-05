@@ -3,6 +3,7 @@
 import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
 import {
   cancelRunResultSchema,
+  dreamModelsSchema,
   memoryDocumentSchema,
   memoryOverviewSchema,
   memoryTreeSchema,
@@ -10,6 +11,7 @@ import {
   runNowResultSchema,
   updateDreamSettingsRequestSchema,
   type CancelRunResult,
+  type DreamModelsSnapshot,
   type MemoryDocument,
   type MemoryOverview,
   type MemoryTreeSnapshot,
@@ -22,6 +24,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$6f684d794d656d6f5569 {
     overview: () => Promise<RemoteResult<MemoryOverview>>
     updateDreamSettings: (request: UpdateDreamSettingsRequest) => Promise<RemoteResult<MemoryOverview>>
+    models: () => Promise<RemoteResult<DreamModelsSnapshot>>
     tree: () => Promise<RemoteResult<MemoryTreeSnapshot>>
     read: (request: ReadMemoryFileRequest) => Promise<RemoteResult<MemoryDocument>>
     runNow: () => Promise<RemoteResult<RunNowResult>>
@@ -30,6 +33,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteMap {
     'ohMyMemoUi/overview': () => Promise<RemoteResult<MemoryOverview>>
     'ohMyMemoUi/updateDreamSettings': (request: UpdateDreamSettingsRequest) => Promise<RemoteResult<MemoryOverview>>
+    'ohMyMemoUi/models': () => Promise<RemoteResult<DreamModelsSnapshot>>
     'ohMyMemoUi/tree': () => Promise<RemoteResult<MemoryTreeSnapshot>>
     'ohMyMemoUi/read': (request: ReadMemoryFileRequest) => Promise<RemoteResult<MemoryDocument>>
     'ohMyMemoUi/runNow': () => Promise<RemoteResult<RunNowResult>>
@@ -60,39 +64,45 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
       id: 'dsh-ohmymemo#ohMyMemoUi/overview', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'overview',
       invocation: direct, parameters: noParameters,
       result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#MemoryOverview', schema: memoryOverviewSchema },
-      sourceLocation: { file: 'src/manager.ts', line: 187, column: 3 },
+      sourceLocation: { file: 'src/manager.ts', line: 192, column: 3 },
     },
     {
       id: 'dsh-ohmymemo#ohMyMemoUi/updateDreamSettings', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'updateDreamSettings',
       invocation: direct,
       parameters: parameter('request', updateDreamSettingsRequestSchema, 'dsh-ohmymemo/manager-contract#UpdateDreamSettingsRequest'),
       result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#MemoryOverview', schema: memoryOverviewSchema },
-      sourceLocation: { file: 'src/manager.ts', line: 216, column: 3 },
+      sourceLocation: { file: 'src/manager.ts', line: 225, column: 3 },
+    },
+    {
+      id: 'dsh-ohmymemo#ohMyMemoUi/models', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'models',
+      invocation: direct, parameters: noParameters,
+      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#DreamModelsSnapshot', schema: dreamModelsSchema },
+      sourceLocation: { file: 'src/manager.ts', line: 242, column: 3 },
     },
     {
       id: 'dsh-ohmymemo#ohMyMemoUi/tree', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'tree',
       invocation: direct, parameters: noParameters,
       result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#MemoryTreeSnapshot', schema: memoryTreeSchema },
-      sourceLocation: { file: 'src/manager.ts', line: 230, column: 3 },
+      sourceLocation: { file: 'src/manager.ts', line: 278, column: 3 },
     },
     {
       id: 'dsh-ohmymemo#ohMyMemoUi/read', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'read',
       invocation: direct,
       parameters: parameter('request', readMemoryFileRequestSchema, 'dsh-ohmymemo/manager-contract#ReadMemoryFileRequest'),
       result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#MemoryDocument', schema: memoryDocumentSchema },
-      sourceLocation: { file: 'src/manager.ts', line: 235, column: 3 },
+      sourceLocation: { file: 'src/manager.ts', line: 283, column: 3 },
     },
     {
       id: 'dsh-ohmymemo#ohMyMemoUi/runNow', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'runNow',
       invocation: direct, parameters: noParameters,
       result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#RunNowResult', schema: runNowResultSchema },
-      sourceLocation: { file: 'src/manager.ts', line: 243, column: 3 },
+      sourceLocation: { file: 'src/manager.ts', line: 291, column: 3 },
     },
     {
       id: 'dsh-ohmymemo#ohMyMemoUi/cancelRun', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'cancelRun',
       invocation: direct, parameters: noParameters,
       result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#CancelRunResult', schema: cancelRunResultSchema },
-      sourceLocation: { file: 'src/manager.ts', line: 257, column: 3 },
+      sourceLocation: { file: 'src/manager.ts', line: 305, column: 3 },
     },
   ],
 }

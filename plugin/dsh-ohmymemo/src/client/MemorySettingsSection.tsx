@@ -18,7 +18,7 @@ import {
   type MarkdownLabels,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { DreamRunStatus, MemoryDocument, MemoryOverview, MemoryTreeSnapshot } from '../manager-contract.ts'
+import type { DreamModelsSnapshot, DreamRunStatus, MemoryDocument, MemoryOverview, MemoryTreeSnapshot } from '../manager-contract.ts'
 import type { MemorySettingsController } from './controller.ts'
 import { buildMemoryTree, type MemoryTreeNode } from './tree.ts'
 import type { MemoryLocaleKey } from './locales.ts'
@@ -103,6 +103,7 @@ export function MemorySettingsSection(props: MemorySettingsSectionProps): React.
         {state.overview !== null && tab === 'overview' && (
           <Overview
             overview={state.overview}
+            models={state.models}
             operation={state.operation}
             t={props.t}
             onSettings={patch => { void props.controller.updateSettings(patch) }}
@@ -136,15 +137,19 @@ function LoadingState(props: { t: (key: MemoryLocaleKey) => string }): React.Rea
 
 function Overview(props: {
   overview: MemoryOverview
+  models: DreamModelsSnapshot | null
   operation: string | null
   t: (key: MemoryLocaleKey) => string
-  onSettings(patch: { enabled?: boolean; scheduleLocalTime?: string }): void
+  onSettings(patch: { enabled?: boolean; scheduleLocalTime?: string; modelProvider?: string; model?: string; effort?: string }): void
   onRun(): void
   onCancel(): void
 }): React.ReactElement {
   const { overview, t } = props
   const busy = props.operation !== null
   const running = overview.dream.status === 'running'
+  const models = props.models
+  const currentModelKey = models === null ? 'default' : models.currentModelKey
+  const currentEffortKey = models === null ? 'default' : models.currentEffortKey
   return (
     <div>
       <section className="omm-band">
@@ -180,6 +185,41 @@ function Overview(props: {
                 }
               }}
             />
+          </label>
+          <label className="omm-field">
+            <span>{t('extractModel')}</span>
+            <select
+              className="omm-select"
+              value={currentModelKey}
+              disabled={busy || models === null || models.options.length === 0}
+              onChange={(event) => {
+                const key = event.currentTarget.value
+                if (key === 'default') {
+                  props.onSettings({ modelProvider: '', model: '' })
+                } else {
+                  const at = key.indexOf('/')
+                  if (at > 0) props.onSettings({ modelProvider: key.slice(0, at), model: key.slice(at + 1) })
+                }
+              }}
+            >
+              {(models?.options ?? []).map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
+            </select>
+          </label>
+          <label className="omm-field" title={models !== null && models.efforts.length <= 1 ? t('noEffortLevels') : undefined}>
+            <span>{t('extractEffort')}</span>
+            <select
+              className="omm-select"
+              value={currentEffortKey}
+              disabled={busy || models === null || models.efforts.length <= 1}
+              onChange={(event) => {
+                const key = event.currentTarget.value
+                props.onSettings({ effort: key === 'default' ? '' : key })
+              }}
+            >
+              {(models?.efforts ?? []).map(option => (
+                <option key={option.key} value={option.key}>{option.key === 'default' ? t('followDefault') : option.label}</option>
+              ))}
+            </select>
           </label>
           <div className="omm-actions">
             {running ? (
@@ -217,8 +257,8 @@ function Overview(props: {
           <div>
             <div className="omm-last-result">
               <ResultMetric label={t('sourceMessages')} value={overview.dream.lastResult.sourceMessages} />
-              <ResultMetric label={t('candidatesCreated')} value={overview.dream.lastResult.candidatesCreated} />
-              <ResultMetric label={t('candidatesRejected')} value={overview.dream.lastResult.candidatesRejected} />
+              <ResultMetric label={t('memoriesCreated')} value={overview.dream.lastResult.memoriesCreated} />
+              <ResultMetric label={t('memoriesRejected')} value={overview.dream.lastResult.memoriesRejected} />
             </div>
             {overview.dream.lastResult.detail !== null && <div className="omm-diagnostic">{overview.dream.lastResult.detail}</div>}
           </div>

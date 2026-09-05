@@ -3,6 +3,7 @@
 import { createSnapshotStore, type SnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { RemoteResult, TypertRemoteNamespaceMap } from '@deepseek-ai/dsh-typert-protocol'
 import type {
+  DreamModelsSnapshot,
   MemoryDocument,
   MemoryOverview,
   MemoryTreeSnapshot,
@@ -16,6 +17,7 @@ export interface MemorySettingsState {
   tree: MemoryTreeSnapshot | null
   document: MemoryDocument | null
   documentPath: string | null
+  models: DreamModelsSnapshot | null
   error: string | null
   notice: 'disabled' | 'already-running' | 'cancelled' | null
 }
@@ -31,6 +33,7 @@ export class MemorySettingsController {
     tree: null,
     document: null,
     documentPath: null,
+    models: null,
     error: null,
     notice: null,
   })
@@ -70,9 +73,10 @@ export class MemorySettingsController {
       state.error = null
     })
     try {
-      const [overview, tree] = await Promise.all([
+      const [overview, tree, models] = await Promise.all([
         unwrap(this.remote.overview()),
         unwrap(this.remote.tree()),
+        this.remote.models().then(result => (result.ok ? result.value : null), () => null),
       ])
       if (!this.isCurrent(generation)) return
       this.store.update((state) => {
@@ -87,6 +91,7 @@ export class MemorySettingsController {
         state.operation = null
         state.overview = overview
         state.tree = tree
+        if (models !== null) state.models = models
         state.error = null
       })
     } catch (error) {

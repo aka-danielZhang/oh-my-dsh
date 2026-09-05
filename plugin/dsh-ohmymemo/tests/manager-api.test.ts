@@ -16,7 +16,7 @@ test('manager config owns bounded defaults and rejects invalid tunables', () => 
 })
 
 test('Typert contributions cover every Memory Remote operation', () => {
-  const methods = ['cancelRun', 'overview', 'read', 'runNow', 'tree', 'updateDreamSettings']
+  const methods = ['cancelRun', 'models', 'overview', 'read', 'runNow', 'tree', 'updateDreamSettings']
   assert.deepEqual(TYPERT_REMOTE.descriptors.map(descriptor => descriptor.method).sort(), methods)
   assert.deepEqual(TYPERT_HOST.invocations.map(descriptor => descriptor.method).sort(), methods)
   assert.equal(TYPERT_HOST.face, 'host')
@@ -181,8 +181,8 @@ test('finishRun honouring a late cancellation never advances cursors or the boun
       agentSessionId: null,
       promptHash: null,
       sourceSessions: [{ sessionId: 's-new', capturedThroughSeq: 5, messageCount: 2 }],
-      candidatesCreated: ['mem_new1'],
-      candidatesRejected: 0,
+      memoriesCreated: ['mem_new1'],
+      memoriesRejected: 0,
       cursors: { 's-new': 5 },
     },
     sourceMessages: 2,
@@ -206,7 +206,14 @@ test('dream setting wire input is strict and requires at least one change', () =
     ifRevision: 'sha256:x',
     enabled: true,
   })
+  assert.deepEqual(updateDreamSettingsRequestSchema.parse({ ifRevision: 'sha256:x', modelProvider: 'zai', model: 'glm-5.3-flash', effort: 'high' }), {
+    ifRevision: 'sha256:x',
+    modelProvider: 'zai',
+    model: 'glm-5.3-flash',
+    effort: 'high',
+  })
   assert.throws(() => updateDreamSettingsRequestSchema.parse({ ifRevision: 'sha256:x' }))
   assert.throws(() => updateDreamSettingsRequestSchema.parse({ ifRevision: 'sha256:x', scheduleLocalTime: '27:00' }))
+  assert.throws(() => updateDreamSettingsRequestSchema.parse({ ifRevision: 'sha256:x', modelProvider: '' }))
   assert.throws(() => updateDreamSettingsRequestSchema.parse({ ifRevision: 'sha256:x', enabled: true, extra: 1 }))
 })

@@ -30,6 +30,9 @@ export const MEMORY_SETTINGS_CSS = `
 .omm-controls{display:grid;grid-template-columns:minmax(160px,220px) minmax(0,1fr);align-items:end;gap:16px;margin-bottom:14px;}
 .omm-field{display:flex;min-width:0;flex-direction:column;gap:5px;color:var(--dsw-alias-label-tertiary);font-size:12px;}
 .omm-time{box-sizing:border-box;width:100%;height:34px;padding:0 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;color-scheme:light dark;}
+.omm-select{box-sizing:border-box;width:100%;height:34px;padding:0 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;color-scheme:light dark;}
+.omm-select:focus{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px;}
+.omm-select:disabled{opacity:.55;}
 .omm-time:focus{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px;}
 .omm-time:disabled{opacity:.55;}
 .omm-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-height:34px;}

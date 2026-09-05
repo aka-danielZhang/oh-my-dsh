@@ -17,8 +17,8 @@ export const dreamRunSummarySchema = z.object({
   status: z.enum(['success', 'error', 'cancelled']),
   sourceSessions: z.number().int().nonnegative(),
   sourceMessages: z.number().int().nonnegative(),
-  candidatesCreated: z.number().int().nonnegative(),
-  candidatesRejected: z.number().int().nonnegative(),
+  memoriesCreated: z.number().int().nonnegative(),
+  memoriesRejected: z.number().int().nonnegative(),
   detail: z.string().nullable(),
 }).strict()
 export type DreamRunSummary = z.infer<typeof dreamRunSummarySchema>
@@ -56,8 +56,8 @@ export const dreamRunAuditSchema = z.object({
     capturedThroughSeq: z.number().int().nonnegative().nullable(),
     messageCount: z.number().int().nonnegative(),
   }).strict()),
-  candidatesCreated: z.array(z.string()),
-  candidatesRejected: z.number().int().nonnegative(),
+  memoriesCreated: z.array(z.string()),
+  memoriesRejected: z.number().int().nonnegative(),
   detail: z.string().nullable(),
 }).strict()
 export type DreamRunAudit = z.infer<typeof dreamRunAuditSchema>
@@ -111,6 +111,10 @@ export const memoryOverviewSchema = z.object({
     enabled: z.boolean(),
     scheduleLocalTime: z.string(),
     timeZone: z.string(),
+    /** Effective extraction route: config override, else the harness default. */
+    modelProvider: z.string(),
+    model: z.string(),
+    effort: z.string(),
     status: dreamRunStatusSchema,
     activeJobId: z.string().nullable(),
     lastAttemptAt: z.number().nullable(),
@@ -142,10 +146,32 @@ export const updateDreamSettingsRequestSchema = z.object({
   ifRevision: z.string(),
   enabled: z.boolean().optional(),
   scheduleLocalTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u).optional(),
-}).strict().refine(value => value.enabled !== undefined || value.scheduleLocalTime !== undefined, {
+  modelProvider: z.string().min(1).max(200).optional(),
+  model: z.string().min(1).max(200).optional(),
+  effort: z.string().min(1).max(200).optional(),
+}).strict().refine(value =>
+  value.enabled !== undefined
+  || value.scheduleLocalTime !== undefined
+  || value.modelProvider !== undefined
+  || value.model !== undefined
+  || value.effort !== undefined, {
   message: 'at least one dream setting is required',
 })
 export type UpdateDreamSettingsRequest = z.infer<typeof updateDreamSettingsRequestSchema>
+
+/** Model/effort picker catalog for the dream-extraction route. */
+export const dreamModelsSchema = z.object({
+  /** Harness default route used when no override is configured. */
+  defaultRoute: z.object({ provider: z.string(), model: z.string() }).strict(),
+  /** Selectable routes; `default` follows {@link defaultRoute}, others are `provider/model`. */
+  options: z.array(z.object({ key: z.string(), label: z.string() }).strict()),
+  /** Efforts the effective route exposes; `default` follows the route default. */
+  efforts: z.array(z.object({ key: z.string(), label: z.string() }).strict()),
+  /** Current picker keys: `default` or an exact option/effort key. */
+  currentModelKey: z.string(),
+  currentEffortKey: z.string(),
+}).strict()
+export type DreamModelsSnapshot = z.infer<typeof dreamModelsSchema>
 
 export const readMemoryFileRequestSchema = z.object({
   path: z.string().min(1),

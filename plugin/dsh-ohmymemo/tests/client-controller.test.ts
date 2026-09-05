@@ -9,6 +9,9 @@ const overview: MemoryOverview = {
   dream: {
     enabled: true,
     scheduleLocalTime: '02:00',
+    modelProvider: 'p',
+    model: 'm',
+    effort: '',
     timeZone: 'Asia/Shanghai',
     status: 'idle',
     activeJobId: null,
@@ -38,11 +41,20 @@ const document: MemoryDocument = {
   meta: {},
 }
 
+const modelsCatalog = {
+  defaultRoute: { provider: 'p', model: 'm' },
+  options: [{ key: 'default', label: '跟随默认模型（p / m）' }],
+  efforts: [{ key: 'default', label: '跟随默认' }],
+  currentModelKey: 'default',
+  currentEffortKey: 'default',
+}
+
 function remote(overrides: Partial<TypertRemoteNamespaceMap['ohMyMemoUi']> = {}): TypertRemoteNamespaceMap['ohMyMemoUi'] {
   return {
     overview: async () => ({ ok: true, value: overview }),
     tree: async () => ({ ok: true, value: tree }),
     read: async () => ({ ok: true, value: document }),
+    models: async () => ({ ok: true, value: modelsCatalog }),
     updateDreamSettings: async () => ({ ok: true, value: { ...overview, configRevision: 'sha256:next' } }),
     runNow: async () => ({ ok: true, value: { started: true, jobId: 'job-dream-run' } }),
     cancelRun: async () => ({ ok: true, value: { cancelled: true } }),

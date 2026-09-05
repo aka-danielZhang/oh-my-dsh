@@ -193,6 +193,20 @@ test('scope file round-trips', () => {
   assert.equal(parseScopeFile('id: ws_x\n').scope, undefined)
 })
 
+test('dream model config fields round-trip and default to follow-default', () => {
+  assert.equal(defaultStoreConfig().dream_model_provider, '')
+  assert.equal(defaultStoreConfig().dream_model, '')
+  assert.equal(defaultStoreConfig().dream_effort, '')
+  const parsed = parseStoreConfig(serializeStoreConfig({ ...defaultStoreConfig(), dream_model_provider: 'zai', dream_model: 'glm-5.3-flash', dream_effort: 'high' }))
+  assert.deepEqual(parsed.issues, [])
+  assert.equal(parsed.config.dream_model_provider, 'zai')
+  assert.equal(parsed.config.dream_model, 'glm-5.3-flash')
+  assert.equal(parsed.config.dream_effort, 'high')
+  const fallen = parseStoreConfig(serializeStoreConfig(defaultStoreConfig()).replace('dream_model: ""', 'dream_model: 42'))
+  assert.equal(fallen.config.dream_model, '')
+  assert.ok(fallen.issues.some(issue => issue.field === 'dream_model'))
+})
+
 test('store config falls back per-field on invalid values and warns on unknown fields', () => {
   const text = ['schema: ohmymemo-config/v1', 'max_record_bytes: banana', 'dream_schedule_local_time: 27:90', 'future_knob: yes', 'watch: false'].join('\n')
   const { config, issues } = parseStoreConfig(text)
