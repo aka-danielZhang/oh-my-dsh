@@ -38,6 +38,10 @@
         "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-client-ui-settings"
       ]
+    },
+    "desktop": {
+      "ship": true,
+      "pin": "0.1.0"
     }
   },
   "scripts": {
