@@ -201,6 +201,35 @@ test('finishRun honouring a late cancellation never advances cursors or the boun
   assert.equal(next.lastSuccessAt, undefined)
 })
 
+test('legacy persisted run state without items migrates to an empty list', () => {
+  const legacy = {
+    version: 1,
+    status: 'error',
+    activeRunId: null,
+    activeJobId: null,
+    activeTrigger: null,
+    lastAttemptAt: 1,
+    lastSuccessAt: null,
+    lastScheduledFor: null,
+    nextRunAt: null,
+    lastResult: {
+      runId: 'dream-old',
+      trigger: 'scheduled',
+      startedAt: 1,
+      finishedAt: 2,
+      status: 'error',
+      sourceSessions: 0,
+      sourceMessages: 0,
+      memoriesCreated: 0,
+      memoriesRejected: 1,
+      detail: 'written before items existed',
+    },
+    cursors: {},
+  }
+  const parsed = dreamRuntimeStateSchema.parse(legacy)
+  assert.deepEqual(parsed.lastResult?.items, [], 'old record boots with an empty item list')
+})
+
 test('dream setting wire input is strict and requires at least one change', () => {
   assert.deepEqual(updateDreamSettingsRequestSchema.parse({ ifRevision: 'sha256:x', enabled: true }), {
     ifRevision: 'sha256:x',

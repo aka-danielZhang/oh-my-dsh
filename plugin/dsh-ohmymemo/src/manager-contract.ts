@@ -19,12 +19,14 @@ export const dreamRunSummarySchema = z.object({
   sourceMessages: z.number().int().nonnegative(),
   memoriesCreated: z.number().int().nonnegative(),
   memoriesRejected: z.number().int().nonnegative(),
-  /** Bounded copy of what this run created, for the UI result card. */
+  /** Bounded copy of what this run created, for the UI result card. Older
+   *  persisted runs predate the field; they default to an empty list so a
+   *  stored record never blocks boot after an upgrade. */
   items: z.array(z.object({
     key: z.string(),
     kind: z.enum(['semantic', 'episodic', 'procedural']),
     content: z.string(),
-  }).strict()),
+  }).strict()).default([]),
   detail: z.string().nullable(),
 }).strict()
 export type DreamRunSummary = z.infer<typeof dreamRunSummarySchema>
