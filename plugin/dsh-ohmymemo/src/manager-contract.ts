@@ -19,6 +19,12 @@ export const dreamRunSummarySchema = z.object({
   sourceMessages: z.number().int().nonnegative(),
   memoriesCreated: z.number().int().nonnegative(),
   memoriesRejected: z.number().int().nonnegative(),
+  /** Bounded copy of what this run created, for the UI result card. */
+  items: z.array(z.object({
+    key: z.string(),
+    kind: z.enum(['semantic', 'episodic', 'procedural']),
+    content: z.string(),
+  }).strict()),
   detail: z.string().nullable(),
 }).strict()
 export type DreamRunSummary = z.infer<typeof dreamRunSummarySchema>

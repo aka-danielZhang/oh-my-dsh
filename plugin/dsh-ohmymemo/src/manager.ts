@@ -120,6 +120,7 @@ interface RunProgress {
   sourceSessions: DreamRunAudit['sourceSessions']
   memoriesCreated: string[]
   memoriesRejected: number
+  items: DreamRunSummary['items']
   cursors: Record<string, number>
 }
 
@@ -634,6 +635,7 @@ export class OhMyMemoManager extends TypertRemoteService {
               }],
             })
             progress.memoriesCreated.push(created.id)
+            progress.items.push({ key: proposal.key, kind: proposal.kind, content: proposal.content })
           } catch (error) {
             if (!isMemoryPolicyRefusal(error)) throw error
             progress.memoriesRejected += 1
@@ -700,6 +702,7 @@ export class OhMyMemoManager extends TypertRemoteService {
       sourceMessages: result.sourceMessages,
       memoriesCreated: result.progress.memoriesCreated.length,
       memoriesRejected: result.progress.memoriesRejected,
+      items: cancelled ? [] : result.progress.items,
       detail: cancelled ? 'cancelled before commit' : null,
     }
     await this.persistAudit(auditFrom(request, result.progress, summary))
@@ -751,6 +754,7 @@ export class OhMyMemoManager extends TypertRemoteService {
       sourceMessages,
       memoriesCreated: progress.memoriesCreated.length,
       memoriesRejected: progress.memoriesRejected,
+      items: [],
       detail,
     }
     await this.persistAudit(auditFrom(request, progress, summary))
@@ -837,6 +841,7 @@ export class OhMyMemoManager extends TypertRemoteService {
       sourceMessages: 0,
       memoriesCreated: 0,
       memoriesRejected: 0,
+      items: [],
       detail: 'previous process ended before the dream-memory run settled',
     }
     await this.replaceState({
@@ -908,6 +913,7 @@ function emptyProgress(): RunProgress {
     sourceSessions: [],
     memoriesCreated: [],
     memoriesRejected: 0,
+    items: [],
     cursors: {},
   }
 }

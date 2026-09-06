@@ -3,6 +3,8 @@
 import React from 'react'
 import {
   Button,
+  IconCheckOutline16,
+  IconChevronDownOutline14,
   IconChevronLeftOutline14,
   IconChevronRightOutline14,
   IconDatabaseOutline16,
@@ -135,6 +137,104 @@ function LoadingState(props: { t: (key: MemoryLocaleKey) => string }): React.Rea
   )
 }
 
+function ModelPicker(props: {
+  value: string
+  modelLabel: string
+  effortLabel: string | null
+  groups: Array<{ name: string; options: Array<{ key: string; name: string; label: string }> }>
+  efforts: Array<{ key: string; label: string }>
+  effortValue: string
+  disabled: boolean
+  onPickModel(key: string): void
+  onPickEffort(key: string): void
+  t: (key: MemoryLocaleKey) => string
+}): React.ReactElement {
+  const [open, setOpen] = React.useState(false)
+  const [pane, setPane] = React.useState<'root' | 'model' | 'effort'>('root')
+  const close = (): void => { setOpen(false); setPane('root') }
+  const modelPane = (
+    <div className="omm-ms-groups">
+      {props.groups.length === 0
+        ? <div className="omm-ms-empty">{props.t('noModels')}</div>
+        : props.groups.map(group => (
+          <section key={group.name} className="omm-ms-group">
+            <div className="omm-ms-group-title">{group.name}</div>
+            {group.options.map(option => (
+              <button
+                key={option.key}
+                type="button"
+                className="omm-ms-option"
+                role="menuitemradio"
+                aria-checked={option.key === props.value}
+                title={option.label}
+                onClick={() => { close(); props.onPickModel(option.key) }}
+              >
+                <span className="omm-ms-option-copy"><span className="omm-ms-option-name">{option.name}</span></span>
+                {option.key === props.value ? <span className="omm-ms-check"><IconCheckOutline16 /></span> : null}
+              </button>
+            ))}
+          </section>
+        ))}
+    </div>
+  )
+  const effortPane = (
+    <div className="omm-ms-groups">
+      {props.efforts.map(option => (
+        <button
+          key={option.key}
+          type="button"
+          className="omm-ms-option"
+          role="menuitemradio"
+          aria-checked={option.key === props.effortValue}
+          onClick={() => { close(); props.onPickEffort(option.key) }}
+        >
+          <span className="omm-ms-option-copy">
+            <span className="omm-ms-option-name">{option.key === 'default' ? props.t('followDefault') : option.label}</span>
+          </span>
+          {option.key === props.effortValue ? <span className="omm-ms-check"><IconCheckOutline16 /></span> : null}
+        </button>
+      ))}
+      {props.efforts.length <= 1 ? <div className="omm-ms-empty">{props.t('noEffortLevels')}</div> : null}
+    </div>
+  )
+  return (
+    <div className="omm-ms">
+      <button
+        type="button"
+        className="omm-ms-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={props.disabled}
+        title={props.modelLabel + (props.effortLabel === null ? '' : ` · ${props.effortLabel}`)}
+        onClick={() => { if (open) close(); else { setPane('root'); setOpen(true) } }}
+      >
+        <span className="omm-ms-label">{props.modelLabel}</span>
+        {props.effortLabel === null ? null : <span className="omm-ms-effort">· {props.effortLabel}</span>}
+        <IconChevronDownOutline14 className={open ? 'omm-ms-caret omm-ms-caret-open' : 'omm-ms-caret'} />
+      </button>
+      {open ? <div className="omm-ms-backdrop" onClick={close} /> : null}
+      {open ? (
+        <div className="omm-ms-menu" role="menu">
+          {pane === 'root' ? (
+            <>
+              <button type="button" className="omm-ms-cell" role="menuitem" onClick={() => { setPane('model') }}>
+                <span className="omm-ms-cell-label">{props.t('extractModel')}</span>
+                <span className="omm-ms-cell-value">{props.modelLabel}</span>
+                <IconChevronRightOutline14 className="omm-ms-cell-chevron" />
+              </button>
+              <button type="button" className="omm-ms-cell" role="menuitem" onClick={() => { setPane('effort') }}>
+                <span className="omm-ms-cell-label">{props.t('extractEffort')}</span>
+                <span className="omm-ms-cell-value">{props.effortLabel === null ? props.t('followDefault') : props.effortLabel}</span>
+                <IconChevronRightOutline14 className="omm-ms-cell-chevron" />
+              </button>
+            </>
+          ) : pane === 'model' ? modelPane : effortPane}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function Overview(props: {
   overview: MemoryOverview
   models: DreamModelsSnapshot | null
@@ -150,78 +250,88 @@ function Overview(props: {
   const models = props.models
   const currentModelKey = models === null ? 'default' : models.currentModelKey
   const currentEffortKey = models === null ? 'default' : models.currentEffortKey
+  const modelLabel = models === null
+    ? t('followDefault')
+    : (models.options.find(option => option.key === currentModelKey)?.label ?? t('followDefault'))
+  const effortEntry = models === null ? undefined : models.efforts.find(option => option.key === currentEffortKey)
+  const effortLabel = currentEffortKey === 'default' ? null : (effortEntry?.label ?? currentEffortKey)
+  const groupsMap = new Map<string, Array<{ key: string; name: string; label: string }>>()
+  for (const option of models?.options ?? []) {
+    const at = option.key.indexOf('/')
+    const groupName = at > 0 ? option.key.slice(0, at) : t('defaultGroup')
+    if (!groupsMap.has(groupName)) groupsMap.set(groupName, [])
+    groupsMap.get(groupName)!.push({
+      key: option.key,
+      name: at > 0 ? option.label.slice(groupName.length + 3) : option.label,
+      label: option.label,
+    })
+  }
+  const groups = [...groupsMap.entries()].map(([name, options]) => ({ name, options }))
+  const lastResult = overview.dream.lastResult
   return (
-    <div>
-      <section className="omm-band">
-        <div className="omm-band-head">
-          <h3 className="omm-band-title">
-            <IconSparkle16 />
-            <strong>{t('dreamTitle')}</strong>
-          </h3>
-          <div className="omm-header-actions">
-            <span className="omm-state-label">{overview.dream.enabled ? t('dreamEnabled') : t('dreamDisabled')}</span>
-            <button
-              className="omm-switch"
-              type="button"
-              role="switch"
-              aria-label={t('toggleDream')}
-              aria-checked={overview.dream.enabled}
-              disabled={busy}
-              onClick={() => { props.onSettings({ enabled: !overview.dream.enabled }) }}
-            />
+    <div className="omm-cards">
+      <section className="omm-card">
+        <div className="omm-card-head">
+          <div className="omm-card-text">
+            <span className="omm-card-name"><IconSparkle16 />{t('dreamTitle')}</span>
+            <span className="omm-card-desc">{overview.dream.enabled ? t('dreamCardOn') : t('dreamCardOff')}</span>
           </div>
+          <button
+            className="omm-switch"
+            type="button"
+            role="switch"
+            aria-label={t('toggleDream')}
+            aria-checked={overview.dream.enabled}
+            disabled={busy}
+            onClick={() => { props.onSettings({ enabled: !overview.dream.enabled }) }}
+          />
         </div>
-        <div className="omm-controls">
-          <label className="omm-field">
-            <span>{t('scheduleTime')}</span>
-            <input
-              className="omm-time"
-              type="time"
-              value={overview.dream.scheduleLocalTime}
-              disabled={busy}
-              onChange={(event) => {
-                if (/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(event.currentTarget.value)) {
-                  props.onSettings({ scheduleLocalTime: event.currentTarget.value })
-                }
-              }}
-            />
-          </label>
-          <label className="omm-field">
-            <span>{t('extractModel')}</span>
-            <select
-              className="omm-select"
-              value={currentModelKey}
-              disabled={busy || models === null || models.options.length === 0}
-              onChange={(event) => {
-                const key = event.currentTarget.value
-                if (key === 'default') {
-                  props.onSettings({ modelProvider: '', model: '' })
-                } else {
-                  const at = key.indexOf('/')
-                  if (at > 0) props.onSettings({ modelProvider: key.slice(0, at), model: key.slice(at + 1) })
-                }
-              }}
-            >
-              {(models?.options ?? []).map(option => <option key={option.key} value={option.key}>{option.label}</option>)}
-            </select>
-          </label>
-          <label className="omm-field" title={models !== null && models.efforts.length <= 1 ? t('noEffortLevels') : undefined}>
-            <span>{t('extractEffort')}</span>
-            <select
-              className="omm-select"
-              value={currentEffortKey}
-              disabled={busy || models === null || models.efforts.length <= 1}
-              onChange={(event) => {
-                const key = event.currentTarget.value
-                props.onSettings({ effort: key === 'default' ? '' : key })
-              }}
-            >
-              {(models?.efforts ?? []).map(option => (
-                <option key={option.key} value={option.key}>{option.key === 'default' ? t('followDefault') : option.label}</option>
-              ))}
-            </select>
-          </label>
-          <div className="omm-actions">
+        <div className="omm-card-body">
+          <div className="omm-rows">
+            <span className="omm-k">{t('scheduleTime')}</span>
+            <div className="omm-v omm-time-row">
+              <input
+                className="omm-time"
+                type="time"
+                value={overview.dream.scheduleLocalTime}
+                disabled={busy}
+                onChange={(event) => {
+                  if (/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(event.currentTarget.value)) {
+                    props.onSettings({ scheduleLocalTime: event.currentTarget.value })
+                  }
+                }}
+              />
+              <span className="omm-k">{overview.dream.timeZone}</span>
+            </div>
+            <span className="omm-k">{t('extractModel')}</span>
+            <div className="omm-v">
+              <ModelPicker
+                value={currentModelKey}
+                modelLabel={modelLabel}
+                effortLabel={effortLabel}
+                groups={groups}
+                efforts={models?.efforts ?? []}
+                effortValue={currentEffortKey}
+                disabled={busy || models === null || models.options.length === 0}
+                onPickModel={(key) => {
+                  if (key === 'default') props.onSettings({ modelProvider: '', model: '' })
+                  else {
+                    const at = key.indexOf('/')
+                    if (at > 0) props.onSettings({ modelProvider: key.slice(0, at), model: key.slice(at + 1) })
+                  }
+                }}
+                onPickEffort={(key) => { props.onSettings({ effort: key === 'default' ? '' : key }) }}
+                t={t}
+              />
+            </div>
+          </div>
+          <div className="omm-run-meta">
+            {t('status')} {t(statusKey(overview.dream.status))}
+            {' · '}{t('lastRun')} {formatDate(overview.dream.lastAttemptAt, t)}
+            {' · '}{t('nextRun')} {formatDate(overview.dream.nextRunAt, t)}
+            {' · '}{t('lastSuccess')} {formatDate(overview.dream.lastSuccessAt, t)}
+          </div>
+          <div className="omm-card-actions">
             {running ? (
               <Button
                 variant="outline"
@@ -245,58 +355,60 @@ function Overview(props: {
             )}
           </div>
         </div>
-        <div className="omm-grid">
-          <Fact label={t('status')} value={t(statusKey(overview.dream.status))} />
-          <Fact label={t('lastRun')} value={formatDate(overview.dream.lastAttemptAt, t)} />
-          <Fact label={t('nextRun')} value={formatDate(overview.dream.nextRunAt, t)} />
-          <Fact label={t('lastSuccess')} value={formatDate(overview.dream.lastSuccessAt, t)} />
-          <Fact label={t('scheduleTime')} value={overview.dream.scheduleLocalTime} />
-          <Fact label={t('hostTimeZone')} value={overview.dream.timeZone} />
-        </div>
-        {overview.dream.lastResult !== null && (
-          <div>
-            <div className="omm-last-result">
-              <ResultMetric label={t('sourceMessages')} value={overview.dream.lastResult.sourceMessages} />
-              <ResultMetric label={t('memoriesCreated')} value={overview.dream.lastResult.memoriesCreated} />
-              <ResultMetric label={t('memoriesRejected')} value={overview.dream.lastResult.memoriesRejected} />
-            </div>
-            {overview.dream.lastResult.detail !== null && <div className="omm-diagnostic">{overview.dream.lastResult.detail}</div>}
-          </div>
-        )}
       </section>
-      <section className="omm-band">
-        <div className="omm-band-head">
-          <h3 className="omm-band-title">
-            <IconDatabaseOutline16 />
-            <strong>{t('inventoryTitle')}</strong>
-          </h3>
+
+      {lastResult !== null && (
+        <section className="omm-card">
+          <div className="omm-card-head">
+            <div className="omm-card-text">
+              <span className="omm-card-name"><IconDatabaseOutline16 />{t('lastRunTitle')}</span>
+              <span className="omm-card-desc">
+                {`${t('sourceMessages')} ${lastResult.sourceMessages} · ${t('memoriesCreated')} ${lastResult.memoriesCreated} · ${t('memoriesRejected')} ${lastResult.memoriesRejected}`}
+              </span>
+            </div>
+          </div>
+          {lastResult.items.length > 0 && (
+            <div className="omm-card-body">
+              <ul className="omm-result-list">
+                {lastResult.items.map((item, index) => (
+                  <li key={index} className="omm-result-item">
+                    <span className="omm-result-content">{item.content}</span>
+                    <span className="omm-result-key">{item.key} · {item.kind}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {lastResult.detail !== null && <div className="omm-diagnostic">{lastResult.detail}</div>}
+        </section>
+      )}
+
+      <section className="omm-card">
+        <div className="omm-card-head">
+          <div className="omm-card-text">
+            <span className="omm-card-name"><IconDatabaseOutline16 />{t('inventoryTitle')}</span>
+          </div>
         </div>
-        <div className="omm-counts">
-          <Count label={t('active')} value={overview.counts.active} />
-          <Count label={t('candidates')} value={overview.counts.candidate} />
-          <Count label={t('disputed')} value={overview.counts.disputed} />
-          <Count label={t('archived')} value={overview.counts.superseded} />
+        <div className="omm-card-body">
+          <div className="omm-counts">
+            <Count label={t('active')} value={overview.counts.active} />
+            <Count label={t('candidates')} value={overview.counts.candidate} />
+            <Count label={t('disputed')} value={overview.counts.disputed} />
+            <Count label={t('archived')} value={overview.counts.superseded} />
+          </div>
+          <div className="omm-health">
+            <span className="omm-health-state">
+              <span className="omm-dot" data-state={overview.watch.active ? 'active' : 'warning'} />
+              {overview.watch.active ? t('watcherActive') : t('watcherInactive')}
+            </span>
+            <span>{overview.files.count} {t('files')}</span>
+          </div>
+          {overview.watch.degradedReason !== null && <div className="omm-diagnostic">{overview.watch.degradedReason}</div>}
+          {overview.files.truncated && <div className="omm-diagnostic">{t('fileLimit')}</div>}
         </div>
-        <div className="omm-health">
-          <span className="omm-health-state">
-            <span className="omm-dot" data-state={overview.watch.active ? 'active' : 'warning'} />
-            {overview.watch.active ? t('watcherActive') : t('watcherInactive')}
-          </span>
-          <span>{overview.files.count} {t('files')}</span>
-        </div>
-        {overview.watch.degradedReason !== null && <div className="omm-diagnostic">{overview.watch.degradedReason}</div>}
-        {overview.files.truncated && <div className="omm-diagnostic">{t('fileLimit')}</div>}
       </section>
     </div>
   )
-}
-
-function Fact(props: { label: string; value: string }): React.ReactElement {
-  return <div className="omm-fact"><span className="omm-fact-label">{props.label}</span><span className="omm-fact-value">{props.value}</span></div>
-}
-
-function ResultMetric(props: { label: string; value: number }): React.ReactElement {
-  return <span className="omm-result-metric"><b>{props.value}</b><span>{props.label}</span></span>
 }
 
 function Count(props: { label: string; value: number }): React.ReactElement {
