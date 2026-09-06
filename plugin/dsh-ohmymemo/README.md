@@ -77,6 +77,13 @@ pnpm install && pnpm run typecheck && pnpm run build && pnpm run test
 - **提取**：专用 root Agent 无可见 Tools，执行 guard 拒绝全部工具调用；输出必须整体通过 strict JSON、精确证据 quote 子串和 secret 检查，任一非法 item 使整轮失败且不推进游标。产品决策（2026-09-05）：自动结果**直接写为正式记忆**——`status: active`、`privacy: normal`、`pinned: true`，立即可被 search/capsule 召回，不经候选区、无需手动确认；证据落地、append-origin 过滤、secret fail-closed、同 key 去重与 tombstone 屏障仍是护栏。游标按「seq 连续已拟合前缀」推进：时间乱序导致低 seq 证据未进 prompt 时该 Session 游标原地不动，下次 Run 重新审视（同 key 去重保证幂等）；取消若赶在提交前到达，Run 以 `cancelled` 结算且不推进游标与调度边界。
 - **记忆空间**：设置顶级菜单“记忆”内部提供“概览/记忆空间”。浏览器只索引 allowlist 中的 canonical/candidate/archive/generated-view Markdown，Host 端解析 frontmatter、清理 generated header，并在敏感记录上只返回 redacted 正文；路径规范化、generation、symlink、文件类型和大小均 fail closed。设置页在挂载期间轮询概览，初载与轮询均为 single-flight，慢 RPC 不会造成请求堆积或状态卡死。
 
+## 运行时读取纪律（2026-09-05 生产事故修复）
+
+插件**永不 duck-type 读取 `agent.session` 的内部字段**（`.events` / `.surface` 等）——它不是公开契约：野外部场（resume 后的会话视图）曾缺失 `events`，导致每个回合在 `agent/pre-step` 崩溃（`Cannot read properties of undefined (reading '<seq>')`），并连带维护 Agent 路径的 `events.at(-1)` 崩溃。事件一律经 **`sessionQuery` 受支持快照**读取：
+
+- capsule 对账：`readSurface(sessionId)`（每轮首次一见扫描一次；轮内用进程内 digest 缓存仲裁——大日志会话的整日志折叠绝不在每步发生）。监听器整体 fail-open：读面/存储异常时跳过本次胶囊并告警，**记忆注入永远不允许弄死回合**。
+- 维护 Agent 事件窗口：`observeSession(id, { projectionMode: 'none' })` 租约（`header`/`events`/`[Symbol.dispose]`），followup 前后各一次。
+
 ## Model Experience
 
 - **Model-visible input**：普通 Agent 继续只收到 Phase 2 的有界 context capsule。梦境维护 Agent 的 system/user prompt 持久化在独立 `ohmymemo-maintenance-*` Session，并只包含本轮通过过滤与 bytes 上限的 direct-human 证据；发送给模型的事件元数据只含 `workspaceAvailable`，不含绝对 cwd。

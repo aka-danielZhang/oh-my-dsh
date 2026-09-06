@@ -577,7 +577,16 @@ export class OhMyMemoManager extends TypertRemoteService {
       try {
         await handle.agent.whenIdle()
         signal.throwIfAborted()
-        const firstSeq = (handle.agent.session.events.at(-1)?.seq ?? -1) + 1
+        // Supported reads only: the live `agent.session` internals are not a
+        // public contract (a wild resumed shape lacked `events` and crashed
+        // runs), so event windows come from the sessionQuery observation lease.
+        const before = await this.ctx.sessionQuery.observeSession(agentSessionId, { signal, projectionMode: 'none' })
+        let firstSeq: number
+        try {
+          firstSeq = (before.events.at(-1)?.seq ?? -1) + 1
+        } finally {
+          before[Symbol.dispose]()
+        }
         handle.agent.followup(createUserMessage({
           content: [{ type: 'text', text: promptInput.prompt }],
           source: {
@@ -589,7 +598,13 @@ export class OhMyMemoManager extends TypertRemoteService {
         }))
         await handle.agent.whenIdle()
         await this.ctx.sessions.flush(handle.agent.session)
-        const suffix = handle.agent.session.events.filter(event => event.seq >= firstSeq)
+        const after = await this.ctx.sessionQuery.observeSession(agentSessionId, { signal, projectionMode: 'none' })
+        let suffix: SessionEvent[]
+        try {
+          suffix = after.events.filter(event => event.seq >= firstSeq)
+        } finally {
+          after[Symbol.dispose]()
+        }
         requireCompletedTurn(suffix)
         const output = lastAssistantText(suffix)
         const parsed = parseDreamOutput(output, promptInput.evidence, {

@@ -44,6 +44,10 @@ Client apply 挂载 Typert Remote，以 `createSnapshotStore` 构造稳定 contr
 
 当前 DSH 没有同时提供 direct-user provenance 与分页/有界物理读取的 Session API；本轮只能把完整 corpus/selected-log 物化与后续有界处理区分并如实记录。Model-visible prompt 必须可从 Session 日志重建，而平台没有 maintenance Session 隐藏或删除契约，因此 `ohmymemo-maintenance-*` root Session 可能出现在普通历史并长期保留；本插件不绕过 Session Persistence 直接删文件。
 
+## 生产事故：duck-type 会话读取崩溃（2026-09-05 午间，已修复）
+
+正式包装进真实 harness 后，resume 的会话在 `agent/pre-step` 全量崩溃（`reading '<seq>'`，context.ts 的 `session.events[seq]`），维护 Agent 的 `events.at(-1)` 同族崩溃（`reading 'at'`）。根因：插件自造 `SessionSurfaceView` duck-type 断言 `agent.session.events` 必在——运行时野外部场（resume 后）没有该字段，而 `surface.nodes` 在，首次查表即炸；10:34 的旧进程恰好撞上完整形状所以此前未现。**静态未闭环点**：为何该运行时 resume 后 `agent.session` 缺 `events`（Session 类有该 getter）——修复不依赖答案：所有事件读取改走 `sessionQuery` 快照（`readSurface`/`observeSession` 租约，均为演示插件在同运行时实证可用的 API）。capsule 对账改为「每轮一次 readSurface 扫描 + 轮内内存 digest 缓存」，避免大日志会话每步整日志折叠；监听器 fail-open（异常跳过胶囊+告警）。回归测试覆盖野形状与读面失败。
+
 ## 产品定版（2026-09-05，用户拍板）
 
 - **自动转正式**：梦境提取不再走候选区——结果直接写成 `status: active`、`privacy: normal`、`pinned: true` 的正式记忆，立即可被 search/capsule 召回，无需用户手动确认。证据落地（append-origin direct-human + 精确 quote）、secret fail-closed、同 key 去重、tombstone 屏障保留为护栏；`memory_update` 的 revision+hash 双 CAS 仍是修订防线。
