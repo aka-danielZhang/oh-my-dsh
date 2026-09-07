@@ -3,7 +3,8 @@
  * runtime deps the way the shell does, import every host lib entry
  * (the path that died on missing zod / deleted settingsNamespace),
  * `plugin add` them into a fresh home, then `--dump-config` against
- * the pinned assembled runtime.
+ * the pinned assembled runtime, then boot twice and mount every shipped
+ * agent preset with its real tools (no model request).
  */
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
@@ -157,6 +158,8 @@ function main() {
         throw new Error(`smoke-packaged-profile: dump-config omitted ${spec.package}`)
       }
     }
+    console.log('smoke-packaged-profile: boot and mount every shipped agent preset twice')
+    run(node, [join(repoRoot, 'scripts/smoke-agent-presets.mjs'), JSON.stringify(runtime)], { cwd, env })
     console.log(`smoke-packaged-profile: ok (${String(specs.length)} shipped plugins against ${revision.ref})`)
   } catch (error) {
     const log = join(work, 'logs/install.log')
