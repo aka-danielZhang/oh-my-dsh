@@ -230,6 +230,96 @@ test('legacy persisted run state without items migrates to an empty list', () =>
   assert.deepEqual(parsed.lastResult?.items, [], 'old record boots with an empty item list')
 })
 
+test('maintenance agent is created with a validated cwd so prompt assembly resolves', async () => {
+  type CreateHarness = {
+    accepting: boolean
+    currentRun?: { jobId: string; runId: string; abort: AbortController; done: Promise<{ status: string }> }
+    operationTail: Promise<void>
+    config: Record<string, unknown>
+    ctx: {
+      jobs: { start(input: { run(): { done: Promise<unknown> } }): string }
+      agents: {
+        withoutInitiator<T>(run: () => T): T
+        create(options: Record<string, unknown>): Promise<unknown>
+      }
+      sessionQuery: Record<string, unknown>
+      agentDefaultModel: Record<string, unknown>
+      llm: Record<string, unknown>
+      logger: { warn(): void }
+    }
+    memo: Record<string, unknown>
+    refreshDomain(): Promise<void>
+    recoverInterruptedRun(): Promise<void>
+    replaceState(patch: unknown): Promise<void>
+    failRun(request: unknown, error: unknown, signal: AbortSignal): Promise<unknown>
+    maintenanceCwd(source: unknown): string
+    collectSources(signal: AbortSignal): Promise<unknown>
+    startRun(input: { trigger: 'manual'; scheduledFor: null }): Promise<string>
+  }
+  const manager = Object.create(OhMyMemoManager.prototype) as unknown as CreateHarness
+  manager.accepting = true
+  manager.operationTail = Promise.resolve()
+  manager.config = {
+    runTimeoutMs: 60_000,
+    agentMaxTokens: 2048,
+    maxMemoriesPerRun: 6,
+    maxCandidateContentChars: 500,
+    candidateConfidence: 0.6,
+    maxTranscriptBytes: 12_000,
+    lookbackHours: 72,
+  }
+  let captured: Record<string, unknown> | undefined
+  let hooks: { done: Promise<unknown> } | undefined
+  manager.ctx = {
+    jobs: {
+      start(input: { run(): { done: Promise<unknown> } }) {
+        hooks = input.run()
+        return 'job-cwd'
+      },
+    },
+    agents: {
+      withoutInitiator: <T,>(run: () => T): T => run(),
+      async create(options: Record<string, unknown>) {
+        captured = options
+        throw new Error('stop-after-create')
+      },
+    },
+    sessionQuery: {},
+    agentDefaultModel: { currentSelection: () => ({ provider: 'p', model: 'm' }) },
+    llm: { listProviders: () => [], resolveModelInfo: async () => { throw new Error('none') } },
+    logger: { warn() {} },
+  }
+  Object.defineProperty(manager, 'memo', { value: {
+    configSnapshot: () => ({ config: { allow_inference_candidates: true, dream_model_provider: '', dream_model: '', dream_effort: '' } }),
+    withMaintenanceLease: async (run: () => Promise<unknown>) => run(),
+    hasMemoryKey: () => false,
+    scopeForCwd: () => undefined,
+  } })
+  manager.refreshDomain = async () => {}
+  manager.recoverInterruptedRun = async () => {}
+  manager.replaceState = async () => {}
+  manager.failRun = async () => ({ status: 'failed' })
+  manager.maintenanceCwd = () => '/tmp/fix-verify-ws'
+  manager.collectSources = async () => ({
+    sessions: [{
+      sessionId: 'sess-x',
+      capturedThroughSeq: 3,
+      lastEventAt: Date.now(),
+      messages: [{ sessionId: 'sess-x', seq: 3, messageId: 'mx', cwd: '/tmp/fix-verify-ws', time: Date.now(), text: '用户说喜欢深色主题' }],
+    }],
+    emptyCursors: {},
+  })
+
+  await manager.startRun({ trigger: 'manual', scheduledFor: null })
+  if (hooks !== undefined) await hooks.done.catch(() => undefined)
+  // create runs behind the claim resolution — poll briefly for it.
+  for (let waited = 0; captured === undefined && waited < 2_000; waited += 25) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  const meta = (captured?.meta ?? {}) as { cwd?: string }
+  assert.equal(meta.cwd, '/tmp/fix-verify-ws', 'agents.create must carry meta.cwd so {{cwd}} resolves')
+})
+
 test('dream setting wire input is strict and requires at least one change', () => {
   assert.deepEqual(updateDreamSettingsRequestSchema.parse({ ifRevision: 'sha256:x', enabled: true }), {
     ifRevision: 'sha256:x',

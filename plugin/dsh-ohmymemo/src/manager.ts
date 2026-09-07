@@ -5,6 +5,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
@@ -558,6 +559,12 @@ export class OhMyMemoManager extends TypertRemoteService {
       progress.agentSessionId = String(agentSessionId)
       const handle = await this.ctx.agents.create({
         sessionId: agentSessionId,
+        // The stock deployment:persona section renders `{{cwd}}`, so the
+        // maintenance session must carry one — without it prompt assembly
+        // throws and every run dies at turn start. The extractor is
+        // text-in/text-out (no tools), so any validated absolute cwd works;
+        // prefer the evidence's dominant workspace cwd, else the home dir.
+        meta: { cwd: this.maintenanceCwd(source) },
         agentOptions: {
           provider: model.provider,
           model: model.model,
@@ -668,6 +675,29 @@ export class OhMyMemoManager extends TypertRemoteService {
         : error
       throw new DreamRunFailure(errorMessage(failure), progress, sourceMessages, failure)
     }
+  }
+
+  /**
+   * Validated absolute cwd for the maintenance session. The stock
+   * deployment:persona prompt section renders `{{cwd}}`, which only resolves
+   * when the session carries one — a cwd-less agent dies at prompt assembly.
+   * The extractor never touches the filesystem, so the value is plumbing:
+   * prefer the evidence's most common workspace cwd, else the home directory.
+   */
+  private maintenanceCwd(source: { sessions: DreamSourceSession[] }): string {
+    const counts = new Map<string, number>()
+    for (const session of source.sessions) {
+      for (const message of session.messages) {
+        if (message.cwd === undefined) continue
+        counts.set(message.cwd, (counts.get(message.cwd) ?? 0) + 1)
+      }
+    }
+    let best: string | undefined
+    let bestCount = -1
+    for (const [cwd, count] of counts) {
+      if (count > bestCount) { best = cwd; bestCount = count }
+    }
+    return best ?? homedir()
   }
 
   private async collectSources(signal: AbortSignal): Promise<{
