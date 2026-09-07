@@ -27,6 +27,10 @@ export const dreamRunSummarySchema = z.object({
     kind: z.enum(['semantic', 'episodic', 'procedural']),
     content: z.string(),
   }).strict()).default([]),
+  /** The output hit the model's max-token ceiling and only a prefix was used.
+   *  Older persisted runs predate the field; they default to false so a
+   *  stored record never blocks boot after an upgrade. */
+  truncated: z.boolean().default(false),
   detail: z.string().nullable(),
 }).strict()
 export type DreamRunSummary = z.infer<typeof dreamRunSummarySchema>
@@ -42,6 +46,13 @@ export const dreamRuntimeStateSchema = z.object({
   lastScheduledFor: z.number().nullable(),
   nextRunAt: z.number().nullable(),
   lastResult: dreamRunSummarySchema.nullable(),
+  /** Deterministic output-failure streak on the current evidence window,
+   *  feeding the dead-letter cursor advance. Older persisted state predates
+   *  the field; it defaults to null so a stored record never blocks boot. */
+  failureStreak: z.object({
+    promptHash: z.string(),
+    count: z.number().int().positive(),
+  }).strict().nullable().default(null),
   cursors: z.record(z.string(), z.number().int().nonnegative()),
 }).strict()
 export type DreamRuntimeState = z.infer<typeof dreamRuntimeStateSchema>
@@ -66,6 +77,7 @@ export const dreamRunAuditSchema = z.object({
   }).strict()),
   memoriesCreated: z.array(z.string()),
   memoriesRejected: z.number().int().nonnegative(),
+  truncated: z.boolean().default(false),
   detail: z.string().nullable(),
 }).strict()
 export type DreamRunAudit = z.infer<typeof dreamRunAuditSchema>

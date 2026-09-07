@@ -60,6 +60,7 @@ export interface Config {
   catchUpWindowHours: number
   runTimeoutMs: number
   agentMaxTokens: number
+  deadLetterThreshold: number
   maxBrowseFiles: number
   maxFileReadBytes: number
   auditRetentionRuns: number
@@ -73,11 +74,18 @@ export const Config: z<Config> = z.object({
   maxTranscriptBytes: z.number().step(1).min(4096).max(1_048_576).default(96_000),
   lookbackHours: z.number().min(1).max(720).default(48),
   maxMemoriesPerRun: z.number().step(1).min(1).max(100).default(12),
-  maxCandidateContentChars: z.number().step(1).min(64).max(16_000).default(1200),
+  maxCandidateContentChars: z.number().step(1).min(64).max(16_000).default(300),
   candidateConfidence: z.number().min(0).max(1).default(0.82),
   catchUpWindowHours: z.number().min(1).max(168).default(36),
   runTimeoutMs: z.number().step(1).min(10_000).max(3_600_000).default(900_000),
-  agentMaxTokens: z.number().step(1).min(256).max(32_768).default(4000),
+  // Output budget must cover the worst-case JSON (maxMemoriesPerRun items of
+  // maxCandidateContentChars + quote + metadata) AND the reasoning tokens a
+  // thinking model spends from the same ceiling. The old 4_000 default was
+  // the root cause of every-night max-tokens truncation.
+  agentMaxTokens: z.number().step(1).min(256).max(65_536).default(16_384),
+  // Consecutive deterministic output failures on the same evidence window
+  // before the run is dead-lettered and its cursors advance anyway.
+  deadLetterThreshold: z.number().step(1).min(2).max(10).default(3),
   maxBrowseFiles: z.number().step(1).min(1).max(10_000).default(1000),
   maxFileReadBytes: z.number().step(1).min(1024).max(1_048_576).default(262_144),
   auditRetentionRuns: z.number().step(1).min(1).max(1000).default(60),
@@ -123,6 +131,7 @@ interface RunProgress {
   memoriesRejected: number
   items: DreamRunSummary['items']
   cursors: Record<string, number>
+  truncated: boolean
 }
 
 interface SuccessfulRun {
@@ -130,15 +139,30 @@ interface SuccessfulRun {
   sourceMessages: number
 }
 
+/**
+ * A deterministic output failure: the model turn ended in a state no retry
+ * can fix (uncompleted turn, empty text, unparseable or ungrounded output).
+ * Only these accrue the dead-letter streak — timeouts, aborts, and provider
+ * errors are infrastructure luck and must keep retrying.
+ */
+class DreamOutputError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = 'DreamOutputError'
+  }
+}
+
 class DreamRunFailure extends Error {
   readonly progress: RunProgress
   readonly sourceMessages: number
+  readonly poison: boolean
 
-  constructor(message: string, progress: RunProgress, sourceMessages: number, cause: unknown) {
+  constructor(message: string, progress: RunProgress, sourceMessages: number, cause: unknown, poison: boolean) {
     super(message, { cause })
     this.name = 'DreamRunFailure'
     this.progress = progress
     this.sourceMessages = sourceMessages
+    this.poison = poison
   }
 }
 
@@ -527,6 +551,7 @@ export class OhMyMemoManager extends TypertRemoteService {
       const promptInput = buildDreamPrompt(source.sessions, {
         maxTranscriptBytes: this.config.maxTranscriptBytes,
         maxMemories: this.config.maxMemoriesPerRun,
+        maxContentChars: this.config.maxCandidateContentChars,
       })
       // Cursor safety: prompt fitting is ordered by wall-clock time, but durable
       // logs advance by seq — advance only through each session's contiguous
@@ -559,12 +584,10 @@ export class OhMyMemoManager extends TypertRemoteService {
       progress.agentSessionId = String(agentSessionId)
       const handle = await this.ctx.agents.create({
         sessionId: agentSessionId,
-        // The stock deployment:persona section renders `{{cwd}}`, so the
-        // maintenance session must carry one — without it prompt assembly
-        // throws and every run dies at turn start. The extractor is
-        // text-in/text-out (no tools), so any validated absolute cwd works;
-        // prefer the evidence's dominant workspace cwd, else the home dir.
-        meta: { cwd: this.maintenanceCwd(source) },
+        // The extractor is text-in/text-out (no tools) and never reads the
+        // filesystem, so any validated absolute cwd works; the neutral home
+        // directory keeps the session ungrouped (see maintenanceCwd).
+        meta: { cwd: this.maintenanceCwd() },
         agentOptions: {
           provider: model.provider,
           model: model.model,
@@ -612,12 +635,27 @@ export class OhMyMemoManager extends TypertRemoteService {
         } finally {
           after[Symbol.dispose]()
         }
-        requireCompletedTurn(suffix)
+        // A max-tokens ending is salvageable: the parse below recovers the
+        // complete prefix of the memories array. Everything else but a clean
+        // completion is a deterministic output failure.
+        const outcome = turnOutcome(suffix)
+        if (outcome !== 'completed' && outcome !== 'max-tokens') {
+          throw new DreamOutputError(`dream-memory Agent did not complete (${outcome})`)
+        }
         const output = lastAssistantText(suffix)
-        const parsed = parseDreamOutput(output, promptInput.evidence, {
-          maxMemories: this.config.maxMemoriesPerRun,
-          maxContentChars: this.config.maxCandidateContentChars,
-        })
+        // Parse failures (garbage, truncation with no usable prefix, or a
+        // well-formed response with ungrounded items) are deterministic
+        // output failures — wrap them so the dead-letter streak counts them.
+        let parsed
+        try {
+          parsed = parseDreamOutput(output, promptInput.evidence, {
+            maxMemories: this.config.maxMemoriesPerRun,
+            maxContentChars: this.config.maxCandidateContentChars,
+          })
+        } catch (error) {
+          throw new DreamOutputError(`dream-memory extraction output invalid: ${errorMessage(error)}`, { cause: error })
+        }
+        progress.truncated = outcome === 'max-tokens' || parsed.truncated
         progress.memoriesRejected += parsed.rejected
         for (const proposal of parsed.proposals) {
           signal.throwIfAborted()
@@ -673,7 +711,7 @@ export class OhMyMemoManager extends TypertRemoteService {
       const failure = timeout.aborted && !controller.signal.aborted
         ? new Error(`dream-memory run exceeded ${this.config.runTimeoutMs}ms`, { cause: error })
         : error
-      throw new DreamRunFailure(errorMessage(failure), progress, sourceMessages, failure)
+      throw new DreamRunFailure(errorMessage(failure), progress, sourceMessages, failure, failure instanceof DreamOutputError)
     }
   }
 
@@ -681,23 +719,15 @@ export class OhMyMemoManager extends TypertRemoteService {
    * Validated absolute cwd for the maintenance session. The stock
    * deployment:persona prompt section renders `{{cwd}}`, which only resolves
    * when the session carries one — a cwd-less agent dies at prompt assembly.
-   * The extractor never touches the filesystem, so the value is plumbing:
-   * prefer the evidence's most common workspace cwd, else the home directory.
+   * The extractor never touches the filesystem, so the value is pure
+   * plumbing: always the home directory. Deliberately NOT the evidence's
+   * workspace — pointing the session at a repo made prompt assembly pull in
+   * that repo's AGENTS.md (tens of KB of unrelated instructions paid on
+   * every run) and grouped the maintenance sessions under that workspace.
+   * Home keeps them ungrouped and cheap.
    */
-  private maintenanceCwd(source: { sessions: DreamSourceSession[] }): string {
-    const counts = new Map<string, number>()
-    for (const session of source.sessions) {
-      for (const message of session.messages) {
-        if (message.cwd === undefined) continue
-        counts.set(message.cwd, (counts.get(message.cwd) ?? 0) + 1)
-      }
-    }
-    let best: string | undefined
-    let bestCount = -1
-    for (const [cwd, count] of counts) {
-      if (count > bestCount) { best = cwd; bestCount = count }
-    }
-    return best ?? homedir()
+  private maintenanceCwd(): string {
+    return homedir()
   }
 
   private async collectSources(signal: AbortSignal): Promise<{
@@ -748,7 +778,11 @@ export class OhMyMemoManager extends TypertRemoteService {
       memoriesCreated: result.progress.memoriesCreated.length,
       memoriesRejected: result.progress.memoriesRejected,
       items: cancelled ? [] : result.progress.items,
+      truncated: cancelled ? false : result.progress.truncated,
       detail: cancelled ? 'cancelled before commit' : null,
+    }
+    if (!cancelled && summary.truncated) {
+      summary.detail = `output hit the model's max-token ceiling; ${summary.memoriesCreated} memor(y/ies) salvaged from the complete prefix`
     }
     await this.persistAudit(auditFrom(request, result.progress, summary))
     if (cancelled) {
@@ -774,6 +808,7 @@ export class OhMyMemoManager extends TypertRemoteService {
       lastSuccessAt: finishedAt,
       lastScheduledFor: request.scheduledFor ?? this.state.lastScheduledFor,
       lastResult: summary,
+      failureStreak: null,
       cursors: { ...this.state.cursors, ...result.progress.cursors },
     })
     return {
@@ -789,6 +824,23 @@ export class OhMyMemoManager extends TypertRemoteService {
     const detail = errorMessage(error)
     const progress = error instanceof DreamRunFailure ? error.progress : emptyProgress()
     const sourceMessages = error instanceof DreamRunFailure ? error.sourceMessages : 0
+    // Dead-letter accounting: only deterministic output failures on the same
+    // evidence window accrue the streak. At the threshold, advance this
+    // run's cursors anyway so the next scheduled run moves past the toxic
+    // window instead of re-buying the identical failure every night.
+    let streak: DreamRuntimeState['failureStreak'] = null
+    let cursorsPatch: Record<string, number> = {}
+    let deadLettered = false
+    if (!cancelled && error instanceof DreamRunFailure && error.poison && progress.promptHash !== null) {
+      const previous = this.state.failureStreak
+      const count = previous !== null && previous.promptHash === progress.promptHash ? previous.count + 1 : 1
+      if (count >= this.config.deadLetterThreshold) {
+        cursorsPatch = progress.cursors
+        deadLettered = true
+      } else {
+        streak = { promptHash: progress.promptHash, count }
+      }
+    }
     const summary: DreamRunSummary = {
       runId: request.runId,
       trigger: request.trigger,
@@ -800,7 +852,10 @@ export class OhMyMemoManager extends TypertRemoteService {
       memoriesCreated: progress.memoriesCreated.length,
       memoriesRejected: progress.memoriesRejected,
       items: [],
-      detail,
+      truncated: progress.truncated,
+      detail: deadLettered
+        ? `${detail}; dead-lettered after ${this.config.deadLetterThreshold} consecutive failures, evidence window skipped`
+        : detail,
     }
     await this.persistAudit(auditFrom(request, progress, summary))
     await this.commitState({
@@ -810,9 +865,11 @@ export class OhMyMemoManager extends TypertRemoteService {
       activeJobId: null,
       activeTrigger: null,
       lastResult: summary,
+      failureStreak: streak,
+      cursors: deadLettered ? { ...this.state.cursors, ...cursorsPatch } : this.state.cursors,
     })
-    this.logFailure('dream-memory run', error)
-    return { status: cancelled ? 'killed' : 'failed', detail }
+    this.logFailure(deadLettered ? 'dream-memory run (dead-lettered)' : 'dream-memory run', error)
+    return { status: cancelled ? 'killed' : 'failed', detail: summary.detail ?? undefined }
   }
 
   private async persistAudit(audit: DreamRunAudit): Promise<void> {
@@ -887,6 +944,7 @@ export class OhMyMemoManager extends TypertRemoteService {
       memoriesCreated: 0,
       memoriesRejected: 0,
       items: [],
+      truncated: false,
       detail: 'previous process ended before the dream-memory run settled',
     }
     await this.replaceState({
@@ -945,6 +1003,7 @@ function initialState(): DreamRuntimeState {
     lastScheduledFor: null,
     nextRunAt: null,
     lastResult: null,
+    failureStreak: null,
     cursors: {},
   }
 }
@@ -960,6 +1019,7 @@ function emptyProgress(): RunProgress {
     memoriesRejected: 0,
     items: [],
     cursors: {},
+    truncated: false,
   }
 }
 
@@ -979,16 +1039,20 @@ function auditFrom(request: RunRequest, progress: RunProgress, summary: DreamRun
     sourceSessions: progress.sourceSessions.map(item => ({ ...item })),
     memoriesCreated: [...progress.memoriesCreated],
     memoriesRejected: progress.memoriesRejected,
+    truncated: progress.truncated,
     detail: summary.detail,
   }
 }
 
-function requireCompletedTurn(events: readonly SessionEvent[]): void {
+/**
+ * End reason of the extraction turn, validating consumed work first.
+ * `max-tokens` is recoverable (prefix salvage); every other non-completed
+ * reason is a deterministic output failure for the caller to classify.
+ */
+function turnOutcome(events: readonly SessionEvent[]): string {
   const consumed = foldConsumedWork(events)
-  if (consumed.droppedUnrun) throw new Error('dream-memory Agent dropped queued input')
-  if (consumed.end === undefined || consumed.end.data.reason.kind !== 'completed') {
-    throw new Error(`dream-memory Agent did not complete (${consumed.end?.data.reason.kind ?? 'missing turn end'})`)
-  }
+  if (consumed.droppedUnrun) throw new DreamOutputError('dream-memory Agent dropped queued input')
+  return consumed.end?.data.reason.kind ?? 'missing'
 }
 
 function lastAssistantText(events: readonly SessionEvent[]): string {
@@ -1002,7 +1066,7 @@ function lastAssistantText(events: readonly SessionEvent[]): string {
       .trim()
     if (text.length > 0) return text
   }
-  throw new Error('dream-memory Agent returned no text response')
+  throw new DreamOutputError('dream-memory Agent returned no text response')
 }
 
 function hashString(text: string): string {

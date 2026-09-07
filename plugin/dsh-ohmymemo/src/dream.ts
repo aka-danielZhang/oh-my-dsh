@@ -149,10 +149,13 @@ export function extractDreamSource(
   return { sessionId, capturedThroughSeq, lastEventAt, messages }
 }
 
+/** Longest evidence quote the extractor may cite (prompt guidance + hard gate). */
+export const MAX_QUOTE_CHARS = 200
+
 /** Build one logged extraction prompt and the exact evidence allowlist it names. */
 export function buildDreamPrompt(
   sessions: DreamSourceSession[],
-  options: { maxTranscriptBytes: number; maxMemories: number },
+  options: { maxTranscriptBytes: number; maxMemories: number; maxContentChars: number },
 ): { prompt: string; evidence: Map<string, DreamEvidence>; messageCount: number } {
   const evidence = new Map<string, DreamEvidence>()
   const lines: string[] = []
@@ -175,8 +178,8 @@ export function buildDreamPrompt(
     'Extract only durable preferences or reusable working procedures explicitly stated by the user.',
     'Do not infer secrets, credentials, temporary task details, guesses, opinions about the assistant, or facts stated only by the assistant.',
     `Return JSON only: {"memories":[...]} with at most ${options.maxMemories} items.`,
-    'Each item must contain: content (concise Markdown), kind (semantic|episodic|procedural), scope (user|workspace), key (short dotted identifier), importance (0..1), tags (string[]), evidence ({sessionId,seq,quote}).',
-    'The evidence quote must be an exact non-empty substring of that source text. Use workspace scope only when workspaceAvailable is true and the fact is specific to that workspace.',
+    `Each item must contain: content (concise Markdown, at most ${options.maxContentChars} characters — one or two sentences), kind (semantic|episodic|procedural), scope (user|workspace), key (short dotted identifier), importance (0..1), tags (string[]), evidence ({sessionId,seq,quote}).`,
+    `The evidence quote must be an exact non-empty substring of that source text, kept short (at most ${MAX_QUOTE_CHARS} characters). Use workspace scope only when workspaceAvailable is true and the fact is specific to that workspace.`,
     'When nothing qualifies, return {"memories":[]}.',
     '',
     'BEGIN UNTRUSTED NDJSON',
@@ -227,13 +230,35 @@ function fitPromptLine(
   }
 }
 
-/** Parse and ground one model response; any invalid item fails the batch. */
+/** Parsed extractor output: grounded proposals plus why anything was dropped. */
+export interface DreamParseResult {
+  proposals: DreamProposal[]
+  rejected: number
+  /** True when the output stopped mid-stream and only its complete prefix was used. */
+  truncated: boolean
+}
+
+/**
+ * Parse and ground one model response.
+ *
+ * Well-formed JSON takes the strict path: any invalid item fails the whole
+ * batch (an ungrounded citation is model misbehavior, not bad luck). A
+ * response cut mid-stream takes the salvage path: the complete prefix of the
+ * memories array is recovered, every salvaged item still faces the full
+ * grounding validation — truncation excuses missing items, never invalid
+ * ones — and zero usable survivors still fails the batch.
+ */
 export function parseDreamOutput(
   output: string,
   evidence: Map<string, DreamEvidence>,
   options: { maxMemories: number; maxContentChars: number },
-): { proposals: DreamProposal[]; rejected: number } {
-  const raw = parseJsonObject(output)
+): DreamParseResult {
+  let raw: unknown
+  try {
+    raw = parseJsonObject(output)
+  } catch (error) {
+    return salvageDreamOutput(output, evidence, options, error)
+  }
   if (!isPlainObject(raw) || Object.keys(raw).some(key => key !== 'memories') || !Array.isArray(raw.memories)) {
     throw new Error('dream extractor response must contain only a memories array')
   }
@@ -245,7 +270,74 @@ export function parseDreamOutput(
     else proposals.push(proposal)
   }
   if (rejected > 0) throw new Error(`dream extractor response contained ${rejected} invalid or over-limit item(s)`)
-  return { proposals, rejected: 0 }
+  return { proposals, rejected: 0, truncated: false }
+}
+
+/** Strict salvage of a truncated memories stream; throws the original error when unusable. */
+function salvageDreamOutput(
+  output: string,
+  evidence: Map<string, DreamEvidence>,
+  options: { maxMemories: number; maxContentChars: number },
+  original: unknown,
+): DreamParseResult {
+  const salvaged = salvageTruncatedItems(output)
+  if (salvaged === undefined) throw original
+  const proposals: DreamProposal[] = []
+  for (const item of salvaged.slice(0, options.maxMemories)) {
+    const proposal = parseProposal(item, evidence, options.maxContentChars)
+    if (proposal === undefined) throw original
+    proposals.push(proposal)
+  }
+  if (proposals.length === 0) throw original
+  return { proposals, rejected: 0, truncated: true }
+}
+
+/**
+ * Recover the complete item objects of a truncated `{"memories":[…` stream.
+ * A string-aware brace scan collects every top-level object that closed
+ * before the cut; anything after it is lost. Returns undefined when the
+ * output does not even open the memories array — a shape violation rather
+ * than a truncation — so the caller rethrows the original parse error.
+ */
+function salvageTruncatedItems(output: string): unknown[] | undefined {
+  const key = output.indexOf('"memories"')
+  if (key === -1) return undefined
+  const open = output.indexOf('[', key + '"memories"'.length)
+  if (open === -1) return undefined
+  const items: unknown[] = []
+  let depth = 0
+  let itemStart = -1
+  let inString = false
+  let escaped = false
+  for (let index = open + 1; index < output.length; index += 1) {
+    const char = output[index]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (char === '\\') escaped = true
+      else if (char === '"') inString = false
+      continue
+    }
+    if (char === '"') {
+      inString = true
+    } else if (char === '{') {
+      if (depth === 0) itemStart = index
+      depth += 1
+    } else if (char === '}') {
+      if (depth === 0) break
+      depth -= 1
+      if (depth === 0 && itemStart !== -1) {
+        try {
+          items.push(JSON.parse(output.slice(itemStart, index + 1)))
+        } catch {
+          return undefined
+        }
+        itemStart = -1
+      }
+    } else if (char === ']' && depth === 0) {
+      break
+    }
+  }
+  return items
 }
 
 function parseProposal(
@@ -266,7 +358,7 @@ function parseProposal(
   const source = evidence.get(evidenceKey(raw.evidence.sessionId, raw.evidence.seq as number))
   if (source === undefined || (raw.scope === 'workspace' && source.cwd === undefined)) return undefined
   const quote = raw.evidence.quote.trim()
-  if (quote.length < 4 || !source.text.includes(quote)) return undefined
+  if (quote.length < 4 || quote.length > MAX_QUOTE_CHARS || !source.text.includes(quote)) return undefined
   const content = raw.content.trim()
   if (detectSecretLike(content) !== undefined || detectSecretLike(quote) !== undefined) return undefined
   const hash = createHash('sha256')

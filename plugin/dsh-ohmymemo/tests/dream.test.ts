@@ -70,7 +70,7 @@ test('prompt input is byte-bounded and output proposals require exact evidence q
     maxMessages: 10,
     maxMessageChars: 200,
   })
-  const prompt = buildDreamPrompt([source], { maxTranscriptBytes: 4096, maxMemories: 4 })
+  const prompt = buildDreamPrompt([source], { maxTranscriptBytes: 4096, maxMemories: 4, maxContentChars: 500 })
   assert.equal(prompt.messageCount, 1)
   assert.ok(prompt.prompt.includes('BEGIN UNTRUSTED NDJSON'))
   assert.ok(prompt.prompt.includes('"workspaceAvailable":true'))
@@ -110,11 +110,11 @@ test('prompt byte limit emits complete JSON and truncates oversized text without
     maxMessages: 10,
     maxMessageChars: 200,
   })
-  const prompt = buildDreamPrompt([source], { maxTranscriptBytes: 8, maxMemories: 1 })
+  const prompt = buildDreamPrompt([source], { maxTranscriptBytes: 8, maxMemories: 1, maxContentChars: 500 })
   assert.equal(prompt.messageCount, 0)
   assert.equal(prompt.evidence.size, 0)
 
-  const bounded = buildDreamPrompt([source], { maxTranscriptBytes: 150, maxMemories: 1 })
+  const bounded = buildDreamPrompt([source], { maxTranscriptBytes: 150, maxMemories: 1, maxContentChars: 500 })
   assert.equal(bounded.messageCount, 1)
   const line = bounded.prompt.split('BEGIN UNTRUSTED NDJSON\n')[1]?.split('\nEND UNTRUSTED NDJSON')[0]
   assert.ok(line !== undefined)
@@ -158,4 +158,64 @@ test('cursor watermarks advance only through the contiguous fitted seq prefix', 
 
   // Nothing fitted → no entry.
   assert.equal(cursorWatermarks([session('s3', [4])], []).has('s3'), false)
+})
+
+test('truncated output salvages the complete prefix and marks the result', () => {
+  const source = extractDreamSource(snapshot(), undefined, {
+    cutoffMs: 0,
+    maxMessages: 10,
+    maxMessageChars: 200,
+  })
+  const prompt = buildDreamPrompt([source], { maxTranscriptBytes: 4096, maxMemories: 4, maxContentChars: 500 })
+  const first = {
+    content: 'The user prefers pnpm for JavaScript projects.',
+    kind: 'semantic',
+    scope: 'workspace',
+    key: 'preference.package-manager',
+    importance: 0.8,
+    tags: ['pnpm'],
+    evidence: { sessionId: 'session-user', seq: 3, quote: 'always use pnpm' },
+  }
+  // Cut mid-way through the second item: only the first survives, the result
+  // is marked truncated, and nothing throws.
+  const cut = `${JSON.stringify({ memories: [first] }).slice(0, -2)},{"content":"second item that never`
+  const salvaged = parseDreamOutput(cut, prompt.evidence, { maxMemories: 4, maxContentChars: 500 })
+  assert.equal(salvaged.truncated, true)
+  assert.equal(salvaged.rejected, 0)
+  assert.equal(salvaged.proposals.length, 1)
+  assert.match(salvaged.proposals[0]!.key, /^dream\.preference\.package-manager\./)
+
+  // An ungrounded item among the salvaged ones still fails the batch:
+  // truncation excuses missing items, never invalid ones.
+  const poisoned = `${JSON.stringify({ memories: [{ ...first, evidence: { sessionId: 'session-user', seq: 3, quote: 'fabricated quote text' } }] }).slice(0, -2)},{"content":"cut`
+  assert.throws(() => parseDreamOutput(poisoned, prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), SyntaxError)
+
+  // Cut before any item closes → nothing salvageable → the original error.
+  assert.throws(() => parseDreamOutput('{"memories":[{"content":"lorem', prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), SyntaxError)
+
+  // No memories array at all → shape violation, not truncation → rethrow.
+  assert.throws(() => parseDreamOutput('{"results":[{"content":"x', prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), SyntaxError)
+})
+
+test('over-long evidence quotes are rejected and the prompt states both limits', () => {
+  const source = extractDreamSource(snapshot(), undefined, {
+    cutoffMs: 0,
+    maxMessages: 10,
+    maxMessageChars: 200,
+  })
+  const prompt = buildDreamPrompt([source], { maxTranscriptBytes: 4096, maxMemories: 4, maxContentChars: 300 })
+  assert.ok(prompt.prompt.includes('at most 300 characters'))
+  assert.ok(prompt.prompt.includes('at most 200 characters'))
+  const longQuote = 'always use pnpm'.padEnd(201, 'x')
+  assert.throws(() => parseDreamOutput(JSON.stringify({
+    memories: [{
+      content: 'The user prefers pnpm.',
+      kind: 'semantic',
+      scope: 'workspace',
+      key: 'preference.package-manager',
+      importance: 0.8,
+      tags: [],
+      evidence: { sessionId: 'session-user', seq: 3, quote: longQuote },
+    }],
+  }), prompt.evidence, { maxMemories: 4, maxContentChars: 300 }), /invalid or over-limit/)
 })
