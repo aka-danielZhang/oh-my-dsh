@@ -48,7 +48,16 @@ function tarExtract(archive, dest) {
 function importHostLib(dest, node, packageName) {
   const lib = join(dest, 'lib')
   if (!existsSync(lib)) {
-    throw new Error(`smoke-packaged-profile: ${packageName} tarball has no lib/`)
+    // Bare-source plugins (npm convention, e.g. provider-balance): the host
+    // entry is the manifest main, loaded through the same tsx loader the
+    // dump-config run below uses.
+    const pkg = JSON.parse(readFileSync(join(dest, 'package.json'), 'utf8'))
+    const main = typeof pkg.main === 'string' && pkg.main.length > 0 ? pkg.main : ''
+    if (!main) throw new Error(`smoke-packaged-profile: ${packageName} has neither lib/ nor a main entry`)
+    const href = pathToFileURL(join(dest, main)).href
+    console.log(`smoke-packaged-profile: import ${packageName}/${main}`)
+    run(node, ['--import', 'tsx/esm', '--input-type=module', '-e', `await import(${JSON.stringify(href)})`], { cwd: dest })
+    return
   }
   const files = readdirSync(lib).filter((name) => name.endsWith('.js') && name !== 'client.js').sort()
   if (files.length === 0) {
