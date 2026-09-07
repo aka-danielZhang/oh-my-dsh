@@ -92,7 +92,7 @@ function main() {
     for (const spec of specs) {
       if (!existsSync(join(spec.dir, 'lib/index.js'))) {
         console.log(`smoke-packaged-profile: build ${spec.package}`)
-        run(pnpm, ['run', 'build'], { cwd: spec.dir })
+        run(pnpm, ['run', '--if-present', 'build'], { cwd: spec.dir })
       }
       const tar = join(tarballDir, spec.tarball)
       tarCreate(tar, spec.dir, spec.packEntries)
