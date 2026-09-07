@@ -4,6 +4,13 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 
 ## [Unreleased]
 
+## [0.3.0-rc.32] - 2026-09-07
+
+### Added
+
+- 桌面安装包随包插件从 7 个扩展到 11 个：新增 branding、fs-observation-log、provider-balance、reasoning-efforts 四个此前需要手动 `dsh plugin add` 的插件。全新环境首次启动即获得完整插件集；已有 Profile 下次启动自动补装缺失插件，无需手动操作。provider-balance 保持裸源码分发形态（runtime tsx 直载 TS），打包清单经新增的 `dsh.desktop.pack` 覆盖显式声明，不再假设 `lib/` 布局；无构建脚本的插件在 prepare 与 CI 名单校验中按 `--if-present` 跳过。
+- `mcp-settings` 本次暂不入包：其 tsc/vitest 解析表还锚在旧 harness 基线（rc.1 重组移除了 `packages/client/runtime`），移植完成前继续手动 `dsh plugin add dsh-mcp-settings`。
+
 ## [0.3.0-rc.31] - 2026-09-04
 
 ### Changed
