@@ -145,8 +145,16 @@ export class MemorySettingsController {
         ...patch,
       }))
       if (!this.isCurrent(generation)) return
+      // The model/effort pickers render from the models snapshot, not the
+      // overview. Refetch it after the write commits so a changed selection
+      // is reflected immediately instead of showing the stale value until
+      // the next full reload.
+      const models = await this.remote.models()
+        .then(result => (result.ok ? result.value : null), () => null)
+      if (!this.isCurrent(generation)) return
       this.store.update((state) => {
         state.overview = next
+        if (models !== null) state.models = models
         state.operation = null
       })
     } catch (error) {

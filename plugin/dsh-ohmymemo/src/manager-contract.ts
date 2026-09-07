@@ -166,9 +166,11 @@ export const updateDreamSettingsRequestSchema = z.object({
   ifRevision: z.string(),
   enabled: z.boolean().optional(),
   scheduleLocalTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/u).optional(),
-  modelProvider: z.string().min(1).max(200).optional(),
-  model: z.string().min(1).max(200).optional(),
-  effort: z.string().min(1).max(200).optional(),
+  // `''` clears the override (back to the harness default), so no min(1):
+  // a min-length rule made "follow default" unpickable once set.
+  modelProvider: z.string().max(200).optional(),
+  model: z.string().max(200).optional(),
+  effort: z.string().max(200).optional(),
 }).strict().refine(value =>
   value.enabled !== undefined
   || value.scheduleLocalTime !== undefined

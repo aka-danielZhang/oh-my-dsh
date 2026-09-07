@@ -333,6 +333,11 @@ test('dream setting wire input is strict and requires at least one change', () =
   })
   assert.throws(() => updateDreamSettingsRequestSchema.parse({ ifRevision: 'sha256:x' }))
   assert.throws(() => updateDreamSettingsRequestSchema.parse({ ifRevision: 'sha256:x', scheduleLocalTime: '27:00' }))
-  assert.throws(() => updateDreamSettingsRequestSchema.parse({ ifRevision: 'sha256:x', modelProvider: '' }))
+  // `''` clears the override — valid by design (the old min(1) made
+  // "follow default" unpickable once any override was set).
+  assert.deepEqual(updateDreamSettingsRequestSchema.parse({ ifRevision: 'sha256:x', effort: '' }), {
+    ifRevision: 'sha256:x',
+    effort: '',
+  })
   assert.throws(() => updateDreamSettingsRequestSchema.parse({ ifRevision: 'sha256:x', enabled: true, extra: 1 }))
 })

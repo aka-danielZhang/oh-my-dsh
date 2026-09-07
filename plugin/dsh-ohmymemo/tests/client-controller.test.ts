@@ -157,3 +157,29 @@ test('controller forwards config CAS and reflects manual-run/cancel outcomes', a
   unmount()
   controller.dispose()
 })
+
+test('updateSettings refetches the models snapshot so effort/model pickers reflect the write', async () => {
+  let modelsSnapshot = modelsCatalog
+  let modelsCalls = 0
+  const controller = new MemorySettingsController(remote({
+    models: async () => {
+      modelsCalls += 1
+      return { ok: true, value: modelsSnapshot }
+    },
+    updateDreamSettings: async () => {
+      // The host commits the write before responding, so a models() call
+      // racing it could read stale state; the controller must call models()
+      // AFTER updateDreamSettings resolves. Simulate the fresh snapshot.
+      modelsSnapshot = { ...modelsCatalog, currentEffortKey: 'high' }
+      return { ok: true, value: { ...overview, configRevision: 'sha256:next' } }
+    },
+  }))
+  await controller.load()
+  assert.equal(modelsCalls, 1)
+  assert.equal(controller.store.getSnapshot().models?.currentEffortKey, 'default')
+  await controller.updateSettings({ effort: 'high' })
+  assert.equal(modelsCalls, 2)
+  assert.equal(controller.store.getSnapshot().models?.currentEffortKey, 'high')
+  assert.equal(controller.store.getSnapshot().overview?.configRevision, 'sha256:next')
+  controller.dispose()
+})
