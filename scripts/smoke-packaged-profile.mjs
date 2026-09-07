@@ -6,8 +6,9 @@
  * the pinned assembled runtime.
  */
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
@@ -45,18 +46,19 @@ function tarExtract(archive, dest) {
   run('tar', args)
 }
 
-function importHostLib(dest, node, packageName) {
+function importHostLib(dest, node, runtimeCwd, packageName) {
   const lib = join(dest, 'lib')
   if (!existsSync(lib)) {
     // Bare-source plugins (npm convention, e.g. provider-balance): the host
     // entry is the manifest main, loaded through the same tsx loader the
-    // dump-config run below uses.
+    // dump-config run below uses. cwd sits in the runtime tree so the
+    // `tsx` --import specifier resolves against the runtime's own copy.
     const pkg = JSON.parse(readFileSync(join(dest, 'package.json'), 'utf8'))
     const main = typeof pkg.main === 'string' && pkg.main.length > 0 ? pkg.main : ''
     if (!main) throw new Error(`smoke-packaged-profile: ${packageName} has neither lib/ nor a main entry`)
     const href = pathToFileURL(join(dest, main)).href
     console.log(`smoke-packaged-profile: import ${packageName}/${main}`)
-    run(node, ['--import', 'tsx/esm', '--input-type=module', '-e', `await import(${JSON.stringify(href)})`], { cwd: dest })
+    run(node, ['--import', 'tsx/esm', '--input-type=module', '-e', `await import(${JSON.stringify(href)})`], { cwd: runtimeCwd })
     return
   }
   const files = readdirSync(lib).filter((name) => name.endsWith('.js') && name !== 'client.js').sort()
@@ -84,7 +86,9 @@ function findNode(runtimeDir) {
 
 function main() {
   const revision = JSON.parse(readFileSync(join(repoRoot, 'runtime/revision.json'), 'utf8'))
-  const runtimeDir = join(repoRoot, 'runtime/build', revision.sha)
+  const runtimeDir = process.env.DSH_DESKTOP_RUNTIME
+    ? resolve(process.env.DSH_DESKTOP_RUNTIME)
+    : join(repoRoot, 'runtime/build', revision.sha)
   const cli = join(runtimeDir, 'dsh/node_modules/@deepseek-ai/dsh/lib/bin.js')
   if (!existsSync(cli)) {
     throw new Error(`smoke-packaged-profile: assemble the runtime first (missing ${cli})`)
@@ -96,12 +100,13 @@ function main() {
   const home = join(work, 'home')
   mkdirSync(tarballDir)
   mkdirSync(extractDir)
-  mkdirSync(join(home, 'profiles/web'), { recursive: true })
+  mkdirSync(home)
   try {
     for (const spec of specs) {
-      if (!existsSync(join(spec.dir, 'lib/index.js'))) {
+      const pkg = JSON.parse(readFileSync(join(spec.dir, 'package.json'), 'utf8'))
+      if (!existsSync(join(spec.dir, 'lib/index.js')) && typeof pkg.scripts?.build === 'string') {
         console.log(`smoke-packaged-profile: build ${spec.package}`)
-        run(pnpm, ['run', '--if-present', 'build'], { cwd: spec.dir })
+        run(pnpm, ['run', 'build'], { cwd: spec.dir })
       }
       const tar = join(tarballDir, spec.tarball)
       tarCreate(tar, spec.dir, spec.packEntries)
@@ -111,19 +116,27 @@ function main() {
         throw new Error(`smoke-packaged-profile: ${spec.tarball} extracted without package.json`)
       }
       linkPluginRuntimeDeps(dest, join(runtimeDir, 'dsh'))
-      importHostLib(dest, findNode(runtimeDir), spec.package)
+      importHostLib(dest, findNode(runtimeDir), join(runtimeDir, 'dsh'), spec.package)
     }
     const node = findNode(runtimeDir)
     const profile = join(home, 'profiles/web')
-    writeFileSync(join(profile, 'cordis.patch.yml'), '[]\n')
-    writeFileSync(join(profile, 'pnpm-workspace.yaml'), 'packages:\n  - .\n\nnodeLinker: hoisted\nautoInstallPeers: false\n')
     const env = { ...process.env, DSH_HOME: home, CI: 'true' }
     const cwd = join(runtimeDir, 'dsh')
-    for (const spec of specs) {
-      const dest = join(extractDir, spec.package)
-      console.log(`smoke-packaged-profile: plugin add ${spec.package}`)
-      run(node, ['--import', 'tsx/esm', cli, 'plugin', '--profile', 'web', 'add', dest], { cwd, env })
+    const runtime = {
+      node, cli, cwd, argsPrefix: ['--import', 'tsx/esm'], oneNode: false,
+      pathPrepend: [dirname(node), join(runtimeDir, 'tools/node_modules/.bin')],
     }
+    const plugins = specs.map(spec => ({ package: spec.package, dir: join(extractDir, spec.package) }))
+    const installer = pathToFileURL(join(repoRoot, 'src/install.ts')).href
+    const loader = pathToFileURL(createRequire(import.meta.url).resolve('tsx/esm')).href
+    console.log('smoke-packaged-profile: shell install transaction and idempotent relaunch')
+    run(node, ['--import', loader, '--input-type=module', '-e', `
+      import { runDesktopPluginInstall, desktopPackagesInstalled } from ${JSON.stringify(installer)};
+      const [runtime, plugins, home, logs] = JSON.parse(process.argv[1]);
+      runDesktopPluginInstall(runtime, plugins, home, logs, 'web', 'missing');
+      if (!desktopPackagesInstalled(plugins, home, 'web')) throw new Error('incomplete shell install');
+      runDesktopPluginInstall(runtime, plugins, home, logs, 'web', 'unchecked');
+    `, JSON.stringify([runtime, plugins, home, work])], { cwd, env })
     const profilePkg = JSON.parse(readFileSync(join(profile, 'package.json'), 'utf8'))
     const bundles = profilePkg.dsh?.profile?.bundles ?? []
     for (const spec of specs) {
@@ -145,6 +158,10 @@ function main() {
       }
     }
     console.log(`smoke-packaged-profile: ok (${String(specs.length)} shipped plugins against ${revision.ref})`)
+  } catch (error) {
+    const log = join(work, 'logs/install.log')
+    if (existsSync(log)) console.error(readFileSync(log, 'utf8'))
+    throw error
   } finally {
     rmSync(work, { recursive: true, force: true })
   }

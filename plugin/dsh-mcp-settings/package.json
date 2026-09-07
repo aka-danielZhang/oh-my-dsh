@@ -1,6 +1,6 @@
 {
   "name": "dsh-mcp-settings",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Settings-driven MCP server manager, inventory Remote, and Web settings UI for DeepSeek Harness",
   "type": "module",
   "packageManager": "pnpm@11.7.0",
@@ -12,7 +12,7 @@
     "bundle": "tsdown",
     "dev:web": "tsdown --watch",
     "test": "vitest run",
-    "typecheck": "tsc -b --pretty false",
+    "typecheck": "tsc --noEmit --pretty false",
     "prepare": "tsdown",
     "smoke": "node --check lib/index.js && node --check lib/manager.js && node --check lib/manager-types.js && node --check lib/inventory.js && node --check lib/inventory-types.js && node --check lib/typert.host.js && node --check lib/typert.remote-client.js && node --check lib/client.js",
     "plugin:add": "dsh plugin --profile web add file:.",
@@ -62,16 +62,7 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib/index.js",
-    "lib/invariant.js",
-    "lib/manager.js",
-    "lib/manager-types.js",
-    "lib/inventory.js",
-    "lib/inventory-types.js",
-    "lib/typert.host.js",
-    "lib/typert.remote-client.js",
-    "lib/client.js",
-    "lib/client.js.map",
+    "lib",
     "src",
     "cordis.patch.yml",
     "README.md",
@@ -92,13 +83,13 @@
     "directory": "plugin/dsh-mcp-settings"
   },
   "dependencies": {
-    "@deepseek-ai/schemastery": "^3.18.0",
-    "zod": "^4.4.3"
+    "@deepseek-ai/schemastery": "^3.18.0"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0-rc.7 <5",
     "@deepseek-ai/dsh-client-locale": ">=0.0.1-rc.1 <1",
-    "@deepseek-ai/dsh-client-runtime": ">=0.0.1-rc.1 <1",
+    "@deepseek-ai/dsh-api-gateway": ">=0.1.2-rc.1 <1",
+    "@deepseek-ai/dsh-client-ui-renderer": ">=0.1.2-rc.1 <1",
     "@deepseek-ai/dsh-client-ui-primitives": ">=0.0.1-rc.1 <1",
     "@deepseek-ai/dsh-client-ui-settings": ">=0.0.1-rc.1 <1",
     "@deepseek-ai/dsh-client-ui-slots": ">=0.0.1-rc.1 <1",
@@ -112,6 +103,15 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-api-gateway": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-locale": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-store": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-invariants": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-system-prompt": "0.1.2-rc.1",
     "@deepseek-ai/dsh-attachment": "0.1.2-rc.1",
     "@deepseek-ai/dsh-credentials": "0.1.2-rc.1",
     "@deepseek-ai/dsh-llm": "0.1.2-rc.1",
@@ -135,15 +135,18 @@
     "tsdown": "0.22.2",
     "typescript": "6.0.3",
     "vite-tsconfig-paths": "6.1.1",
-    "vitest": "4.1.8"
+    "vitest": "4.1.8",
+    "zod": "^4.4.3"
   },
   "dsh": {
+    "desktop": { "ship": true },
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-api-gateway",
+        "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-connection"

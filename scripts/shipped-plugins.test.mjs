@@ -49,6 +49,7 @@ test('lists every ship:true plugin once, including thread', () => {
     'dsh-compaction-hierarchical',
     'dsh-desktop-bridge',
     'dsh-fs-observation-log',
+    'dsh-mcp-settings',
     'dsh-model-efforts-editor',
     'dsh-model-image-input',
     'dsh-provider-balance',
@@ -63,10 +64,7 @@ test('lists every ship:true plugin once, including thread', () => {
   assert.equal(thread?.hashKey, 'threadTarball')
   const compaction = specs.find((spec) => spec.package === 'dsh-compaction-hierarchical')
   assert.equal(compaction?.env, 'DSH_DESKTOP_COMPACTION_PLUGIN')
-  // mcp-settings 0.2.5 的 tsc/vitest 解析还锚在旧 harness 基线（rc.1 重组移走了
-  // packages/client/runtime，见 docs/notes/2026-09-07-desktop-ships-all-plugins.md），
-  // 移植完成前不随包分发。
-  assert.ok(!names.includes('dsh-mcp-settings'))
+  assert.ok(names.includes('dsh-mcp-settings'))
   assert.ok(!names.includes('dsh-question-rail'))
 })
 

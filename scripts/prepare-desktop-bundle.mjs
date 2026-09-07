@@ -140,7 +140,7 @@ if (prepareMode === 'build') {
   for (const spec of shipped) {
     if (spec.package === 'dsh-desktop-bridge') continue
     for (const script of ['typecheck', 'test', 'build']) {
-      run(pnpm, ['run', script], { cwd: spec.dir })
+      run(pnpm, ['run', '--if-present', script], { cwd: spec.dir })
     }
   }
   assembleRuntime()

@@ -88,12 +88,9 @@ Restart the Web profile. The bundle rows disappear while user settings remain in
 
 ## Develop
 
-The typecheck and test setup follows the DSH out-of-tree plugin convention: keep a Harness checkout in the sibling directory `../deepseek-harness`.
+Typechecking, tests, and builds use pinned npm packages. No sibling Harness checkout is required.
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git ../deepseek-harness
-cd ../deepseek-harness && pnpm install
-cd ../dsh-mcp-settings
 pnpm install
 pnpm run typecheck
 pnpm test
@@ -110,9 +107,9 @@ pnpm run dev:web
 
 `dsh web` always mounts the client HMR receiver. The watcher rebuilds this out-of-tree package's Host and Client bundles; the running Host observes the changed bundle revision and reloads the browser plugin without a page refresh. Harness's root `pnpm run dev:web` only watches in-tree `packages/*/*` client plugins and does not replace this package-local watcher.
 
-`prepare` uses the self-contained `tsdown.config.ts` and `tsconfig.prepare.json`, so a consumer installing from GitHub does not need the sibling Harness checkout. Type checking and tests do require it.
+`prepare` uses the self-contained `tsdown.config.ts` and `tsconfig.prepare.json`. Host Zod and its shared chunks are bundled for desktop extraction.
 
-GitHub CI verifies the consumer-side install, bundle, JavaScript syntax, and packed distribution without a Harness checkout. The full typecheck and test suite runs against a matching sibling Harness fork tree. Source-checkout development pins `@deepseek-ai/dsh-mcp-client` to the status-capable `@crazx` npm alias so Node cannot silently load the official build and leave every connected server displayed as connecting.
+Tests exercise the published host package and browser factories. The MCP client is pinned to the status-capable `@crazx` npm alias so Node cannot silently load the official build and leave every connected server displayed as connecting. Desktop 0.3.0-rc.33 includes this plugin automatically.
 
 ## Compatibility
 

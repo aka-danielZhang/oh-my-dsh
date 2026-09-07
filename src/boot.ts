@@ -117,7 +117,7 @@ function restoreAdoptionBackup(
   return restored
 }
 
-function prepareProfileAdoption(root: string, summary: ExistingHomeSummary): AdoptionRecord | undefined {
+function prepareProfileAdoption(root: string, summary: ExistingHomeSummary, packaged: boolean): AdoptionRecord | undefined {
   cleanupStaleBackupStaging(root, summary.canonicalHome)
   let previous = latestRecord(root, summary.canonicalHome)
   if (previous?.backup) {
@@ -165,7 +165,7 @@ function prepareProfileAdoption(root: string, summary: ExistingHomeSummary): Ado
       ? '继续前会保存一份可恢复的当前 Web Profile 配置快照。'
       : '当前没有 Web Profile，因此没有需要备份的 Profile；Desktop 会新建它。'
     const primary = summary.hasWebProfile ? '备份并继续' : '继续'
-    const shipped = shippedPluginRefs(false).map((spec) => spec.package)
+    const shipped = shippedPluginRefs(packaged).map((spec) => spec.package)
     const shippedLabel = shipped.length <= 1
       ? (shipped[0] ?? '')
       : `${shipped.slice(0, -1).join('、')}和${shipped[shipped.length - 1] ?? ''}`
@@ -337,7 +337,7 @@ export async function bootSequence(packaged: boolean, electronPath: string): Pro
   const home = dshHome()
   recoverWebProfile(home)
   const summary = inspectHome(home)
-  const adoption = prepareProfileAdoption(root, summary)
+  const adoption = prepareProfileAdoption(root, summary, packaged)
   if (adoption === undefined) return 'exitRequested'
 
   const runtime = findRuntime(packaged, electronPath)

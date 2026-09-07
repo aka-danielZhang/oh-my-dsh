@@ -15,7 +15,7 @@ import {
 } from '../src/client/drafts.ts'
 import { en, type McpSettingsLocaleKey } from '../src/client/locales.ts'
 import type { McpInventorySnapshot } from '../src/inventory-types.ts'
-import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 
 afterEach(() => {
   cleanup()

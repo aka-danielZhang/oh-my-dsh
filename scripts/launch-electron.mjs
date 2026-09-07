@@ -9,12 +9,13 @@
  * Launch as `electron .` so `app.getAppPath()` is the repo root (package.json).
  */
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { bundleElectronMain } from './bundle-electron-main.mjs'
+import { listShippedPluginSpecs } from './shipped-plugins.mjs'
 
 const require = createRequire(import.meta.url)
 const electronBin = require('electron')
@@ -24,14 +25,6 @@ if (typeof electronBin !== 'string' || electronBin.length === 0) {
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
-
-const BRIDGE = 'dsh-desktop-bridge'
-const OTHER_PLUGINS = [
-  'dsh-compaction-hierarchical',
-  'dsh-web-search-toggle',
-  'dsh-model-image-input',
-  'dsh-send-while-running',
-]
 
 function buildPlugin(name) {
   const dir = resolve(repoRoot, 'plugin', name)
@@ -43,16 +36,9 @@ function buildPlugin(name) {
 }
 
 function ensureDesktopPluginsBuilt() {
-  buildPlugin(BRIDGE)
-  for (const name of OTHER_PLUGINS) {
-    const lib = resolve(repoRoot, 'plugin', name, 'lib/index.js')
-    if (existsSync(lib)) continue
-    try {
-      buildPlugin(name)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      console.warn(`launch-electron: ${name} has no lib/index.js and build failed (${message}); sidecar plugin load will fail`)
-    }
+  for (const spec of listShippedPluginSpecs(repoRoot)) {
+    const pkg = JSON.parse(readFileSync(resolve(spec.dir, 'package.json'), 'utf8'))
+    if (typeof pkg.scripts?.build === 'string') buildPlugin(spec.package)
   }
 }
 

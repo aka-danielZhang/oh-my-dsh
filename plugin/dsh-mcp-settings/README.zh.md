@@ -88,12 +88,9 @@ dsh plugin --profile web remove dsh-mcp-settings
 
 ## 开发
 
-类型检查和测试遵循 DSH 仓库外插件约定：在相邻目录 `../deepseek-harness` 保留一个 Harness checkout。
+类型检查、测试与构建均使用钉版 npm 包，不需要相邻 Harness checkout。
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git ../deepseek-harness
-cd ../deepseek-harness && pnpm install
-cd ../dsh-mcp-settings
 pnpm install
 pnpm run typecheck
 pnpm test
@@ -110,9 +107,9 @@ pnpm run dev:web
 
 `dsh web` 始终挂载 Client HMR 接收端。watcher 会重建这个仓库外插件的 Host 和 Client bundle；运行中的 Host 发现 bundle revision 变化后，会让浏览器插件自动热替换，无需刷新页面。Harness 根目录的 `pnpm run dev:web` 只监视仓库内 `packages/*/*` 的 Client 插件，不能替代本插件自己的 watcher。
 
-`prepare` 使用自包含的 `tsdown.config.ts` 与 `tsconfig.prepare.json`，因此 GitHub 安装方不需要相邻 Harness checkout；类型检查与测试需要它。
+`prepare` 使用自包含的 `tsdown.config.ts` 与 `tsconfig.prepare.json`；Host Zod 与生成的共享 chunk 随包分发，桌面解包无需另装私有依赖。
 
-GitHub CI 会在没有 Harness checkout 的情况下验证消费端安装、bundle、JavaScript 语法和打包产物。完整类型检查与测试针对匹配的相邻 Harness fork 树运行。源码 checkout 开发态把 `@deepseek-ai/dsh-mcp-client` 钉到带状态事件的 `@crazx` npm alias，防止 Node 静默加载官方构建，导致已连接服务器仍一直显示为连接中。
+测试覆盖已发布 Host 包和浏览器工厂。MCP client 钉到带状态事件的 `@crazx` npm alias，防止 Node 静默加载官方构建，导致已连接服务器仍一直显示为连接中。Desktop 0.3.0-rc.33 起自动随包安装本插件。
 
 ## 兼容性
 
