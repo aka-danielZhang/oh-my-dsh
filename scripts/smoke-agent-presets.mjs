@@ -2,13 +2,12 @@
 import { spawn, execFileSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 
 const runtime = JSON.parse(process.argv[2])
 const patch = join(process.env.DSH_HOME, 'preset-smoke.patch.json')
 writeFileSync(patch, JSON.stringify([{ insert: [{
   id: 'desktop-preset-smoke',
-  name: fileURLToPath(new URL('./fixtures/agent-preset-probe.mjs', import.meta.url)),
+  name: new URL('./fixtures/agent-preset-probe.mjs', import.meta.url).href,
 }] }]))
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/KEY|SECRET|TOKEN|PASSWORD/.test(key)))
 env.DSH_TELEMETRY_DISABLED = '1'

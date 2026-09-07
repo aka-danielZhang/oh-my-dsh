@@ -8,7 +8,7 @@ Desktop rc.34 的公开 runtime 与本地安装包内容一致。fork npm 发布
 
 fork [PR #14](https://github.com/aka-danielZhang/deepseek-harness/pull/14) 修复发布脚本：包自身发布到 `@crazx`，普通依赖保留原名并以 `npm:@crazx/<pkg>@<version>` 指向 fork；peer 保留原名和 fork semver，由宿主提供同一实例。发布脚本在打包和写 registry 前执行六项依赖名回归测试。
 
-Desktop rc.35 消费 `v0.1.2-rc.1+zw.2` 对应的 11 个 npm 修改包。插件业务代码与独立版本不变，插件的开发类型依赖不因本次纯发布元数据修复而全量重装。
+Desktop rc.36 消费 `v0.1.2-rc.1+zw.2` 对应的 11 个 npm 修改包。插件业务代码与独立版本不变，插件的开发类型依赖不因本次纯发布元数据修复而全量重装。rc.35 的 Windows 构建因测试探针使用盘符路径而被拦截、未正式发布；探针改用标准 file URL，不改业务加载器。
 
 ## 防回归
 
