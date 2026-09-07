@@ -109,7 +109,7 @@ pnpm run dev:web
 
 `prepare` 使用自包含的 `tsdown.config.ts` 与 `tsconfig.prepare.json`；Host Zod 与生成的共享 chunk 随包分发，桌面解包无需另装私有依赖。
 
-测试覆盖已发布 Host 包和浏览器工厂。MCP client 钉到带状态事件的 `@crazx` npm alias，防止 Node 静默加载官方构建，导致已连接服务器仍一直显示为连接中。Desktop 0.3.0-rc.33 起自动随包安装本插件。
+测试覆盖已发布 Host 包和浏览器工厂。MCP client 钉到带状态事件的 `@crazx` npm alias，防止 Node 静默加载官方构建，导致已连接服务器仍一直显示为连接中。Desktop 0.3.0-rc.34 起自动随包安装本插件。
 
 ## 兼容性
 

@@ -64,10 +64,11 @@ docs/                        packaging-playbook.md + notes/（决策记录住仓
 
 ### 2026-09-07 首装补充契约
 
-- Desktop 0.3.0-rc.33 起随包清单为 12 个：此前七包加 branding、fs-observation-log、provider-balance、reasoning-efforts 与 mcp-settings 0.2.6。实际集合仍以 `dsh.desktop.ship` 为单一事实源；MCP 暂缓入包的旧决策已被当前基线迁移与验证取代。
+- Desktop 0.3.0-rc.34 起随包清单为 12 个：此前七包加 branding、fs-observation-log、provider-balance、reasoning-efforts 与 mcp-settings 0.2.6。实际集合仍以 `dsh.desktop.ship` 为单一事实源；MCP 暂缓入包的旧决策已被当前基线迁移与验证取代。rc.33 因 Windows 安装冒烟失败未正式发布。
 - mcp-settings 类型检查、测试与构建不再依赖相邻源码树；使用 npm 发布的当前 gateway / renderer / settings 入口，Host Zod 内联且共享 chunk 随包。其三行 bundle 契约不变。
 - 已打包壳在首次接管确认阶段也必须读取 resources 中的 `shippedPlugins`，不可回退读取 `plugin/` 源码名单。开发启动同样按名单构建，有 build 脚本则运行、失败即中止，无脚本则跳过。
 - packaged profile 冒烟必须调用真实 `runDesktopPluginInstall` 事务并检查重复运行幂等；裸 TS host entry 的 tsx loader 从 assembled runtime cwd 解析。详情见 `docs/notes/2026-09-07-first-install-mcp.md`。
+- 安装事务添加插件后先在 staging 内刷新锁文件，再显式冻结安装验证；Windows pnpm 目录 add 可能未将新的 link spec 写入锁文件。已有 Profile 的事务前冻结检查和保护数据校验不得放松。
 
 npm 版本依赖是**唯一常态**；源码依赖仅限本地调试，且只能经专门命令进出：
 

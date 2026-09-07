@@ -109,7 +109,7 @@ pnpm run dev:web
 
 `prepare` uses the self-contained `tsdown.config.ts` and `tsconfig.prepare.json`. Host Zod and its shared chunks are bundled for desktop extraction.
 
-Tests exercise the published host package and browser factories. The MCP client is pinned to the status-capable `@crazx` npm alias so Node cannot silently load the official build and leave every connected server displayed as connecting. Desktop 0.3.0-rc.33 includes this plugin automatically.
+Tests exercise the published host package and browser factories. The MCP client is pinned to the status-capable `@crazx` npm alias so Node cannot silently load the official build and leave every connected server displayed as connecting. Desktop 0.3.0-rc.34 includes this plugin automatically.
 
 ## Compatibility
 
