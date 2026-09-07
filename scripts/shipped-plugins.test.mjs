@@ -45,10 +45,14 @@ test('lists every ship:true plugin once, including thread', () => {
   const specs = listShippedPluginSpecs(repoRoot)
   const names = specs.map((spec) => spec.package)
   assert.deepEqual(names, [
+    'dsh-branding',
     'dsh-compaction-hierarchical',
     'dsh-desktop-bridge',
+    'dsh-fs-observation-log',
     'dsh-model-efforts-editor',
     'dsh-model-image-input',
+    'dsh-provider-balance',
+    'dsh-reasoning-efforts',
     'dsh-send-while-running',
     'dsh-thread',
     'dsh-web-search-toggle',
@@ -59,9 +63,24 @@ test('lists every ship:true plugin once, including thread', () => {
   assert.equal(thread?.hashKey, 'threadTarball')
   const compaction = specs.find((spec) => spec.package === 'dsh-compaction-hierarchical')
   assert.equal(compaction?.env, 'DSH_DESKTOP_COMPACTION_PLUGIN')
-  assert.ok(!names.includes('dsh-branding'))
+  // mcp-settings 0.2.5 的 tsc/vitest 解析还锚在旧 harness 基线（rc.1 重组移走了
+  // packages/client/runtime，见 docs/notes/2026-09-07-desktop-ships-all-plugins.md），
+  // 移植完成前不随包分发。
   assert.ok(!names.includes('dsh-mcp-settings'))
   assert.ok(!names.includes('dsh-question-rail'))
+})
+
+test('bare-source plugin overrides its pack entries away from lib', () => {
+  const specs = listShippedPluginSpecs(repoRoot)
+  const providerBalance = specs.find((spec) => spec.package === 'dsh-provider-balance')
+  assert.deepEqual(providerBalance?.packEntries, [
+    'package.json',
+    'src',
+    'client',
+    'cordis.yml',
+    'cordis.bundle.yml',
+    'README.md',
+  ])
 })
 
 test('manifest slice is what a packaged shell can extract', () => {

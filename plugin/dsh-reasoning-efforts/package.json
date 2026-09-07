@@ -12,6 +12,9 @@
     "./package.json": "./package.json"
   },
   "dsh": {
+    "desktop": {
+      "ship": true
+    },
     "bundle": {
       "patch": "./cordis.patch.yml"
     }

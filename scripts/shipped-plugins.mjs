@@ -26,6 +26,12 @@ import { fileURLToPath } from 'node:url'
  *   pin: string | undefined
  *   packEntries: string[]
  * }} ShippedPluginSpec */
+/**
+ * `dsh.desktop.pack` overrides `packEntriesFor` for plugins whose shipped
+ * layout is not `package.json + lib/` — e.g. the npm bare-source convention
+ * (`main: ./src/index.ts`, runtime tsx loads TS directly), where a forced
+ * `lib` entry would either ship a stale tree or fail the tar outright.
+ */
 
 /**
  * @param {string} stem
@@ -146,6 +152,13 @@ export function listShippedPluginSpecs(repoRoot) {
     if (pin !== undefined && pin !== pkg.version) {
       throw new Error(`shipped-plugins: ${name} dsh.desktop.pin ${pin} != package.json version ${pkg.version}`)
     }
+    let pack
+    if (desktop.pack !== undefined) {
+      if (!Array.isArray(desktop.pack) || desktop.pack.length === 0 || !desktop.pack.every((entry) => typeof entry === 'string' && entry.length > 0)) {
+        throw new Error(`shipped-plugins: ${name} dsh.desktop.pack must be a non-empty array of non-empty strings`)
+      }
+      pack = desktop.pack
+    }
     specs.push({
       package: name,
       dir,
@@ -156,7 +169,7 @@ export function listShippedPluginSpecs(repoRoot) {
       versionKey: versionKeyForTarball(tarball),
       version: pkg.version,
       pin,
-      packEntries: packEntriesFor(dir),
+      packEntries: pack ?? packEntriesFor(dir),
     })
   }
   if (specs.length === 0) {

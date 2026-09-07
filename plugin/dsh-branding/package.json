@@ -15,6 +15,9 @@
     "./package.json": "./package.json"
   },
   "dsh": {
+    "desktop": {
+      "ship": true
+    },
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-runtime"

@@ -25,7 +25,7 @@ for (const spec of specs) {
     run(['run', 'setup'], spec.dir, { ...process.env, DSH_CHECKOUT: checkout })
   }
   for (const script of ['typecheck', 'test', 'build']) {
-    run(['run', script], spec.dir)
+    run(['run', '--if-present', script], spec.dir)
   }
 }
 console.log(`check-shipped-plugins: ok (${String(specs.length)} plugins)`)

@@ -30,6 +30,17 @@
     "./package.json": "./package.json"
   },
   "dsh": {
+    "desktop": {
+      "ship": true,
+      "pack": [
+        "package.json",
+        "src",
+        "client",
+        "cordis.yml",
+        "cordis.bundle.yml",
+        "README.md"
+      ]
+    },
     "bundle": {
       "patch": "./cordis.bundle.yml"
     },

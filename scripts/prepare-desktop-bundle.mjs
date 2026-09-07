@@ -117,7 +117,7 @@ async function buildDesktopPlugins() {
       console.log(`prepare-desktop-bundle: skip build ${basename(pluginDir)} (cached lib)`)
       continue
     }
-    jobs.push(runAsync(pnpm, ['run', 'build'], { cwd: pluginDir }))
+    jobs.push(runAsync(pnpm, ['run', '--if-present', 'build'], { cwd: pluginDir }))
   }
   await Promise.all(jobs)
 }
