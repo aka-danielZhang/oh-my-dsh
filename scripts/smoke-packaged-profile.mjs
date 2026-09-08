@@ -120,6 +120,8 @@ function main() {
       importHostLib(dest, findNode(runtimeDir), join(runtimeDir, 'dsh'), spec.package)
     }
     const node = findNode(runtimeDir)
+    console.log('smoke-packaged-profile: model client fibers against packaged Cordis')
+    run(node, [join(repoRoot, 'scripts/smoke-model-plugin-clients.mjs'), join(runtimeDir, 'dsh'), extractDir])
     const profile = join(home, 'profiles/web')
     const env = { ...process.env, DSH_HOME: home, CI: 'true' }
     const cwd = join(runtimeDir, 'dsh')

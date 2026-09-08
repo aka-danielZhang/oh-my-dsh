@@ -1,6 +1,6 @@
 {
   "name": "dsh-model-image-input",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Per-model image-input controls injected into custom pi-ai model rows in Web Settings",
   "type": "module",
   "main": "lib/index.js",
@@ -31,7 +31,7 @@
       "tarball": "model-image-input.tar.gz",
       "dest": "plugins/dsh-model-image-input",
       "env": "DSH_DESKTOP_MODEL_IMAGE_INPUT_PLUGIN",
-      "pin": "0.1.2"
+      "pin": "0.1.3"
     }
   },
   "scripts": {

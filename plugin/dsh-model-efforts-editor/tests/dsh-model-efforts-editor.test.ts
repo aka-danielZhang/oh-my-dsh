@@ -21,7 +21,10 @@ test('host half exports a loadable surface entry', () => {
 
 test('client half exports a loadable plugin', () => {
   assert.equal(typeof clientApply, 'function')
-  assert.ok(Array.isArray(inject) && inject.includes('locale'))
+  assert.ok(Array.isArray(inject))
+  for (const service of ['locale', 'settingsScope', 'remote', 'remote.settings']) {
+    assert.ok(inject.includes(service), `inject must declare ${service}`)
+  }
   assert.equal(NS, 'settings.modelEfforts')
   assert.equal(PI_AI_NS, 'llm-pi-ai')
 })
