@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OhMyMemo 记忆空间 — 范围、状态与视图</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#f5f5f5; --paper-2:#ececec; --ink:#2d3142; --muted:#4f5d75;
+    --soft:#7a8399; --rule:rgba(45,49,66,0.10); --accent:#eb6c36;
+    --accent-tint:rgba(235,108,54,0.08); --link:#2e5aa8;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:var(--paper);color:var(--ink);
+    font-family:'Geist','Noto Sans SC',sans-serif;padding:3rem 2.5rem;}
+  .eyebrow{font-family:'Geist Mono',monospace;font-size:11px;letter-spacing:0.22em;
+    text-transform:uppercase;color:var(--soft);margin-bottom:0.75rem;}
+  h1{font-family:'Instrument Serif','Noto Serif SC',serif;font-weight:400;
+    font-size:1.9rem;line-height:1.2;margin-bottom:0.5rem;}
+  .subtitle{font-size:13px;color:var(--muted);max-width:760px;line-height:1.7;margin-bottom:2.25rem;}
+  .diagram{max-width:1280px;margin:0 auto;}
+  svg{width:100%;height:auto;display:block;}
+  .aside-note{max-width:1280px;margin:1.5rem auto 0;background:#ffffff;
+    border:1px solid rgba(45,49,66,0.12);border-radius:6px;padding:1rem 1.25rem;
+    display:flex;gap:0.9rem;align-items:baseline;}
+  .aside-note .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);
+    flex:none;transform:translateY(-1px);}
+  .aside-note p{font-family:'Instrument Serif','Noto Serif SC',serif;font-style:italic;
+    font-size:14.5px;color:var(--muted);line-height:1.75;}
+  footer{max-width:1280px;margin:2.5rem auto 0;padding-top:1rem;
+    border-top:1px solid var(--rule);font-family:'Geist Mono',monospace;
+    font-size:9px;color:var(--soft);letter-spacing:0.1em;
+    display:flex;justify-content:space-between;}
+</style>
+</head>
+<body>
+  <p class="eyebrow">NESTED · DSH-OHYMEMO MEMORY SPACE</p>
+  <h1>记忆空间：范围、状态与视图</h1>
+  <p class="subtitle">范围（scope）决定一条记忆跟着谁走，状态（status）决定它现在算不算数，视图（views/）是系统按范围生成好的只读摘要。本图按真实目录结构绘制：一条记忆就是一个带 frontmatter 的 .md 文件。</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 1280 720" role="img" aria-labelledby="memspace-title memspace-desc" xmlns="http://www.w3.org/2000/svg">
+    <title id="memspace-title">OhMyMemo 记忆空间目录结构</title>
+    <desc id="memspace-desc">嵌套图展示 OhMyMemo 记忆库的目录结构：scopes 正典区按 user 与 workspace 两类范围存放记忆文件，状态决定文件位于正典区、候选区、归档区或墓碑区，views 目录是由正典记忆筛选重建的只读摘要视图。</desc>
+    <defs>
+      <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+      </marker>
+      <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#eb6c36"/>
+      </marker>
+      <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+      </marker>
+    </defs>
+
+    <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+    <!-- ===== containment rings (painted first) ===== -->
+    <!-- Store root -->
+    <rect x="40" y="72" width="1200" height="552" rx="8" fill="rgba(45,49,66,0.015)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+    <!-- scopes/ canonical area -->
+    <rect x="72" y="112" width="696" height="488" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.35)" stroke-width="1"/>
+    <!-- user scope -->
+    <rect x="104" y="152" width="632" height="204" rx="8" fill="rgba(45,49,66,0.025)" stroke="rgba(45,49,66,0.45)" stroke-width="1"/>
+    <!-- workspace scope -->
+    <rect x="104" y="380" width="632" height="192" rx="8" fill="rgba(45,49,66,0.025)" stroke="rgba(45,49,66,0.45)" stroke-width="1"/>
+    <!-- views/ derived views — focal -->
+    <rect x="800" y="112" width="408" height="264" rx="8" fill="rgba(235,108,54,0.06)" stroke="#eb6c36" stroke-width="1.2"/>
+
+    <!-- ===== derivation arrow scopes → views ===== -->
+    <line x1="768" y1="244" x2="796" y2="244" stroke="#eb6c36" stroke-width="1.6" marker-end="url(#arrow-accent)"/>
+    <rect x="752" y="220" width="64" height="12" rx="2" fill="#f5f5f5"/>
+    <text x="784" y="229" fill="#eb6c36" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          text-anchor="middle" letter-spacing="0.06em">筛选重建</text>
+
+    <!-- ===== memory file chips ===== -->
+    <!-- user scope chips -->
+    <rect x="136" y="184" width="568" height="28" rx="4" fill="#ffffff" stroke="rgba(45,49,66,0.18)" stroke-width="1"/>
+    <g transform="translate(144,190) scale(0.8)">
+      <path d="M0 0 L16 0 L20 4 L20 20 L0 20 Z" fill="#f5f5f5" stroke="rgba(45,49,66,0.40)" stroke-width="1"/>
+      <path d="M16 0 L16 4 L20 4" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1"/>
+    </g>
+    <text x="172" y="202" fill="#4f5d75" font-size="9" font-family="'Geist Mono','Noto Sans SC',monospace">user/semantic/mem_01M1Y8MJWH….md</text>
+    <text x="608" y="202" fill="#7a8399" font-size="11" font-family="'Geist','Noto Sans SC',sans-serif" text-anchor="end">用户使用中文交流</text>
+    <rect x="632" y="192" width="56" height="12" rx="2" fill="none" stroke="rgba(79,93,117,0.55)" stroke-width="0.8"/>
+    <text x="660" y="201" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">active</text>
+
+    <rect x="136" y="224" width="568" height="28" rx="4" fill="#ffffff" stroke="rgba(45,49,66,0.18)" stroke-width="1"/>
+    <g transform="translate(144,230) scale(0.8)">
+      <path d="M0 0 L16 0 L20 4 L20 20 L0 20 Z" fill="#f5f5f5" stroke="rgba(45,49,66,0.40)" stroke-width="1"/>
+      <path d="M16 0 L16 4 L20 4" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1"/>
+    </g>
+    <text x="172" y="242" fill="#4f5d75" font-size="9" font-family="'Geist Mono','Noto Sans SC',monospace">user/episodic/2026/09/mem_01M1Y8MK2….md</text>
+    <text x="608" y="242" fill="#7a8399" font-size="11" font-family="'Geist','Noto Sans SC',sans-serif" text-anchor="end">和助手逐题复习算法（Java）</text>
+    <rect x="632" y="232" width="56" height="12" rx="2" fill="none" stroke="rgba(79,93,117,0.55)" stroke-width="0.8"/>
+    <text x="660" y="241" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">active</text>
+
+    <rect x="136" y="264" width="568" height="28" rx="4" fill="#ffffff" stroke="rgba(45,49,66,0.18)" stroke-width="1"/>
+    <g transform="translate(144,270) scale(0.8)">
+      <path d="M0 0 L16 0 L20 4 L20 20 L0 20 Z" fill="#f5f5f5" stroke="rgba(45,49,66,0.40)" stroke-width="1"/>
+      <path d="M16 0 L16 4 L20 4" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1"/>
+    </g>
+    <text x="172" y="282" fill="#4f5d75" font-size="9" font-family="'Geist Mono','Noto Sans SC',monospace">user/procedural/mem_01M1Y8MK4….md</text>
+    <text x="608" y="282" fill="#7a8399" font-size="11" font-family="'Geist','Noto Sans SC',sans-serif" text-anchor="end">文档要点放最前</text>
+    <rect x="632" y="272" width="56" height="12" rx="2" fill="none" stroke="rgba(79,93,117,0.55)" stroke-width="0.8"/>
+    <text x="660" y="281" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">active</text>
+
+    <!-- workspace scope chip -->
+    <rect x="136" y="412" width="568" height="28" rx="4" fill="#ffffff" stroke="rgba(45,49,66,0.18)" stroke-width="1"/>
+    <g transform="translate(144,418) scale(0.8)">
+      <path d="M0 0 L16 0 L20 4 L20 20 L0 20 Z" fill="#f5f5f5" stroke="rgba(45,49,66,0.40)" stroke-width="1"/>
+      <path d="M16 0 L16 4 L20 4" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1"/>
+    </g>
+    <text x="172" y="430" fill="#4f5d75" font-size="9" font-family="'Geist Mono','Noto Sans SC',monospace">workspaces/&lt;wsId&gt;/semantic/mem_….md</text>
+    <text x="608" y="430" fill="#7a8399" font-size="11" font-family="'Geist','Noto Sans SC',sans-serif" text-anchor="end">该工作区的出图习惯</text>
+    <rect x="632" y="420" width="56" height="12" rx="2" fill="none" stroke="rgba(79,93,117,0.55)" stroke-width="0.8"/>
+    <text x="660" y="429" fill="#4f5d75" font-size="7" font-family="'Geist Mono',monospace" text-anchor="middle" letter-spacing="0.08em">active</text>
+    <text x="136" y="472" fill="#7a8399" font-size="9" font-family="'Geist Mono','Noto Sans SC',monospace" letter-spacing="0.04em">范围判定：会话 cwd → realpath → ws_&lt;ulid&gt;（dsh workspace id 优先）</text>
+
+    <!-- views chips -->
+    <rect x="832" y="152" width="344" height="28" rx="4" fill="#ffffff" stroke="rgba(235,108,54,0.35)" stroke-width="1"/>
+    <text x="848" y="170" fill="#4f5d75" font-size="9" font-family="'Geist Mono','Noto Sans SC',monospace">user-profile.md</text>
+    <text x="1160" y="170" fill="#7a8399" font-size="11" font-family="'Geist','Noto Sans SC',sans-serif" text-anchor="end">user 范围核心记忆</text>
+    <rect x="832" y="192" width="344" height="28" rx="4" fill="#ffffff" stroke="rgba(235,108,54,0.35)" stroke-width="1"/>
+    <text x="848" y="210" fill="#4f5d75" font-size="9" font-family="'Geist Mono','Noto Sans SC',monospace">workspaces/&lt;wsId&gt;.md</text>
+    <text x="1160" y="210" fill="#7a8399" font-size="11" font-family="'Geist','Noto Sans SC',sans-serif" text-anchor="end">工作区核心记忆</text>
+    <text x="832" y="252" fill="#7a8399" font-size="9" font-family="'Geist Mono','Noto Sans SC',monospace" letter-spacing="0.04em">重建筛选：pinned · active · normal</text>
+    <text x="832" y="272" fill="#7a8399" font-size="9" font-family="'Geist Mono','Noto Sans SC',monospace" letter-spacing="0.04em">importance 降序 · 手编将在重建时被覆盖</text>
+
+    <!-- ===== status → location boxes ===== -->
+    <rect x="800" y="408" width="408" height="48" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+    <text x="816" y="428" fill="#4f5d75" font-size="9" font-family="'Geist Mono','Noto Sans SC',monospace" letter-spacing="0.04em">inbox/candidates/</text>
+    <text x="816" y="446" fill="#7a8399" font-size="11" font-family="'Geist','Noto Sans SC',sans-serif">candidate 候选 —— 尚未定稿，不参与召回</text>
+
+    <rect x="800" y="464" width="408" height="48" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+    <text x="816" y="484" fill="#4f5d75" font-size="9" font-family="'Geist Mono','Noto Sans SC',monospace" letter-spacing="0.04em">archive/（目录结构与 scopes 镜像）</text>
+    <text x="816" y="502" fill="#7a8399" font-size="11" font-family="'Geist','Noto Sans SC',sans-serif">superseded 旧版 —— 修订后整体迁入</text>
+
+    <rect x="800" y="520" width="408" height="48" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+    <text x="816" y="540" fill="#4f5d75" font-size="9" font-family="'Geist Mono','Noto Sans SC',monospace" letter-spacing="0.04em">tombstones/&lt;id&gt;.yaml</text>
+    <text x="816" y="558" fill="#7a8399" font-size="11" font-family="'Geist','Noto Sans SC',sans-serif">已忘记 —— 墓碑屏障，同 ID / 同 key 不得复活</text>
+
+    <!-- ===== ring label masks (over ring borders) ===== -->
+    <rect x="56" y="64" width="304" height="16" fill="#f5f5f5"/>
+    <text x="64" y="76" fill="#4f5d75" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace" letter-spacing="0.14em">ohmymemo/ · OhMyMemo 记忆库（$DSH_HOME 下）</text>
+
+    <rect x="88" y="104" width="300" height="16" fill="#f5f5f5"/>
+    <text x="96" y="116" fill="#4f5d75" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace" letter-spacing="0.14em">scopes/ · 正典记忆区 —— 唯一事实源</text>
+
+    <rect x="120" y="144" width="348" height="16" fill="#f5f5f5"/>
+    <text x="128" y="156" fill="#4f5d75" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace" letter-spacing="0.14em">user/ · user 范围 —— 跟着你走，跨项目生效</text>
+
+    <rect x="120" y="372" width="436" height="16" fill="#f5f5f5"/>
+    <text x="128" y="384" fill="#4f5d75" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace" letter-spacing="0.14em">workspaces/&lt;wsId&gt;/ · workspace 范围 —— 只在该工作区生效</text>
+
+    <rect x="816" y="104" width="320" height="16" fill="#f5f5f5"/>
+    <text x="824" y="116" fill="#eb6c36" font-size="8" font-weight="600" font-family="'Geist Mono','Noto Sans SC',monospace" letter-spacing="0.14em">views/ · 派生视图（只读 · 随时可重建）</text>
+
+    <!-- ===== editorial callout ===== -->
+    <text x="1208" y="96" fill="#2d3142" font-size="14" font-style="italic"
+          font-family="'Instrument Serif','Noto Serif SC',serif" text-anchor="end">状态决定文件住哪个目录；视图只是派生投影</text>
+    <path d="M 1008 102 Q 996 106 992 112" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+    <circle cx="992" cy="114" r="2" fill="#2d3142"/>
+
+    <!-- ===== legend ===== -->
+    <line x1="30" y1="656" x2="1250" y2="656" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+    <text x="30" y="676" fill="#4f5d75" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.14em">LEGEND</text>
+    <rect x="104" y="665" width="24" height="14" rx="4" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1"/>
+    <text x="136" y="676" fill="#7a8399" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace">目录环（Store · 范围 · 区域）</text>
+    <rect x="376" y="665" width="24" height="14" rx="3" fill="#ffffff" stroke="rgba(45,49,66,0.25)" stroke-width="1"/>
+    <text x="408" y="676" fill="#7a8399" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace">记忆文件（一条记忆 = 一个 .md）</text>
+    <rect x="680" y="665" width="24" height="14" rx="4" fill="rgba(235,108,54,0.06)" stroke="#eb6c36" stroke-width="1"/>
+    <text x="712" y="676" fill="#7a8399" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace">views/ 派生视图（焦点）</text>
+    <text x="912" y="676" fill="#7a8399" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace">active 正式 · candidate 候选 · superseded 旧版 · disputed 有争议</text>
+    <text x="30" y="704" fill="#7a8399" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace">journal/（纯元数据日志）· config.yaml · manifest.yaml —— 库级配置，本图省略 · 完整说明见 docs/ohmymemo-memory-space.md</text>
+  </svg>
+  </div>
+
+  <div class="aside-note">
+    <span class="dot"></span>
+    <p>召回侧：每个新会话的常驻记忆胶囊（capsule）由 context 行从核心视图同源筛选——workspace 优先、importance 排序、8KB 预算内确定性截断；视图给人看，胶囊给模型看，准入条件相同（pinned · active · normal）。提取→入库→召回的完整调用时序见 memory-extraction-sequence.html。</p>
+  </div>
+
+  <footer>
+    <span>DSH-OHYMEMO · NESTED · 2026-09-07</span>
+    <span>一 Store · 两范围环 · 三状态区 · 一焦点视图</span>
+  </footer>
+</body>
+</html>
