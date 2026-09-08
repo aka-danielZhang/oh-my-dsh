@@ -44,8 +44,19 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
   try {
     ctx.effect(() => ctx.locale.register(LOCALE_NS, { zh, en }), 'dsh-ohmymemo: Memory dictionaries')
     ctx.effect(() => {
+      // Pre-claimed with data-plugin/data-plugin-css (the stock build-time
+      // CSS emission convention) and dedup-guarded: the client module
+      // system's claimStyles attributes every UNTAGGED <style> to whichever
+      // plugin materializes next, and that plugin's next HMR reload deletes
+      // the claimed sheet — this plugin's own dev rebuilds did exactly that
+      // to the desktop bridge's rail/titlebar stylesheets (2026-09-08
+      // incident, dsh-desktop docs/notes/2026-09-08-style-tag-claiming-hmr.md).
+      const tagId = 'dsh-ohmymemo/client-css'
+      if (document.querySelector(`style[data-plugin-css="${tagId}"]`) !== null) return () => {}
       const style = document.createElement('style')
       style.dataset.dshOhMyMemo = 'client-css'
+      style.dataset.plugin = 'dsh-ohmymemo'
+      style.dataset.pluginCss = tagId
       style.textContent = MEMORY_SETTINGS_CSS
       document.head.appendChild(style)
       return () => { style.remove() }
