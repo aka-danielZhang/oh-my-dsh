@@ -27,6 +27,8 @@
 
 [`plugin/`](plugin/) 下每个目录都是一个可独立安装、独立发版的 DSH 插件：
 
+> **已安装 Desktop 的插件接入**：以下命令会修改所选 DSH Home 的 Web Profile；默认与 Desktop 共享数据。开发分支插件须先验证运行时基线、全部入口和宿主依赖链接，不能只复制到 `~/.dsh-desktop/plugins/` 就接入正式客户端。操作前阅读 [Desktop 插件接入与故障恢复](docs/desktop-plugin-integration.md)。
+
 ```sh
 dsh plugin --profile web add <repo>/plugin/<name>   # git / 本地路径均可
 dsh plugin --profile web add <name>                 # mcp-settings 与 provider-balance 已发布 npm
@@ -54,6 +56,7 @@ dsh plugin --profile web add <name>                 # mcp-settings 与 provider-
 ## 文档
 
 - [AGENTS.md](AGENTS.md) — 仓库契约、插件边界、本地开发与构建命令
+- [Desktop 插件接入与故障恢复](docs/desktop-plugin-integration.md) — 开发插件接入正式客户端前的验证、依赖边界和安全恢复
 - [Packaging Playbook](docs/packaging-playbook.md) — 构建、签名与公证
 - [Release Runbook](docs/release-runbook.md) — 发布流程
 - [Design Notes](docs/notes/) — 关键决策记录

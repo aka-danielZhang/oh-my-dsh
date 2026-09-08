@@ -4,6 +4,13 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 
 ## [Unreleased]
 
+## [0.3.0-rc.38] - 2026-09-08
+
+### Fixed
+
+- 修复 rc.37 安装或更新后卡在「Failed to load plugins / loader fibers failed」：推理档位和图片输入插件补齐 `remote` 与 `remote.settings` 两项服务声明，两插件升至 0.1.3。保留模型设置写入修复，无需清空配置或聊天数据。
+- 发布前新增实际客户端插件产物的 Cordis 加载、重复挂载和卸载测试，并验证漏掉任一 Remote 服务声明时测试必定失败。
+
 ## [0.3.0-rc.37] - 2026-09-08
 
 ### Fixed

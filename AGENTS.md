@@ -57,6 +57,7 @@ docs/                        packaging-playbook.md + notes/（决策记录住仓
 
 ### 跨包纪律
 
+- **开发插件接入已安装 Desktop 前必读**：[Desktop 插件接入与故障恢复](docs/desktop-plugin-integration.md)。禁止以复制构建文件、手改正式 Profile 或在正式插件目录临时安装依赖，替代 runtime 基线适配、同实例依赖链接和隔离产物验证。源码 `ship: true` 不会改变旧客户端包内的随包清单；Host 多入口与 Client 都须验证。文档任务不授权修改正式 Profile、记忆库或发布新版本。
 - 跨插件只走 slot 与 ctx 服务，禁止 import 另一插件的实现符号；harness 包只做 type-only import（构建时擦除）。
 - 决策记录一律 `docs/notes/`（仓根），不跟包走。包内 README 只写该包的安装与行为。
 
@@ -64,6 +65,7 @@ docs/                        packaging-playbook.md + notes/（决策记录住仓
 
 ### 2026-09-07 首装补充契约
 
+- Desktop 0.3.0-rc.38 随包模型图片输入与档位编辑器均为 0.1.3。读取 `ctx.remote.settings` 必须同时声明 `remote` 与 `remote.settings`；子服务声明不隐含父服务权限。packaged smoke 必须执行两插件的实际 client bundle，以独立 provider fiber 和组装运行时 Cordis 检查启动、重复挂载、卸载及缺失声明反例，不能只检查 Host 入口和静态 inject 字符串。
 - Desktop 0.3.0-rc.34 起随包清单为 12 个：此前七包加 branding、fs-observation-log、provider-balance、reasoning-efforts 与 mcp-settings 0.2.6。实际集合仍以 `dsh.desktop.ship` 为单一事实源；MCP 暂缓入包的旧决策已被当前基线迁移与验证取代。rc.33 因 Windows 安装冒烟失败未正式发布。
 - mcp-settings 类型检查、测试与构建不再依赖相邻源码树；使用 npm 发布的当前 gateway / renderer / settings 入口，Host Zod 内联且共享 chunk 随包。其三行 bundle 契约不变。
 - 已打包壳在首次接管确认阶段也必须读取 resources 中的 `shippedPlugins`，不可回退读取 `plugin/` 源码名单。开发启动同样按名单构建，有 build 脚本则运行、失败即中止，无脚本则跳过。

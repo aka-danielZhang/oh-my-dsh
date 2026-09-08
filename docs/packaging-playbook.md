@@ -85,25 +85,24 @@ DSH_HOME=$(mktemp -d) DSH_DESKTOP_E2E_PROBE=1 DSH_DESKTOP_E2E_EXIT=1 \
 echo "exit=$?"   # 0 = 通过
 ```
 
-**强制走资源分支**（否则构建机的 `runtime/build` 与源码 checkout 会掩盖打包缺陷）：
+**强制走资源分支并隔离壳状态**：使用已打包应用、全新的 OS Home / DSH Home / Electron user-data，避免真实缓存掩盖缺依赖。不要移动开发 runtime，也不要删除正式 `~/.dsh-desktop/runtime`。
 
 ```sh
-mv runtime/build runtime/build.off          # 摘掉 dev 解析路径
-rm -rf ~/.dsh-desktop/runtime               # 摘掉已解压缓存，强制重新解压
-DSH_HOME=$(mktemp -d) DSH_DESKTOP_E2E_PROBE=1 DSH_DESKTOP_E2E_EXIT=1 \
-  "release/mac-arm64/Oh My DSH.app/Contents/MacOS/Oh My DSH"
-echo "exit=$?"                               # 0 = 资源分支完整可用
-mv runtime/build.off runtime/build
+DSH_SMOKE_ROOT=$(mktemp -d)
+mkdir -p "$DSH_SMOKE_ROOT/os-home" "$DSH_SMOKE_ROOT/data"
+env -u DSH_DESKTOP_RUNTIME -u DSH_CHECKOUT \
+  HOME="$DSH_SMOKE_ROOT/os-home" DSH_HOME="$DSH_SMOKE_ROOT/data" \
+  DSH_DESKTOP_E2E_PROBE=1 DSH_DESKTOP_E2E_EXIT=1 \
+  "release/mac-arm64/Oh My DSH.app/Contents/MacOS/Oh My DSH" \
+  --user-data-dir="$DSH_SMOKE_ROOT/electron"
+echo "exit=$?"   # 0 = 探针通过；新增插件仍须做专项加载和功能验证
 ```
 
-**真实 home 场景**（scratch home 是干净世界，测不出 profile 里 `file:` 源码插件（.ts 入口）的加载依赖——0.1.0 就是在这里翻的车，bundled runtime 缺 tsx loader 全树崩溃，见 note 踩坑三）：
+同时检查并清除测试进程继承的 `DSH_DESKTOP_*_PLUGIN`、`DSH_DESKTOP_BRIDGE`、`DSH_WEB_LOG_DIR` 等路径覆盖，不能让它们重新指向正式目录。Windows 用独立测试账号或虚拟机隔离 `%USERPROFILE%` 和应用数据。
 
-```sh
-# 不设 DSH_HOME，用真实 ~/.dsh（含本地源码插件与用户 patch 层）：
-DSH_DESKTOP_E2E_PROBE=1 DSH_DESKTOP_E2E_EXIT=1 pnpm desktop:dev
-```
+**已有 Profile 场景**：空 Home 验证之外，另用隔离目录中的既有 Profile 快照验证 `file:` / `link:` 插件及 home patch。复制前退出有关进程，排除凭据和无关私密数据；检查绝对路径、软链接及 Store root 覆盖，确保所有写入都留在测试目录。不要拿真实 Home 做未经验证插件的首次安装测试。
 
-首次启动会解压 runtime tar（约十几秒），日志有 `extracted bundled runtime <sha>` 一行。真实 `~/.dsh` 手工过一遍：开窗、建会话、下载桥、外链、通知。
+首次启动会解压 runtime tar，日志有 `extracted bundled runtime <sha>` 一行。隔离环境中验证开窗、建会话、下载桥、外链、通知及新增插件，再做完整退出重启。正式 Profile 接入须在备份和用户确认后进行，详见 [Desktop 插件接入与故障恢复](desktop-plugin-integration.md)。
 
 ## 5. 分发与 Gatekeeper
 
@@ -226,4 +225,3 @@ pnpm desktop:build -- --win
 ```
 
 没证书的机器必须仍能打未签名包。
-

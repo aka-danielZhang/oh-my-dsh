@@ -26,7 +26,7 @@ export const NS = 'settings.modelEfforts'
 export const PI_AI_NS = 'llm-pi-ai'
 
 /** Required services: locale dictionaries, the settings scope binder, and the typed settings Remote. */
-export const inject = ['locale', 'settingsScope', 'remote.settings']
+export const inject = ['locale', 'settingsScope', 'remote', 'remote.settings']
 
 /**
  * Client plugin body: bind the llm-pi-ai settings scope, then start the
