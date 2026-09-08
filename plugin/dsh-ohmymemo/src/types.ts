@@ -8,8 +8,12 @@
 /** Memory kinds (see the design doc's taxonomy). */
 export type MemoryKind = 'semantic' | 'episodic' | 'procedural'
 
-/** Maturity states. `forgotten` is not a state: forgetting deletes the body. */
-export type MemoryStatus = 'candidate' | 'active' | 'disputed' | 'superseded'
+/**
+ * Maturity states. `expired` is the lifecycle archive state (valid_until
+ * passed or silence past the decay horizon); `forgotten` is not a state:
+ * forgetting deletes the body.
+ */
+export type MemoryStatus = 'candidate' | 'active' | 'disputed' | 'superseded' | 'expired'
 
 /** Sensitivity policy. Credential-like content never enters the store. */
 export type MemoryPrivacy = 'normal' | 'sensitive' | 'secret-ref'
@@ -62,6 +66,8 @@ export interface MemoryRecord {
   created_at: string
   updated_at: string
   last_confirmed_at?: string
+  /** Last time real evidence re-attested this fact (curator refresh only; never recall). */
+  last_evidenced_at?: string
   valid_from?: string | null
   valid_until?: string | null
   tags: string[]
@@ -112,6 +118,10 @@ export interface StoreUserConfig {
   max_get_records: number
   max_injected_bytes: number
   candidate_retention_days: number
+  /** Read-time decay horizons per kind, in days (see the lifecycle design note). */
+  decay_horizon_days_semantic: number
+  decay_horizon_days_procedural: number
+  decay_horizon_days_episodic: number
 }
 
 /** Workspace scope association file (`scopes/workspaces/<ws>/scope.yaml`). */

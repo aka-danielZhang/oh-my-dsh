@@ -12,15 +12,29 @@
 
 import { hashText, writeFileAtomic } from './atomic.ts'
 import type { MemoryCatalog } from './catalog.ts'
-import type { CatalogEntry, StoreUserConfig } from './types.ts'
+import type { CatalogEntry, MemoryRecord, StoreUserConfig } from './types.ts'
 import { join } from 'node:path'
 
-/** Entry eligibility shared by views and the capsule. */
-export function isCoreViewEntry(entry: CatalogEntry): boolean {
+/**
+ * Entry eligibility shared by views and the capsule. `now` gates the business
+ * validity window: a record whose `valid_until` has passed (or `valid_from`
+ * not yet reached) leaves capsule/views immediately, before the nightly
+ * maintenance archives it. Recency decay, by contrast, is capsule ranking
+ * only — views (human-facing) stay complete.
+ */
+export function isCoreViewEntry(entry: CatalogEntry, now: Date): boolean {
   return entry.quarantine === undefined
     && entry.record.status === 'active'
     && entry.record.privacy === 'normal'
     && entry.record.pinned
+    && withinValidityWindow(entry.record, now)
+}
+
+/** False when the record's business validity window excludes it at `now`. */
+export function withinValidityWindow(record: Pick<MemoryRecord, 'valid_from' | 'valid_until'>, now: Date): boolean {
+  if (record.valid_from !== undefined && record.valid_from !== null && Date.parse(record.valid_from) > now.getTime()) return false
+  if (record.valid_until !== undefined && record.valid_until !== null && Date.parse(record.valid_until) <= now.getTime()) return false
+  return true
 }
 
 /** Deterministic ordering: importance desc, then created_at asc, then id. */
@@ -78,8 +92,10 @@ export function publishView(root: string, relPath: string, text: string): void {
 export function rebuildViews(root: string, catalog: Pick<MemoryCatalog, 'allEntries' | 'scopes'>, config: StoreUserConfig, generatedAt: string): string[] {
   void config
   const written: string[] = []
-  // Views show core entries only: active + normal + pinned, unquarantined.
-  const all = catalog.allEntries().filter(isCoreViewEntry)
+  // Views show core entries only: active + normal + pinned, unquarantined,
+  // inside their validity window at generation time.
+  const now = new Date(generatedAt)
+  const all = catalog.allEntries().filter((entry) => isCoreViewEntry(entry, now))
   const userEntries = all.filter((entry) => entry.record.scope === 'user')
   publishView(root, 'views/user-profile.md', composeView('User profile', 'user', userEntries, generatedAt))
   written.push('views/user-profile.md')

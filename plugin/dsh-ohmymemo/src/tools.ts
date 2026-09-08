@@ -150,6 +150,7 @@ export function apply(ctx: Context): void {
       importance: { type: 'number', description: '召回优先级 0–1，默认 0.5。' },
       pinned: { type: 'boolean', description: '是否有资格进入有界核心视图；默认 true。' },
       tags: { type: 'array', items: { type: 'string' }, description: '少量稳定检索标签。' },
+      validUntil: { type: 'string', description: '可选 ISO 日期/时间戳：仅当事实本身有期限（备考、在职项目约束、季节性环境）时设置；持久偏好勿设。' },
     },
     output: {
       schema: {
@@ -176,6 +177,7 @@ export function apply(ctx: Context): void {
         ...(args.cardinality !== undefined ? { cardinality: args.cardinality } : {}),
         ...(args.importance !== undefined ? { importance: args.importance } : {}),
         ...(args.tags !== undefined ? { tags: args.tags } : {}),
+        ...(args.validUntil !== undefined ? { validUntil: args.validUntil } : {}),
         pinned: args.pinned ?? true,
         confirmed: true,
         sources: [{ type: 'user_command', session_id: sessionId, observed_at: new Date().toISOString() }],

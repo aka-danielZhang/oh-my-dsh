@@ -15,14 +15,24 @@ function entry(id: string, overrides: Record<string, unknown> = {}): ReturnType<
   return makeEntry({ record, relPath: `scopes/user/semantic/${id}.md`, absPath: `/store/${id}`, hash: `sha256:${id}`, bytes: 10, mtimeMs: 0 })
 }
 
-test('core view eligibility: active + normal + pinned, never quarantined', () => {
-  assert.equal(isCoreViewEntry(entry('a')), true, 'base fixture is pinned')
-  assert.equal(isCoreViewEntry(entry('a', { pinned: true })), true)
-  assert.equal(isCoreViewEntry(entry('a', { pinned: true, status: 'disputed' })), false)
-  assert.equal(isCoreViewEntry(entry('a', { pinned: true, privacy: 'sensitive' })), false)
+const NOW = new Date('2026-09-03T10:00:00.000Z')
+
+test('core view eligibility: active + normal + pinned + validity window, never quarantined', () => {
+  assert.equal(isCoreViewEntry(entry('a'), NOW), true, 'base fixture is pinned')
+  assert.equal(isCoreViewEntry(entry('a', { pinned: true }), NOW), true)
+  assert.equal(isCoreViewEntry(entry('a', { pinned: true, status: 'disputed' }), NOW), false)
+  assert.equal(isCoreViewEntry(entry('a', { pinned: true, status: 'expired' }), NOW), false, 'expired never re-enters views')
+  assert.equal(isCoreViewEntry(entry('a', { pinned: true, privacy: 'sensitive' }), NOW), false)
   const quarantined = entry('a', { pinned: true })
   quarantined.quarantine = 'single-key-conflict'
-  assert.equal(isCoreViewEntry(quarantined), false)
+  assert.equal(isCoreViewEntry(quarantined, NOW), false)
+})
+
+test('validity window gates capsule/views membership at read time', () => {
+  assert.equal(isCoreViewEntry(entry('a', { valid_until: '2026-09-04T00:00:00.000Z', valid_from: null }), NOW), true, 'still valid')
+  assert.equal(isCoreViewEntry(entry('a', { valid_until: '2026-09-03T10:00:00.000Z', valid_from: null }), NOW), false, 'valid_until passed (boundary is exclusive)')
+  assert.equal(isCoreViewEntry(entry('a', { valid_until: '2027-01-01T00:00:00.000Z', valid_from: '2026-12-01T00:00:00.000Z' }), NOW), false, 'valid_from not reached')
+  assert.equal(isCoreViewEntry(entry('a', { valid_until: null, valid_from: null }), NOW), true, 'no window = always eligible')
 })
 
 test('ordering: importance desc, then created_at asc, then id', () => {

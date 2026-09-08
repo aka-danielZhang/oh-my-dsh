@@ -68,7 +68,20 @@ test('a published tombstone is a read barrier even while the body lingers', asyn
   assert.equal(service.capsuleInput(undefined).entries.some(entry => entry.record.id === created.id), false, 'capsule omits it')
   const tree = service.displayTree(100, 64_000)
   assert.equal(tree.files.some(file => file.path.includes(created.id)), false, 'browser hides the residue file')
-  assert.equal(service.hasMemoryKey('user', 'semantic', 'preference.deferred'), true, 'writers still see the key occupied and hit the barrier')
+  assert.equal(service.hasMemoryKey('user', 'semantic', 'preference.deferred'), true, 'a tombstone keeps the (scope, key) pair occupied for writers of every kind')
+})
+
+test('hasMemoryKey narrows to the active set: archived records never block re-remembering', async () => {
+  const { service } = await openService()
+  const first = await service.remember({ content: 'v1', kind: 'semantic', scope: 'user', key: 'preference.retired', pinned: true })
+  const firstHash = (await service.get([first.id]))[0]!.hash
+  // Supersede under a DIFFERENT key: the only remaining holder of the old
+  // key is the archived (superseded) record.
+  await service.update({ id: first.id, ifRevision: 1, ifHash: firstHash, content: 'v2', key: 'preference.successor', reason: 'user correction' })
+  assert.equal(service.hasMemoryKey('user', 'semantic', 'preference.retired'), false, 'archived records do not occupy their key')
+  assert.equal(service.hasMemoryKey('user', 'semantic', 'preference.successor'), true, 'the active successor does')
+  const recreated = await service.remember({ content: '重新提到的旧事实。', kind: 'semantic', scope: 'user', key: 'preference.retired', pinned: true })
+  assert.match(recreated.id, /^mem_/)
 })
 
 test('sensitive provenance keeps locators but never quote text', async () => {
@@ -151,5 +164,17 @@ test('stats/doctor/subscribe/rebuildViews operate over the live store', async ()
   assert.ok(changed > 0, 'store change events flow through the service')
   const written = await service.rebuildViews()
   assert.ok(written.includes('views/user-profile.md'))
+  store.close()
+})
+
+test('curatorCatalog lists only active, normal, unconfirmed entries', async () => {
+  const { service, store } = await openService()
+  const plain = await service.remember({ content: '可整理的普通记忆。', kind: 'semantic', scope: 'user', key: 'c.a', pinned: true })
+  await service.remember({ content: '确认过的记忆。', kind: 'semantic', scope: 'user', key: 'c.b', pinned: true, confirmed: true })
+  await service.remember({ content: '敏感记忆。', kind: 'semantic', scope: 'user', key: 'c.c', pinned: true, privacy: 'sensitive' })
+  const catalog = service.curatorCatalog()
+  assert.deepEqual(catalog.entries.map((entry) => entry.id), [plain.id])
+  assert.equal(catalog.entries[0]?.content, '可整理的普通记忆。')
+  assert.equal(catalog.horizons.semantic, 365)
   store.close()
 })

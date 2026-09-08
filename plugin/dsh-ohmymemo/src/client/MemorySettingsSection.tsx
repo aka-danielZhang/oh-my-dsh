@@ -395,6 +395,7 @@ function Overview(props: {
             <Count label={t('candidates')} value={overview.counts.candidate} />
             <Count label={t('disputed')} value={overview.counts.disputed} />
             <Count label={t('archived')} value={overview.counts.superseded} />
+            <Count label={t('expired')} value={overview.counts.expired} />
           </div>
           <div className="omm-health">
             <span className="omm-health-state">
@@ -593,6 +594,7 @@ function memoryStatusKey(status: NonNullable<MemoryDocument['meta']['status']>):
     case 'active': return 'activeStatus'
     case 'disputed': return 'disputedStatus'
     case 'superseded': return 'supersededStatus'
+    case 'expired': return 'expiredStatus'
   }
 }
 

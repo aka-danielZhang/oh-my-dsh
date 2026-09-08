@@ -89,6 +89,8 @@ export interface CreateInput {
   confirmed?: boolean
   confidence?: number
   sources?: MemorySource[]
+  /** Business validity end (ISO 8601); the fact is inherently time-bound. */
+  validUntil?: string
   overrideTombstone?: boolean
   registry?: WorkspaceRegistryLike
 }
@@ -168,6 +170,14 @@ export interface ForgetResult {
   forgottenIds: string[]
   tombstoneId: string
   tombstonePath: string
+}
+
+/** Deterministic lifecycle maintenance outcome (nightly sweep, no LLM). */
+export interface LifecycleMaintenanceReport {
+  /** Candidate ids deterministically deleted (retention window elapsed). */
+  candidatesExpired: string[]
+  /** Memory ids archived with status `expired` (valid_until or silence). */
+  memoriesExpired: string[]
 }
 
 const PENDING_TTL_MS = 10_000
@@ -521,8 +531,11 @@ export class OhMyMemoStore {
         throw new StoreError('OHMYMEMO_SINGLE_KEY_CONFLICT', `key ${scopeValue}/${input.kind}/${key} already has an active record (${existing.map((entry) => entry.record.id).join(', ')}) — update or supersede it instead`)
       }
     } else if (candidate !== undefined) {
+      // Only recall-eligible holders block the key: an archived
+      // (superseded/expired) record must not prevent re-capturing a fact the
+      // user just restated — expiry archives, it never tombstones.
       const duplicate = this.catalogValue.allEntries().find((entry) =>
-        entry.record.scope === scopeValue && entry.record.kind === input.kind && entry.record.key === key)
+        blocksKeyReuse(entry.record, scopeValue, input.kind, key))
       if (duplicate !== undefined) {
         throw new StoreError('OHMYMEMO_SINGLE_KEY_CONFLICT', `candidate key ${scopeValue}/${input.kind}/${key} already exists (${duplicate.record.id})`)
       }
@@ -531,6 +544,7 @@ export class OhMyMemoStore {
     const candidateExpiresAt = candidate === undefined
       ? undefined
       : candidate.expiresAt ?? new Date(this.now().getTime() + this.configValue.candidate_retention_days * 86_400_000).toISOString()
+    const validUntil = input.validUntil !== undefined ? normalizeValidUntil(input.validUntil, at) : undefined
     const record: MemoryRecord = {
       schema: 'ohmymemo/v1',
       id,
@@ -551,6 +565,7 @@ export class OhMyMemoStore {
       sources: input.sources ?? [{ type: 'user_statement', observed_at: at }],
       supersedes: [],
       contradicts: [],
+      ...(validUntil !== undefined ? { valid_until: validUntil } : {}),
       ...(candidate === undefined ? {} : {
         candidate_reason: candidate.reason,
         candidate_expires_at: candidateExpiresAt,
@@ -810,6 +825,229 @@ export class OhMyMemoStore {
   async forget(request: ForgetRequest): Promise<ForgetResult> {
     await this.ensureReady()
     return this.withWriterLock(() => this.forgetLocked(request))
+  }
+
+  /**
+   * Deterministic lifecycle maintenance (the nightly no-LLM segment):
+   *
+   * 1. candidates whose `candidate_expires_at` passed are deleted outright
+   *    (journal `candidate-expired`) — they never entered recall;
+   * 2. active records whose `valid_until` passed, or that stayed unconfirmed
+   *    past twice their kind's decay horizon (read-time weight already 0),
+   *    are archived with status `expired` (journal `memory-expired`).
+   *
+   * Expiry never touches confirmed or non-normal records and never writes a
+   * tombstone — the barrier exists to prevent revival, while expiry must
+   * allow the fact to re-enter the store when the user mentions it again.
+   */
+  async runLifecycleMaintenance(): Promise<LifecycleMaintenanceReport> {
+    await this.ensureReady()
+    return this.withWriterLock(() => this.runLifecycleMaintenanceLocked())
+  }
+
+  private runLifecycleMaintenanceLocked(): LifecycleMaintenanceReport {
+    const now = this.now()
+    const nowMs = now.getTime()
+    const report: LifecycleMaintenanceReport = { candidatesExpired: [], memoriesExpired: [] }
+
+    for (const entry of [...this.catalogValue.allEntries()]) {
+      if (entry.quarantine !== undefined || this.catalogValue.isTombstoned(entry.record.id)) continue
+      if (entry.record.status !== 'candidate') continue
+      const expiresAtMs = Date.parse(entry.record.candidate_expires_at ?? '')
+      if (Number.isNaN(expiresAtMs) || expiresAtMs > nowMs) continue
+      const current = this.readUnderLock(entry.record.id)
+      if (current === undefined) continue
+      this.detectExternalEdit(current)
+      const rel = candidateRecordPath(entry.record.id)
+      this.expectInternal(rel)
+      runTransaction(this.root, {
+        action: 'candidate-expire',
+        ops: [
+          { op: 'delete', path: rel, hash: current.hash },
+          { op: 'journal', entry: {
+            at: now.toISOString(),
+            action: 'candidate-expired',
+            id: entry.record.id,
+            scope: entry.record.scope,
+            key: entry.record.key,
+            reason: 'candidate retention window elapsed',
+          } },
+        ],
+      })
+      this.dropEntryPath(rel)
+      this.emit({ type: 'removed', id: entry.record.id, external: false })
+      report.candidatesExpired.push(entry.record.id)
+    }
+
+    for (const entry of [...this.catalogValue.allEntries()]) {
+      if (entry.quarantine !== undefined || this.catalogValue.isTombstoned(entry.record.id)) continue
+      if (entry.record.status !== 'active') continue
+      if (entry.record.confirmed || entry.record.privacy !== 'normal') continue
+      if (!this.lifecycleExpired(entry.record, nowMs)) continue
+      const current = this.readUnderLock(entry.record.id)
+      if (current === undefined) continue
+      this.expireLocked(current.record, current.hash, current.relPath, now, this.expiryReason(current.record, nowMs))
+      report.memoriesExpired.push(entry.record.id)
+    }
+    return report
+  }
+
+  /** Deterministic expiry rules; the LLM has no vote here (see design note). */
+  private lifecycleExpired(record: MemoryRecord, nowMs: number): boolean {
+    if (record.valid_until !== undefined && record.valid_until !== null && Date.parse(record.valid_until) <= nowMs) {
+      return true
+    }
+    if (record.confirmed) return false
+    const horizonDays = record.kind === 'semantic'
+      ? this.configValue.decay_horizon_days_semantic
+      : record.kind === 'procedural'
+        ? this.configValue.decay_horizon_days_procedural
+        : this.configValue.decay_horizon_days_episodic
+    const baseMs = Date.parse(record.last_evidenced_at ?? record.created_at)
+    if (Number.isNaN(baseMs)) return false
+    return nowMs - baseMs >= 2 * horizonDays * 86_400_000
+  }
+
+  private expiryReason(record: MemoryRecord, nowMs: number): string {
+    if (record.valid_until !== undefined && record.valid_until !== null && Date.parse(record.valid_until) <= nowMs) {
+      return 'valid_until elapsed'
+    }
+    return 'unconfirmed silence past twice the decay horizon'
+  }
+
+  /** Archive one record as `expired` (write-derived move, never a tombstone). */
+  private expireLocked(record: MemoryRecord, hash: string, relPath: string, now: Date, reason: string): void {
+    const at = now.toISOString()
+    const archiveRel = archiveRecordPath(record)
+    if (archiveRel === undefined) {
+      throw new StoreError('OHMYMEMO_INVALID_SCOPE', `record ${record.id} has no archive path`)
+    }
+    const derivedRecord: MemoryRecord = { ...record, status: 'expired', updated_at: at }
+    const derivedHash = hashText(serializeRecord(derivedRecord))
+    this.detectExternalEdit({ record, hash, relPath })
+    this.expectInternal(archiveRel, derivedHash)
+    this.expectInternal(relPath)
+    runTransaction(this.root, {
+      action: 'memory-expire',
+      ops: [
+        { op: 'write-derived', from: relPath, to: archiveRel, before_hash: hash, after_hash: derivedHash, derive: { status: 'expired', updated_at: at } },
+        { op: 'delete', path: relPath, hash },
+        { op: 'journal', entry: journalEntry(now, 'memory-expired', derivedRecord, derivedHash, reason) },
+      ],
+      validateWrite: validateRecordText,
+    })
+    this.refreshEntry(archiveRel)
+    this.dropEntryPath(relPath)
+    this.emit({ type: 'removed', id: record.id, external: false })
+  }
+
+  /**
+   * Curator refresh: an in-place metadata revision that stamps
+   * `last_evidenced_at` with real evidence (journal `memory-refreshed`).
+   * This is the only "re-attested" vote; recall never touches the clock.
+   */
+  async refreshEvidence(input: {
+    id: string
+    evidencedAt: string
+    source: MemorySource
+    reason: string
+  }): Promise<MutationResult> {
+    await this.ensureReady()
+    return this.withWriterLock(() => {
+      const current = this.readUnderLock(input.id)
+      if (current === undefined) {
+        throw new StoreError('OHMYMEMO_RECORD_INVALID', `record ${input.id} on disk is not a valid record — refusing to mutate`)
+      }
+      if (current.record.status !== 'active' || current.record.confirmed) {
+        throw new StoreError('OHMYMEMO_BAD_REQUEST', `record ${input.id} is not curator-refreshable (${current.record.status}${current.record.confirmed ? ', confirmed' : ''})`)
+      }
+      const at = this.now().toISOString()
+      const next: MemoryRecord = {
+        ...current.record,
+        revision: current.record.revision + 1,
+        updated_at: at,
+        last_evidenced_at: input.evidencedAt,
+        sources: appendSource(current.record.sources, input.source),
+      }
+      return this.publishCuratorRevision(current, next, 'memory-refreshed', input.reason)
+    })
+  }
+
+  /**
+   * Curator merge: `absorbed` retires into `survivor` using the supersede
+   * machinery — archived with status `superseded` and a `supersedes` backlink
+   * on the survivor (journal `memory-merged`). Both must be active and share
+   * scope + kind; confirmed records are untouchable.
+   */
+  async mergeMemories(input: { survivorId: string; absorbedId: string; reason: string }): Promise<MutationResult> {
+    await this.ensureReady()
+    return this.withWriterLock(() => {
+      if (input.survivorId === input.absorbedId) {
+        throw new StoreError('OHMYMEMO_BAD_REQUEST', 'merge requires two distinct records')
+      }
+      const survivor = this.readUnderLock(input.survivorId)
+      const absorbed = this.readUnderLock(input.absorbedId)
+      if (survivor === undefined || absorbed === undefined) {
+        throw new StoreError('OHMYMEMO_RECORD_NOT_FOUND', 'merge requires both records to exist and be readable')
+      }
+      for (const side of [survivor, absorbed]) {
+        if (side.record.status !== 'active' || side.record.confirmed) {
+          throw new StoreError('OHMYMEMO_BAD_REQUEST', `record ${side.record.id} is not mergeable (${side.record.status}${side.record.confirmed ? ', confirmed' : ''})`)
+        }
+      }
+      if (survivor.record.scope !== absorbed.record.scope || survivor.record.kind !== absorbed.record.kind) {
+        throw new StoreError('OHMYMEMO_BAD_REQUEST', `merge requires the same scope + kind (${survivor.record.scope}/${survivor.record.kind} vs ${absorbed.record.scope}/${absorbed.record.kind})`)
+      }
+      const at = this.now().toISOString()
+      const next: MemoryRecord = {
+        ...survivor.record,
+        revision: survivor.record.revision + 1,
+        updated_at: at,
+        supersedes: [...new Set([...survivor.record.supersedes, absorbed.record.id])],
+      }
+      const result = this.publishCuratorRevision(survivor, next, 'memory-merged', input.reason)
+
+      const archiveRel = archiveRecordPath(absorbed.record)
+      if (archiveRel === undefined) {
+        throw new StoreError('OHMYMEMO_INVALID_SCOPE', `record ${absorbed.record.id} has no archive path`)
+      }
+      const derivedRecord: MemoryRecord = { ...absorbed.record, status: 'superseded', updated_at: at }
+      const derivedHash = hashText(serializeRecord(derivedRecord))
+      this.expectInternal(archiveRel, derivedHash)
+      this.expectInternal(absorbed.relPath)
+      runTransaction(this.root, {
+        action: 'memory-merge',
+        ops: [
+          { op: 'write-derived', from: absorbed.relPath, to: archiveRel, before_hash: absorbed.hash, after_hash: derivedHash, derive: { status: 'superseded', updated_at: at } },
+          { op: 'delete', path: absorbed.relPath, hash: absorbed.hash },
+          { op: 'journal', entry: journalEntry(this.now(), 'memory-merged', derivedRecord, derivedHash, `${input.reason} (absorbed by ${survivor.record.id})`) },
+        ],
+        validateWrite: validateRecordText,
+      })
+      this.refreshEntry(archiveRel)
+      this.dropEntryPath(absorbed.relPath)
+      this.emit({ type: 'removed', id: absorbed.record.id, external: false })
+      return result
+    })
+  }
+
+  /** Shared tail for curator in-place revisions (single write + journal). */
+  private publishCuratorRevision(previous: { record: MemoryRecord; hash: string; relPath: string }, next: MemoryRecord, action: 'memory-refreshed' | 'memory-merged', reason: string): MutationResult {
+    this.detectExternalEdit(previous)
+    const text = serializeRecord(next)
+    this.checkSize(text)
+    this.expectInternal(previous.relPath, hashText(text))
+    runTransaction(this.root, {
+      action: 'update',
+      ops: [
+        { op: 'write', path: previous.relPath, content: text, before_hash: previous.hash, after_hash: hashText(text) },
+        { op: 'journal', entry: journalEntry(this.now(), action, next, hashText(text), reason) },
+      ],
+      validateWrite: validateRecordText,
+    })
+    this.refreshEntry(previous.relPath)
+    this.emit({ type: 'upserted', id: next.id, revision: next.revision, hash: hashText(text), external: false })
+    return { id: next.id, revision: next.revision, status: next.status, scope: next.scope, path: previous.relPath }
   }
 
   /** Read-only workspace scope resolution for search/capsule (never creates). */
@@ -1227,13 +1465,29 @@ export class OhMyMemoStore {
 function expectedRel(record: MemoryRecord): string {
   const rel = record.status === 'candidate'
     ? candidateRecordPath(record.id)
-    : record.status === 'superseded'
+    : record.status === 'superseded' || record.status === 'expired'
       ? archiveRecordPath(record)
       : canonicalRecordPath(record)
   if (rel === undefined) {
     throw new StoreError('OHMYMEMO_INVALID_SCOPE', `cannot derive path for record ${record.id}`)
   }
   return rel
+}
+
+/** Whether a record still holds its (scope, kind, key) against reuse. */
+function blocksKeyReuse(record: Pick<MemoryRecord, 'scope' | 'kind' | 'key' | 'status'>, scope: string, kind: MemoryKind, key: string): boolean {
+  if (record.scope !== scope || record.kind !== kind || record.key !== key) return false
+  return record.status === 'candidate' || record.status === 'active' || record.status === 'disputed'
+}
+
+/** Append one provenance source unless an identical locator already exists. */
+function appendSource(sources: MemorySource[], source: MemorySource): MemorySource[] {
+  const duplicate = sources.some((existing) =>
+    existing.type === source.type
+    && existing.session_id === source.session_id
+    && existing.event_seq === source.event_seq
+    && existing.quote_hash === source.quote_hash)
+  return duplicate ? sources : [...sources, source]
 }
 
 function normalizeTags(tags: string[] | undefined): string[] {
@@ -1248,6 +1502,20 @@ function normalizeTags(tags: string[] | undefined): string[] {
   }
   if (out.length > 8) throw new StoreError('OHMYMEMO_BAD_REQUEST', 'at most 8 tags per record')
   return out
+}
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?)?$/
+
+/** Validate a requested valid_until; a bare date is expanded to end-of-day UTC. */
+function normalizeValidUntil(raw: string, createdAt: string): string {
+  if (!ISO_DATE_RE.test(raw) || Number.isNaN(Date.parse(raw))) {
+    throw new StoreError('OHMYMEMO_BAD_REQUEST', `validUntil must be an ISO 8601 date or timestamp: ${raw}`)
+  }
+  const expanded = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? `${raw}T23:59:59.999Z` : raw
+  if (Date.parse(expanded) < Date.parse(createdAt)) {
+    throw new StoreError('OHMYMEMO_BAD_REQUEST', `validUntil ${raw} precedes the record's creation`)
+  }
+  return expanded
 }
 
 function validateRecordText(text: string): void {

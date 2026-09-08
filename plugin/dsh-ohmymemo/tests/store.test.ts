@@ -470,3 +470,241 @@ test('doctor warns on loosened file permissions and reports dangling supersedes'
   assert.ok(diagnostics.some((diagnostic) => diagnostic.code === 'permissions-loose' && diagnostic.path === created.path))
   store.close()
 })
+
+test('validUntil write path: bare dates expand to end-of-day; garbage is refused', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  const created = await store.create({
+    content: '备考 2026 年 11 月的系统架构师考试。',
+    kind: 'semantic',
+    scope: 'user',
+    key: 'plan.architect-exam',
+    pinned: true,
+    validUntil: '2026-11-15',
+  })
+  const record = store.readRecord(created.id)!.record
+  assert.equal(record.valid_until, '2026-11-15T23:59:59.999Z')
+  // The serialized file round-trips through the strict schema.
+  const reparsed = parseRecord(readFileSync(join(root, ...created.path.split('/')), 'utf8'))
+  assert.equal(reparsed.record?.valid_until, '2026-11-15T23:59:59.999Z')
+  await assert.rejects(
+    () => store.create({ content: '无效期限。', kind: 'semantic', scope: 'user', key: 'plan.bad', validUntil: 'next Monday' }),
+    (error: unknown) => {
+      assert.match((error as Error).message, /validUntil/)
+      return true
+    },
+  )
+  store.close()
+})
+
+test('lifecycle maintenance: expired candidates are deleted deterministically', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  try {
+    const stale = await store.createCandidate({
+      content: '从未被证实的推断候选。',
+      kind: 'semantic',
+      scope: 'user',
+      key: 'dream.stale-candidate',
+      reason: 'unattended extraction',
+      expiresAt: '2026-09-02T00:00:00.000Z',
+    })
+    const fresh = await store.createCandidate({
+      content: '仍在保留期内的候选。',
+      kind: 'semantic',
+      scope: 'user',
+      key: 'dream.fresh-candidate',
+      reason: 'unattended extraction',
+      expiresAt: '2026-12-01T00:00:00.000Z',
+    })
+    const report = await store.runLifecycleMaintenance()
+    assert.deepEqual(report.candidatesExpired, [stale.id])
+    assert.equal(store.readRecord(stale.id), undefined, 'expired candidate body is gone')
+    assert.ok(store.readRecord(fresh.id) !== undefined, 'retention window keeps the fresh candidate')
+    const actions = readJournal(root).map((entry) => entry.action)
+    assert.ok(actions.includes('candidate-expired'))
+  } finally {
+    store.close()
+  }
+})
+
+test('lifecycle maintenance: valid_until and silence archive as expired; confirmed/sensitive never expire', async () => {
+  const root = scratchRoot()
+  const clock = { date: new Date('2026-09-03T10:00:00.000Z') }
+  const store = makeStore(root, { now: (): Date => clock.date })
+  await store.open()
+  try {
+    const timed = await store.create({
+      content: '在职项目约束：三个月内只维护 A 服务。',
+      kind: 'semantic', scope: 'user', key: 'constraint.job-a', pinned: true,
+      validUntil: '2026-09-10',
+    })
+    const silent = await store.create({
+      content: '很久没有再被证实的偏好。',
+      kind: 'semantic', scope: 'user', key: 'preference.silent', pinned: true,
+    })
+    const evidenced = await store.create({
+      content: '最近被证据再证实的偏好。',
+      kind: 'semantic', scope: 'user', key: 'preference.evidenced', pinned: true,
+    })
+    // Simulate a curator refresh on `evidenced`: last_evidenced_at moves far
+    // into the future relative to the sweep clock (external hand edit).
+    const evidencedRead = store.readRecord(evidenced.id)!
+    writeFileSync(evidencedRead.absPath, serializeRecord({ ...evidencedRead.record, last_evidenced_at: '2027-06-01T00:00:00.000Z' }))
+    const confirmed = await store.create({
+      content: '用户确认过的持久偏好。',
+      kind: 'semantic', scope: 'user', key: 'preference.confirmed', pinned: true, confirmed: true,
+    })
+    const sensitive = await store.create({
+      content: '敏感但长期沉默的健康状况备注。',
+      kind: 'semantic', scope: 'user', key: 'health.notes', pinned: false, privacy: 'sensitive',
+    })
+
+    clock.date = new Date('2028-09-03T10:00:00.000Z') // 2+ years: past 2×365d horizon; past valid_until
+    const report = await store.runLifecycleMaintenance()
+    assert.deepEqual([...report.memoriesExpired].sort(), [timed.id, silent.id].sort())
+
+    const timedAfter = store.readRecord(timed.id)
+    assert.equal(timedAfter?.record.status, 'expired', 'get by id still reads the archived body')
+    assert.match(timedAfter?.record.updated_at ?? '', /^2028-09-03T10:00:00/)
+    assert.match(store.catalog.get(timed.id)?.relPath ?? '', /^archive\//, 'expired records live under archive/')
+
+    assert.ok(store.readRecord(silent.id)?.record.status === 'expired')
+    assert.ok(store.readRecord(confirmed.id)?.record.status === 'active', 'confirmed never expires')
+    assert.ok(store.readRecord(sensitive.id)?.record.status === 'active', 'sensitive never expires')
+    // `evidenced` was refreshed mid-way — its silence clock restarts from
+    // last_evidenced_at (2027-06-01 → 2028-09-03 < 2×365d), so it survives.
+    assert.ok(store.readRecord(evidenced.id)?.record.status === 'active', 'recent evidence survives the sweep')
+
+    const actions = readJournal(root).map((entry) => entry.action)
+    assert.ok(actions.includes('memory-expired'))
+    assert.equal(store.catalogStats().expired, 2)
+  } finally {
+    store.close()
+  }
+})
+
+test('expired archive never blocks re-remembering the same key', async () => {
+  const root = scratchRoot()
+  const clock = { date: new Date('2026-09-03T10:00:00.000Z') }
+  const store = makeStore(root, { now: (): Date => clock.date })
+  await store.open()
+  try {
+    const first = await store.create({
+      content: '备考 9 月的考试。',
+      kind: 'semantic', scope: 'user', key: 'plan.september-exam', pinned: true,
+      validUntil: '2026-09-03T10:00:00.001Z',
+    })
+    clock.date = new Date('2026-09-03T10:00:00.002Z')
+    const report = await store.runLifecycleMaintenance()
+    assert.deepEqual(report.memoriesExpired, [first.id])
+
+    // The user mentions the next exam season: same key re-enters cleanly.
+    const recreated = await store.create({
+      content: '备考 2027 年 3 月的考试。',
+      kind: 'semantic', scope: 'user', key: 'plan.september-exam', pinned: true,
+    })
+    assert.equal(recreated.status, 'active')
+    await assert.rejects(
+      () => store.createCandidate({
+        content: '候选重复提案。',
+        kind: 'semantic', scope: 'user', key: 'plan.september-exam',
+        reason: 'unattended extraction',
+      }),
+      (error: unknown) => {
+        // Blocked by the LIVE holder — the archive alone never blocks.
+        assert.match((error as Error).message, /plan\.september-exam/)
+        return true
+      },
+    )
+  } finally {
+    store.close()
+  }
+})
+
+test('refreshEvidence stamps last_evidenced_at with revision++ and journal memory-refreshed', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  try {
+    const created = await store.create({
+      content: '用户偏好深色主题。', kind: 'semantic', scope: 'user', key: 'preference.theme', pinned: true,
+    })
+    const refreshed = await store.refreshEvidence({
+      id: created.id,
+      evidencedAt: '2026-09-04T08:00:00.000Z',
+      source: { type: 'cross_session_inference', session_id: 'sess-9', event_seq: 4, quote_hash: 'sha256:' + 'a'.repeat(64), quote_preview: '我还是喜欢深色主题', observed_at: '2026-09-04T08:00:00.000Z' },
+      reason: 'curator refresh: evidence window restates the fact',
+    })
+    assert.equal(refreshed.revision, 2)
+    const record = store.readRecord(created.id)!.record
+    assert.equal(record.last_evidenced_at, '2026-09-04T08:00:00.000Z')
+    assert.equal(record.sources.length, 2, 'provenance gains the re-attestation source')
+    // Idempotent duplicate source: same locator is not appended twice.
+    await store.refreshEvidence({
+      id: created.id, evidencedAt: '2026-09-05T08:00:00.000Z',
+      source: { type: 'cross_session_inference', session_id: 'sess-9', event_seq: 4, quote_hash: 'sha256:' + 'a'.repeat(64), quote_preview: '我还是喜欢深色主题', observed_at: '2026-09-04T08:00:00.000Z' },
+      reason: 'curator refresh: evidence window restates the fact',
+    })
+    assert.equal(store.readRecord(created.id)!.record.sources.length, 2)
+    assert.ok(readJournal(root).some((entry) => entry.action === 'memory-refreshed'))
+
+    // Confirmed records are untouchable by the curator.
+    const confirmed = await store.create({
+      content: '用户确认的偏好。', kind: 'semantic', scope: 'user', key: 'preference.confirmed2', pinned: true, confirmed: true,
+    })
+    await assert.rejects(
+      () => store.refreshEvidence({ id: confirmed.id, evidencedAt: '2026-09-04T08:00:00.000Z', source: { type: 'cross_session_inference', observed_at: '2026-09-04T08:00:00.000Z' }, reason: 'x' }),
+      /confirmed/,
+    )
+  } finally {
+    store.close()
+  }
+})
+
+test('mergeMemories retires absorbed via supersede machinery; guards cross-kind and confirmed', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  try {
+    const survivor = await store.create({
+      content: 'JS 包管理用 pnpm。', kind: 'semantic', scope: 'user', key: 'preference.pm.a', pinned: true,
+    })
+    const duplicate = await store.create({
+      content: '前端项目统一用 pnpm。', kind: 'semantic', scope: 'user', key: 'preference.pm.b', pinned: true,
+    })
+    const otherKind = await store.create({
+      content: '构建流程记录。', kind: 'procedural', scope: 'user', key: 'workflow.build', pinned: true,
+    })
+    const confirmed = await store.create({
+      content: '已确认的重复表述。', kind: 'semantic', scope: 'user', key: 'preference.pm.c', pinned: true, confirmed: true,
+    })
+
+    await assert.rejects(
+      () => store.mergeMemories({ survivorId: survivor.id, absorbedId: otherKind.id, reason: 'x' }),
+      /same scope \+ kind/,
+    )
+    await assert.rejects(
+      () => store.mergeMemories({ survivorId: survivor.id, absorbedId: confirmed.id, reason: 'x' }),
+      /confirmed/,
+    )
+    await assert.rejects(
+      () => store.mergeMemories({ survivorId: survivor.id, absorbedId: survivor.id, reason: 'x' }),
+      /distinct/,
+    )
+
+    const merged = await store.mergeMemories({
+      survivorId: survivor.id, absorbedId: duplicate.id, reason: 'curator merge: near-duplicate of the survivor',
+    })
+    assert.equal(merged.id, survivor.id)
+    assert.equal(merged.revision, 2)
+    const survivorRecord = store.readRecord(survivor.id)!.record
+    assert.deepEqual(survivorRecord.supersedes, [duplicate.id], 'supersedes backlink on the survivor')
+    const absorbedEntry = store.catalog.get(duplicate.id)
+    assert.equal(absorbedEntry?.record.status, 'superseded')
+    assert.match(absorbedEntry?.relPath ?? '', /^archive\//)
+    const actions = readJournal(root).map((entry) => entry.action)
+    assert.ok(actions.includes('memory-merged'))
+    assert.ok(store.readRecord(confirmed.id) !== undefined, 'the confirmed record is untouched')
+  } finally {
+    store.close()
+  }
+})

@@ -90,7 +90,7 @@ export function archiveRecordPath(record: Pick<MemoryRecord, 'id' | 'scope' | 'k
 /** The area a record file belongs in for its current status. */
 export function expectedAreaForStatus(status: MemoryStatus): 'canonical' | 'candidate' | 'archive' | undefined {
   if (status === 'candidate') return 'candidate'
-  if (status === 'superseded') return 'archive'
+  if (status === 'superseded' || status === 'expired') return 'archive'
   if (CANONICAL_STATUSES.has(status)) return 'canonical'
   return undefined
 }

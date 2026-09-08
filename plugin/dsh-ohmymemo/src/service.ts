@@ -10,6 +10,8 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { decayHorizonsFromConfig, type DecayHorizons } from './capsule.ts'
+import type { CuratorCatalogEntry } from './dream.ts'
 import type { CatalogEntry, Diagnostic, MemoryChange, MemoryKind, MemoryRecord, MemorySource, MemoryStatus } from './types.ts'
 import type { MemorySearchRequest, MemorySearchResult } from './search.ts'
 import { searchEntries, type SearchContext } from './search.ts'
@@ -24,6 +26,7 @@ import {
   type CreateCandidateInput,
   type CreateInput,
   type ForgetResult,
+  type LifecycleMaintenanceReport,
   type MutationResult,
   type StoreConfigSnapshot,
   type UpdateConfigInput,
@@ -74,14 +77,22 @@ export interface OhMyMemoService {
   dispute(request: { id: string; ifRevision: number; ifHash: string; contradictsWith?: string[]; reason: string }): Promise<MutationResult>
   reactivate(request: { id: string; ifRevision: number; ifHash: string; reason: string }): Promise<MutationResult>
   forget(request: { id?: string; scope?: string; key?: string; reason?: string }): Promise<ForgetResult>
+  /** Deterministic lifecycle maintenance (nightly sweep, no LLM). */
+  runLifecycleMaintenance(): Promise<LifecycleMaintenanceReport>
+  /** Curator refresh: stamp last_evidenced_at from grounded evidence. */
+  refreshEvidence(request: { id: string; evidencedAt: string; source: MemorySource; reason: string }): Promise<MutationResult>
+  /** Curator merge: absorbed retires into survivor via the supersede machinery. */
+  mergeMemories(request: { survivorId: string; absorbedId: string; reason: string }): Promise<MutationResult>
+  /** Bounded catalog for the nightly curator (active, normal, unconfirmed). */
+  curatorCatalog(): { entries: CuratorCatalogEntry[]; horizons: DecayHorizons }
   rebuildViews(): Promise<string[]>
   doctor(): Diagnostic[]
-  stats(): { active: number; candidate: number; disputed: number; superseded: number; quarantined: number; tombstones: number; scopes: number }
+  stats(): { active: number; candidate: number; disputed: number; superseded: number; expired: number; quarantined: number; tombstones: number; scopes: number }
   watchStatus(): { active: boolean; degradedReason?: string }
   /** Read-only scope resolution for the current cwd (never creates). */
   scopeForCwd(cwd: string | undefined): string | undefined
   /** Catalog facts the context capsule needs (entries in scope + budget). */
-  capsuleInput(cwd: string | undefined): { entries: CatalogEntry[]; workspaceScope?: string; budgetBytes: number }
+  capsuleInput(cwd: string | undefined): { entries: CatalogEntry[]; workspaceScope?: string; budgetBytes: number; decayHorizons: DecayHorizons }
   subscribe(listener: (change: MemoryChange) => void): () => void
 }
 
@@ -156,14 +167,20 @@ export function createOhMyMemoService(store: OhMyMemoStore, options: { now?: () 
       return store.updateConfig(request)
     },
     displayTree(limit, maxViewBytes) {
-      return listDisplayFiles(store.root, store.readCatalog(), limit, maxViewBytes)
+      return listDisplayFiles(store.root, store.readCatalog(), limit, maxViewBytes, now())
     },
     displayDocument(request, limits) {
       return readDisplayFile(store.root, store.readCatalog(), request, limits)
     },
     hasMemoryKey(scope, kind, key) {
-      return store.catalog.allEntries().some((entry) =>
+      // Occupied = an unquarantined active/disputed record holds the key
+      // (aligned with the store's byConflictKey, so archived records never
+      // block re-remembering) OR an active forget tombstone barriers the
+      // (scope, key) pair for writes of every kind — mirroring createLocked.
+      const catalog = store.readCatalog()
+      return catalog.activeEntries().some((entry) =>
         entry.record.scope === scope && entry.record.kind === kind && entry.record.key === key)
+        || catalog.tombstoneFor(scope, key) !== undefined
     },
     async withMaintenanceLease(run) {
       return store.withMaintenanceLease(run)
@@ -208,6 +225,36 @@ export function createOhMyMemoService(store: OhMyMemoStore, options: { now?: () 
     async forget(request) {
       return store.forget(request)
     },
+    async runLifecycleMaintenance() {
+      return store.runLifecycleMaintenance()
+    },
+    async refreshEvidence(request) {
+      return store.refreshEvidence(request)
+    },
+    async mergeMemories(request) {
+      return store.mergeMemories(request)
+    },
+    curatorCatalog() {
+      const entries: CuratorCatalogEntry[] = []
+      for (const entry of store.readCatalog().activeEntries()) {
+        const record = entry.record
+        // Confirmed entries are untouchable and deliberately not listed;
+        // sensitive content never crosses to the model.
+        if (record.status !== 'active' || record.confirmed || record.privacy !== 'normal') continue
+        entries.push({
+          id: record.id,
+          key: record.key,
+          kind: record.kind,
+          importance: record.importance,
+          confirmed: record.confirmed,
+          created_at: record.created_at,
+          ...(record.last_evidenced_at !== undefined ? { last_evidenced_at: record.last_evidenced_at } : {}),
+          valid_until: record.valid_until ?? null,
+          content: firstCatalogLine(record.body),
+        })
+      }
+      return { entries, horizons: decayHorizonsFromConfig(store.storeConfig) }
+    },
     async rebuildViews() {
       return rebuildViews(store.root, store.readCatalog(), store.storeConfig, now().toISOString())
     },
@@ -230,7 +277,12 @@ export function createOhMyMemoService(store: OhMyMemoStore, options: { now?: () 
       const workspaceScope = store.resolveWorkspaceScopeForRead(cwd)
       const entries = store.readCatalog().activeEntries().filter((entry) =>
         entry.record.scope === 'user' || (workspaceScope !== undefined && entry.record.scope === workspaceScope))
-      return { entries, ...(workspaceScope !== undefined ? { workspaceScope } : {}), budgetBytes: Math.max(512, store.storeConfig.max_injected_bytes) }
+      return {
+        entries,
+        ...(workspaceScope !== undefined ? { workspaceScope } : {}),
+        budgetBytes: Math.max(512, store.storeConfig.max_injected_bytes),
+        decayHorizons: decayHorizonsFromConfig(store.storeConfig),
+      }
     },
     subscribe(listener) {
       return store.subscribe(listener)
@@ -263,4 +315,10 @@ function scopeValues(store: OhMyMemoStore): string[] {
     values.push(`workspace:${scopeEntry.wsId}`)
   }
   return values
+}
+
+/** First content line for a curator catalog entry (flattened, bounded). */
+function firstCatalogLine(body: string): string {
+  const flat = body.replace(/\s+/g, ' ').trim()
+  return flat.length <= 120 ? flat : `${flat.slice(0, 119)}…`
 }

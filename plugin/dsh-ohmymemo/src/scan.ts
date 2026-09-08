@@ -169,7 +169,7 @@ export function scanFile(root: string, relPath: string, options: ScanOptions): F
 /** The canonical location a record's frontmatter says it belongs at. */
 export function expectedPathFor(record: MemoryRecord): string | undefined {
   if (record.status === 'candidate') return candidateRecordPath(record.id)
-  if (record.status === 'superseded') return archiveRecordPath(record)
+  if (record.status === 'superseded' || record.status === 'expired') return archiveRecordPath(record)
   return canonicalRecordPath(record)
 }
 

@@ -40,7 +40,7 @@ const KEY_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*
 const TAG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
 const KINDS: ReadonlySet<string> = new Set<MemoryKind>(['semantic', 'episodic', 'procedural'])
-const STATUSES: ReadonlySet<string> = new Set<MemoryStatus>(['candidate', 'active', 'disputed', 'superseded'])
+const STATUSES: ReadonlySet<string> = new Set<MemoryStatus>(['candidate', 'active', 'disputed', 'superseded', 'expired'])
 const CARDINALITIES: ReadonlySet<string> = new Set<MemoryCardinality>(['single', 'multiple'])
 const PRIVACIES: ReadonlySet<string> = new Set<MemoryPrivacy>(['normal', 'sensitive', 'secret-ref'])
 const SOURCE_TYPES: ReadonlySet<string> = new Set<MemorySourceType>([
@@ -180,6 +180,7 @@ interface RawRecord {
   created_at: unknown
   updated_at: unknown
   last_confirmed_at?: unknown
+  last_evidenced_at?: unknown
   valid_from?: unknown
   valid_until?: unknown
   tags: unknown
@@ -231,7 +232,7 @@ export function parseRecord(text: string): { record?: MemoryRecord; issues: Sche
     issues.push({ field: 'cardinality', message: 'cardinality must be single | multiple' })
   }
   if (typeof fm.status !== 'string' || !STATUSES.has(fm.status)) {
-    issues.push({ field: 'status', message: 'status must be candidate | active | disputed | superseded' })
+    issues.push({ field: 'status', message: 'status must be candidate | active | disputed | superseded | expired' })
   }
   for (const field of ['confidence', 'importance'] as const) {
     const value = fm[field]
@@ -248,6 +249,9 @@ export function parseRecord(text: string): { record?: MemoryRecord; issues: Sche
   if (!isIso(fm.updated_at)) issues.push({ field: 'updated_at', message: 'updated_at must be an ISO 8601 timestamp' })
   if (fm.last_confirmed_at !== undefined && !isIso(fm.last_confirmed_at)) {
     issues.push({ field: 'last_confirmed_at', message: 'last_confirmed_at must be an ISO 8601 timestamp' })
+  }
+  if (fm.last_evidenced_at !== undefined && !isIso(fm.last_evidenced_at)) {
+    issues.push({ field: 'last_evidenced_at', message: 'last_evidenced_at must be an ISO 8601 timestamp' })
   }
   for (const field of ['valid_from', 'valid_until'] as const) {
     const value = fm[field]
@@ -377,7 +381,7 @@ function validateSources(sources: unknown[]): SchemaIssue[] {
 const RECORD_FIELD_ORDER = [
   'schema', 'id', 'revision', 'scope', 'kind', 'key', 'cardinality', 'status',
   'confidence', 'importance', 'privacy', 'pinned', 'confirmed',
-  'created_at', 'updated_at', 'last_confirmed_at', 'valid_from', 'valid_until',
+  'created_at', 'updated_at', 'last_confirmed_at', 'last_evidenced_at', 'valid_from', 'valid_until',
   'tags', 'sources', 'supersedes', 'contradicts',
   'candidate_reason', 'candidate_expires_at',
 ] as const
@@ -561,6 +565,9 @@ export function defaultStoreConfig(): StoreUserConfig {
     max_get_records: 8,
     max_injected_bytes: 8192,
     candidate_retention_days: 30,
+    decay_horizon_days_semantic: 365,
+    decay_horizon_days_procedural: 180,
+    decay_horizon_days_episodic: 90,
   }
 }
 
@@ -580,7 +587,15 @@ const CONFIG_FIELDS = {
   max_get_records: (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 100,
   max_injected_bytes: (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 512 && (v as number) <= 262_144,
   candidate_retention_days: (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 3650,
+  decay_horizon_days_semantic: isDecayHorizon,
+  decay_horizon_days_procedural: isDecayHorizon,
+  decay_horizon_days_episodic: isDecayHorizon,
 } as const
+
+/** Decay horizons are day counts in [1, 36500]; invalid values fall back to defaults. */
+function isDecayHorizon(v: unknown): v is number {
+  return Number.isInteger(v) && (v as number) >= 1 && (v as number) <= 36_500
+}
 
 /**
  * Parse the user-editable `config.yaml`. Tolerant by design: unknown fields

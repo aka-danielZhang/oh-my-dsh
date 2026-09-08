@@ -106,6 +106,30 @@ test('candidate records require reason and expiry; non-candidates must not carry
   assert.ok(valid.record !== undefined)
 })
 
+test('expired status and last_evidenced_at round-trip through the record schema', () => {
+  const expired = baseRecord({ status: 'expired', last_evidenced_at: '2026-09-01T08:00:00.000Z' })
+  const text = serializeRecord(expired)
+  const reparsed = parseRecord(text)
+  assert.deepEqual(reparsed.record, expired)
+  assert.ok(text.includes('last_evidenced_at:'))
+  const badEvidenced = parseRecord(serializeRecord(baseRecord({ last_evidenced_at: 'yesterday' as unknown as string })))
+  assert.equal(badEvidenced.record, undefined)
+  assert.ok(badEvidenced.issues.some((issue) => issue.field === 'last_evidenced_at'))
+})
+
+test('decay horizon config keys default, round-trip and fall back per-field', () => {
+  const defaults = defaultStoreConfig()
+  assert.equal(defaults.decay_horizon_days_semantic, 365)
+  assert.equal(defaults.decay_horizon_days_procedural, 180)
+  assert.equal(defaults.decay_horizon_days_episodic, 90)
+  const tuned = parseStoreConfig(serializeStoreConfig({ ...defaults, decay_horizon_days_episodic: 45 }))
+  assert.deepEqual(tuned.issues, [])
+  assert.equal(tuned.config.decay_horizon_days_episodic, 45)
+  const broken = parseStoreConfig(serializeStoreConfig(defaults).replace('decay_horizon_days_semantic: 365', 'decay_horizon_days_semantic: soon'))
+  assert.equal(broken.config.decay_horizon_days_semantic, 365, 'invalid value falls back to the default')
+  assert.ok(broken.issues.some((issue) => issue.field === 'decay_horizon_days_semantic'))
+})
+
 test('parseRecord refuses credential-like bodies (fail closed)', () => {
   const withKey = parseRecord(serializeRecord(baseRecord({ body: 'my key is -----BEGIN RSA PRIVATE KEY----- stuff' })))
   assert.equal(withKey.record, undefined)

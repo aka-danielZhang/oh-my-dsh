@@ -253,3 +253,43 @@ test('write-derived ops re-derive deterministic content from disk (supersede res
   assert.equal(readFileSync(absOf(root, archiveRel), 'utf8'), derivedText)
   assert.equal(readFileSync(absOf(root, newRel), 'utf8'), newText)
 })
+
+test('recovery rolls forward an interrupted memory-expire: archive completes, canonical is deleted', () => {
+  const root = scratchRoot()
+  const active = baseRecord({ confirmed: false })
+  const canonicalRel = `scopes/user/semantic/${active.id}.md`
+  const canonicalText = serializeRecord(active)
+  writeFileAtomic(absOf(root, canonicalRel), canonicalText)
+
+  const at = '2026-09-03T10:00:00.000Z'
+  const expiredText = serializeRecord({ ...active, status: 'expired', updated_at: at })
+  const archiveRel = `archive/user/semantic/${active.id}.md`
+  // Crash point: derived archive write done (op1), delete + journal pending.
+  writeFileAtomic(absOf(root, archiveRel), expiredText)
+  const marker: TransactionMarker = {
+    schema: 'ohmymemo-transaction/v1',
+    id: 'txn_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z1',
+    action: 'memory-expire',
+    phase: 'canonical-written',
+    targets: [
+      { path: archiveRel, before_hash: hashText(canonicalText), after_hash: hashText(expiredText) },
+      { path: canonicalRel, before_hash: hashText(canonicalText) },
+    ],
+    ops: [
+      { op: 'write-derived', from: canonicalRel, to: archiveRel, before_hash: hashText(canonicalText), after_hash: hashText(expiredText), derive: { status: 'expired', updated_at: at } },
+      { op: 'delete', path: canonicalRel, hash: hashText(canonicalText) },
+      { op: 'journal', entry: { at, action: 'memory-expired', id: active.id, scope: 'user', key: active.key } },
+    ],
+    created_at: '2026-09-03T09:59:59.000Z',
+  }
+  writeTxnMarker(root, marker)
+
+  const report = recoverTransactions(root)
+  assert.deepEqual(report.recovered, [marker.id])
+  assert.equal(existsSync(absOf(root, archiveRel)), true, 'archive copy survives')
+  assert.equal(existsSync(absOf(root, canonicalRel)), false, 'canonical deleted on resume')
+  const actions = readJournal(root).map((entry) => entry.action)
+  assert.ok(actions.includes('memory-expired'))
+  assert.ok(actions.includes('transaction-recovered'))
+  assert.deepEqual(readTxnMarkers(root).markers, [])
+})

@@ -24,6 +24,7 @@ export interface CatalogStats {
   candidate: number
   disputed: number
   superseded: number
+  expired: number
   quarantined: number
   tombstones: number
   scopes: number
@@ -255,7 +256,7 @@ export class MemoryCatalog {
   }
 
   stats(): CatalogStats {
-    const stats: CatalogStats = { active: 0, candidate: 0, disputed: 0, superseded: 0, quarantined: 0, tombstones: this.tombstoneById.size, scopes: this.scopeByWs.size }
+    const stats: CatalogStats = { active: 0, candidate: 0, disputed: 0, superseded: 0, expired: 0, quarantined: 0, tombstones: this.tombstoneById.size, scopes: this.scopeByWs.size }
     for (const entry of this.byPath.values()) {
       if (this.isTombstoned(entry.record.id)) continue
       if (entry.quarantine !== undefined) {
@@ -266,6 +267,7 @@ export class MemoryCatalog {
       if (status === 'active') stats.active += 1
       else if (status === 'candidate') stats.candidate += 1
       else if (status === 'disputed') stats.disputed += 1
+      else if (status === 'expired') stats.expired += 1
       else stats.superseded += 1
     }
     return stats

@@ -2,14 +2,17 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { SessionLogSnapshot } from '@deepseek-ai/dsh-session-query'
 import {
+  buildCuratorPrompt,
   buildDreamPrompt,
   cursorWatermarks,
   dueCatchUpBoundary,
   extractDreamSource,
   latestScheduleBoundary,
   nextScheduleBoundary,
+  parseCuratorOutput,
   parseDreamOutput,
   parseLocalTime,
+  type CuratorCatalogEntry,
   type DreamEvidence,
   type DreamSourceSession,
 } from '../src/dream.ts'
@@ -218,4 +221,124 @@ test('over-long evidence quotes are rejected and the prompt states both limits',
       evidence: { sessionId: 'session-user', seq: 3, quote: longQuote },
     }],
   }), prompt.evidence, { maxMemories: 4, maxContentChars: 300 }), /invalid or over-limit/)
+})
+
+test('extraction prompt carries the valid_until guidance and parses it through', () => {
+  const source = extractDreamSource(snapshot(), undefined, {
+    cutoffMs: 0,
+    maxMessages: 10,
+    maxMessageChars: 200,
+  })
+  const prompt = buildDreamPrompt([source], { maxTranscriptBytes: 4096, maxMemories: 4, maxContentChars: 500 })
+  assert.ok(prompt.prompt.includes('valid_until (optional ISO 8601 date)'), 'time-bound guidance present')
+  assert.ok(prompt.prompt.includes('Do not extract one-off task states'))
+
+  const accepted = parseDreamOutput(JSON.stringify({
+    memories: [{
+      content: 'The user is preparing for the November architect exam.',
+      kind: 'semantic',
+      scope: 'user',
+      key: 'plan.architect-exam',
+      importance: 0.6,
+      tags: ['exam'],
+      valid_until: '2026-11-30',
+      evidence: { sessionId: 'session-user', seq: 3, quote: 'always use pnpm' },
+    }],
+  }), prompt.evidence, { maxMemories: 4, maxContentChars: 500 })
+  assert.equal(accepted.proposals[0]?.validUntil, '2026-11-30')
+
+  // A malformed valid_until fails the strict path (whole batch) — the same
+  // discipline as any other ungrounded field.
+  assert.throws(() => parseDreamOutput(JSON.stringify({
+    memories: [{
+      content: 'The user is preparing for an exam.',
+      kind: 'semantic',
+      scope: 'user',
+      key: 'plan.exam',
+      importance: 0.6,
+      tags: [],
+      valid_until: 'next month',
+      evidence: { sessionId: 'session-user', seq: 3, quote: 'always use pnpm' },
+    }],
+  }), prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), /invalid or over-limit/)
+})
+
+function curatorCatalog(): CuratorCatalogEntry[] {
+  return [
+    {
+      id: 'mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0',
+      key: 'preference.package-manager',
+      kind: 'semantic',
+      importance: 0.8,
+      confirmed: false,
+      created_at: '2026-09-03T10:00:00.000Z',
+      valid_until: null,
+      content: 'The user prefers pnpm for JavaScript projects.',
+    },
+    {
+      id: 'mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z1',
+      key: 'preference.package-manager.dup',
+      kind: 'semantic',
+      importance: 0.7,
+      confirmed: false,
+      created_at: '2026-09-02T10:00:00.000Z',
+      last_evidenced_at: '2026-09-02T10:00:00.000Z',
+      valid_until: '2027-01-01',
+      content: 'JS 包管理用 pnpm。',
+    },
+  ]
+}
+
+test('curator prompt carries the catalog block, the same evidence window, and the contract', () => {
+  const source = extractDreamSource(snapshot(), undefined, {
+    cutoffMs: 0,
+    maxMessages: 10,
+    maxMessageChars: 200,
+  })
+  const fitted = buildDreamPrompt([source], { maxTranscriptBytes: 4096, maxMemories: 4, maxContentChars: 500 })
+  const prompt = buildCuratorPrompt({ catalog: curatorCatalog(), evidenceLines: fitted.lines })
+  assert.ok(prompt.includes('BEGIN UNTRUSTED CATALOG NDJSON'))
+  assert.ok(prompt.includes('BEGIN UNTRUSTED NDJSON'))
+  assert.ok(prompt.includes('"id":"mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0"'))
+  assert.ok(prompt.includes('"valid_until":"2027-01-01"'), 'valid_until surfaces as null or a date')
+  assert.ok(prompt.includes('when unsure, keep'))
+  // The evidence window is byte-identical to the extractor's.
+  const evidenceBlock = prompt.split('BEGIN UNTRUSTED NDJSON\n')[1]?.split('\nEND UNTRUSTED NDJSON')[0]
+  assert.equal(evidenceBlock, fitted.lines.join('\n'))
+})
+
+test('curator output: grounded refresh passes, fabricated quotes drop, merges dedupe', () => {
+  const source = extractDreamSource(snapshot(), undefined, {
+    cutoffMs: 0,
+    maxMessages: 10,
+    maxMessageChars: 200,
+  })
+  const fitted = buildDreamPrompt([source], { maxTranscriptBytes: 4096, maxMemories: 4, maxContentChars: 500 })
+  const result = parseCuratorOutput(JSON.stringify({
+    refresh: [
+      { id: 'mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0', evidence: { sessionId: 'session-user', seq: 3, quote: 'always use pnpm' } },
+      { id: 'mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0', evidence: { sessionId: 'session-user', seq: 3, quote: 'always use pnpm' } },
+      { id: 'mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z1', evidence: { sessionId: 'session-user', seq: 3, quote: 'fabricated quote text' } },
+      { id: 'mem_missing', evidence: { sessionId: 'session-user', seq: 99, quote: 'always use pnpm' } },
+    ],
+    merge: [
+      { survivor: 'mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0', absorbed: 'mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z1' },
+      { survivor: 'mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0', absorbed: 'mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z1' },
+      { survivor: 'mem_x', absorbed: 'mem_x' },
+    ],
+    keep: ['mem_keepme', 42],
+  }), fitted.evidence)
+  assert.equal(result.refresh.length, 1, 'duplicate refresh + ungrounded refresh drop')
+  assert.equal(result.refresh[0]?.id, 'mem_01J5G0Z0Z0Z0Z0Z0Z0Z0Z0Z0Z0')
+  assert.match(result.refresh[0]?.quoteHash ?? '', /^sha256:[0-9a-f]{64}$/)
+  assert.equal(result.merge.length, 1, 'duplicate and self merges drop')
+  assert.deepEqual(result.keep, ['mem_keepme'])
+  assert.equal(result.rejected, 6, '3 refresh + 2 merge + 1 keep proposals dropped')
+
+  assert.throws(() => parseCuratorOutput('not json', fitted.evidence), SyntaxError)
+  assert.throws(() => parseCuratorOutput('{"refresh":[],"merge":[],"keep":[],"extra":1}', fitted.evidence), /only refresh\/merge\/keep/)
+  assert.throws(() => parseCuratorOutput('{"refresh":{},"merge":[],"keep":[]}', fitted.evidence), /must all be arrays/)
+  // Empty catalog decisions are fine — an all-keep night is a valid outcome.
+  const quiet = parseCuratorOutput('{"refresh":[],"merge":[],"keep":[]}', fitted.evidence)
+  assert.deepEqual(quiet, { refresh: [], merge: [], keep: [], rejected: 0 })
 })

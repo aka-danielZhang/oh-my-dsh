@@ -29,7 +29,7 @@ import { deriveRecord, parseRecord, serializeRecord, type RecordDerive } from '.
 import type { Diagnostic } from './types.ts'
 
 /** Transaction kinds the store issues. */
-export type TxnAction = 'create' | 'candidate-create' | 'config-update' | 'update' | 'supersede' | 'promote' | 'forget'
+export type TxnAction = 'create' | 'candidate-create' | 'config-update' | 'update' | 'supersede' | 'promote' | 'forget' | 'candidate-expire' | 'memory-expire' | 'memory-merge'
 
 /** Durable op shapes (as persisted in the marker — content-free). */
 export type TxnOp =
@@ -360,7 +360,7 @@ function assertValidMarker(raw: unknown, fileName: string): asserts raw is Trans
   if (raw.schema !== MARKER_SCHEMA || typeof raw.id !== 'string' || !TXN_ID_RE.test(raw.id) || raw.id !== fileId) {
     throw new Error('transaction marker id must match its txn_<ulid>.yaml filename')
   }
-  if (!['create', 'candidate-create', 'config-update', 'update', 'supersede', 'promote', 'forget'].includes(String(raw.action))) {
+  if (!['create', 'candidate-create', 'config-update', 'update', 'supersede', 'promote', 'forget', 'candidate-expire', 'memory-expire', 'memory-merge'].includes(String(raw.action))) {
     throw new Error('transaction marker has an invalid action')
   }
   if (raw.phase !== 'prepared' && raw.phase !== 'canonical-written' && raw.phase !== 'journaled') {
@@ -421,7 +421,7 @@ function isNormalizedRelativePath(value: string): boolean {
 function isRecordDerive(value: unknown): boolean {
   if (!isPlainObject(value) || !hasOnlyKeys(value, ['status', 'revision', 'updated_at', 'last_confirmed_at', 'confirmed'])) return false
   if (!isIsoTimestamp(value.updated_at)) return false
-  if (value.status !== undefined && !['candidate', 'active', 'disputed', 'superseded'].includes(String(value.status))) return false
+  if (value.status !== undefined && !['candidate', 'active', 'disputed', 'superseded', 'expired'].includes(String(value.status))) return false
   if (value.revision !== undefined && (!Number.isSafeInteger(value.revision) || (value.revision as number) < 1)) return false
   if (value.last_confirmed_at !== undefined && !isIsoTimestamp(value.last_confirmed_at)) return false
   return value.confirmed === undefined || typeof value.confirmed === 'boolean'
@@ -429,7 +429,7 @@ function isRecordDerive(value: unknown): boolean {
 
 function isJournalEntry(value: unknown): value is JournalEntry {
   if (!isPlainObject(value) || !hasOnlyKeys(value, ['at', 'action', 'txn_id', 'id', 'revision', 'scope', 'key', 'content_hash', 'old_hash', 'new_hash', 'path', 'source', 'reason'])) return false
-  if (!isIsoTimestamp(value.at) || !['created', 'candidate-created', 'config-updated', 'updated', 'superseded', 'promoted', 'forgotten', 'candidate-rejected', 'candidate-expired', 'scope-created', 'external-edit-detected', 'external-removal', 'transaction-recovered', 'transaction-aborted'].includes(String(value.action))) return false
+  if (!isIsoTimestamp(value.at) || !['created', 'candidate-created', 'config-updated', 'updated', 'superseded', 'promoted', 'forgotten', 'candidate-rejected', 'candidate-expired', 'memory-expired', 'memory-refreshed', 'memory-merged', 'scope-created', 'external-edit-detected', 'external-removal', 'transaction-recovered', 'transaction-aborted'].includes(String(value.action))) return false
   if (value.txn_id !== undefined && (typeof value.txn_id !== 'string' || !TXN_ID_RE.test(value.txn_id))) return false
   if (value.revision !== undefined && (!Number.isSafeInteger(value.revision) || (value.revision as number) < 1)) return false
   for (const field of ['id', 'scope', 'key', 'path', 'reason'] as const) {

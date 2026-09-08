@@ -20,7 +20,7 @@ const overview: MemoryOverview = {
     nextRunAt: 1_800_000_000_000,
     lastResult: null,
   },
-  counts: { active: 1, candidate: 2, disputed: 0, superseded: 3, quarantined: 0, tombstones: 0, scopes: 1 },
+  counts: { active: 1, candidate: 2, disputed: 0, superseded: 3, expired: 0, quarantined: 0, tombstones: 0, scopes: 1 },
   files: { count: 1, truncated: false },
   watch: { active: true, degradedReason: null },
 }

@@ -15,20 +15,26 @@ import { foldConsumedWork, installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import type { JobId, JobOutcome } from '@deepseek-ai/dsh-jobs'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
+import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { StoreError } from './errors.ts'
+import { decayFactor, horizonFor } from './capsule.ts'
 import type { OhMyMemoService } from './service.ts'
 import { managerDomainSpec } from './manager-domain.ts'
 import {
+  buildCuratorPrompt,
   buildDreamPrompt,
   cursorWatermarks,
   DREAM_MAINTENANCE_SESSION_PREFIX,
   dueCatchUpBoundary,
   extractDreamSource,
   nextScheduleBoundary,
+  parseCuratorOutput,
   parseDreamOutput,
+  type CuratorCatalogEntry,
+  type DreamEvidence,
   type DreamSourceSession,
 } from './dream.ts'
 import type {
@@ -64,6 +70,7 @@ export interface Config {
   maxBrowseFiles: number
   maxFileReadBytes: number
   auditRetentionRuns: number
+  curatorMaxEntries: number
 }
 
 export const Config: z<Config> = z.object({
@@ -89,6 +96,9 @@ export const Config: z<Config> = z.object({
   maxBrowseFiles: z.number().step(1).min(1).max(10_000).default(1000),
   maxFileReadBytes: z.number().step(1).min(1024).max(1_048_576).default(262_144),
   auditRetentionRuns: z.number().step(1).min(1).max(1000).default(60),
+  // Upper bound of catalog entries offered to the nightly curator, ordered
+  // lowest decay-weight first (the stalest get their review chance first).
+  curatorMaxEntries: z.number().step(1).min(8).max(512).default(64),
 })
 
 export const name = 'dsh-ohmymemo-manager'
@@ -132,11 +142,30 @@ interface RunProgress {
   items: DreamRunSummary['items']
   cursors: Record<string, number>
   truncated: boolean
+  /** Deterministic lifecycle maintenance outcome (runs even without evidence). */
+  expiredMemories: number
+  expiredCandidates: number
+  maintenanceError: string | null
+  /** Curator (auto_consolidation) outcome; zeros when the gate is off. */
+  curatorRefreshed: number
+  curatorMerged: number
+  curatorRejected: number
+  curatorError: string | null
 }
 
 interface SuccessfulRun {
   progress: RunProgress
   sourceMessages: number
+}
+
+/** Narrow structural view of the maintenance Agent handle (curator turn). */
+interface MaintenanceAgentHandle {
+  agent: {
+    session: Session
+    followup(message: UserMessage): unknown
+    whenIdle(): Promise<unknown>
+  }
+  dispose(): Promise<unknown>
 }
 
 /**
@@ -571,7 +600,12 @@ export class OhMyMemoManager extends TypertRemoteService {
         }]
       })
       sourceMessages = promptInput.messageCount
-      if (sourceMessages === 0) return { progress, sourceMessages }
+      if (sourceMessages === 0) {
+        // No new evidence to extract — the deterministic maintenance sweep
+        // still runs: expiry is evidence-independent housekeeping.
+        await this.runMaintenanceSegment(progress)
+        return { progress, sourceMessages }
+      }
 
       const configSnapshot = this.memo.configSnapshot().config
       const fallback = this.ctx.agentDefaultModel.currentSelection()
@@ -684,6 +718,7 @@ export class OhMyMemoManager extends TypertRemoteService {
               confirmed: false,
               confidence: this.config.candidateConfidence,
               tags: proposal.tags,
+              ...(proposal.validUntil !== undefined ? { validUntil: proposal.validUntil } : {}),
               sources: [{
                 type: 'cross_session_inference',
                 session_id: proposal.evidence.sessionId,
@@ -702,6 +737,10 @@ export class OhMyMemoManager extends TypertRemoteService {
             this.logFailure('memory policy rejection', error)
           }
         }
+        await this.runMaintenanceSegment(progress)
+        if (configSnapshot.auto_consolidation) {
+          await this.runCuratorSegment(handle, agentSessionId, promptInput.evidence, promptInput.lines, progress, signal)
+        }
         return { progress, sourceMessages }
       } finally {
         signal.removeEventListener('abort', onAbort)
@@ -712,6 +751,147 @@ export class OhMyMemoManager extends TypertRemoteService {
         ? new Error(`dream-memory run exceeded ${this.config.runTimeoutMs}ms`, { cause: error })
         : error
       throw new DreamRunFailure(errorMessage(failure), progress, sourceMessages, failure, failure instanceof DreamOutputError)
+    }
+  }
+
+  /**
+   * Deterministic lifecycle maintenance after the extraction segment:
+   * candidate sweep + expiry archive (see the store's
+   * runLifecycleMaintenance). Failures are recorded in the audit detail and
+   * logged — they must not poison the extraction result or the dead-letter
+   * streak, which counts only deterministic output failures.
+   */
+  private async runMaintenanceSegment(progress: RunProgress): Promise<void> {
+    try {
+      const report = await this.memo.runLifecycleMaintenance()
+      progress.expiredCandidates = report.candidatesExpired.length
+      progress.expiredMemories = report.memoriesExpired.length
+    } catch (error) {
+      progress.maintenanceError = errorMessage(error)
+      this.logFailure('lifecycle maintenance', error)
+    }
+  }
+
+  /**
+   * Curator segment (gated by `auto_consolidation`): a second followup turn
+   * on the SAME maintenance Agent — no new session, same route/abort chain.
+   * Input is the active-memory catalog (bounded, lowest weight first) plus
+   * the extractor's evidence window; the model only PROPOSES
+   * refresh/merge/keep, and every proposal faces code-side guardrails:
+   * grounding (exact quote substring of a cited event), catalog membership
+   * (confirmed/sensitive entries are never listed), same scope+kind for
+   * merges. Curator failure is partial success — recorded in the audit
+   * detail, never poisoning the extractor's dead-letter streak.
+   */
+  private async runCuratorSegment(
+    handle: MaintenanceAgentHandle,
+    agentSessionId: SessionId,
+    evidence: Map<string, DreamEvidence>,
+    evidenceLines: string[],
+    progress: RunProgress,
+    signal: AbortSignal,
+  ): Promise<void> {
+    try {
+      const catalog = this.memo.curatorCatalog()
+      if (catalog.entries.length === 0) return
+      const now = new Date()
+      const weightOf = (entry: CuratorCatalogEntry): number =>
+        entry.importance * decayFactor(
+          { confirmed: false, created_at: entry.created_at, ...(entry.last_evidenced_at !== undefined ? { last_evidenced_at: entry.last_evidenced_at } : {}) },
+          now,
+          horizonFor(entry.kind, catalog.horizons),
+        )
+      // Stalest first: the entries closest to silent expiry get their review
+      // chance before the bound cuts the catalog.
+      const bounded = [...catalog.entries]
+        .sort((left, right) => weightOf(left) - weightOf(right) || left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id))
+        .slice(0, this.config.curatorMaxEntries)
+      const prompt = buildCuratorPrompt({ catalog: bounded, evidenceLines })
+
+      signal.throwIfAborted()
+      const baseline = await this.ctx.sessionQuery.observeSession(agentSessionId, { signal, projectionMode: 'none' })
+      let firstSeq: number
+      try {
+        firstSeq = (baseline.events.at(-1)?.seq ?? -1) + 1
+      } finally {
+        baseline[Symbol.dispose]()
+      }
+      handle.agent.followup(createUserMessage({
+        content: [{ type: 'text', text: prompt }],
+        source: {
+          kind: 'plugin',
+          plugin: name,
+          form: 'notice',
+          summary: 'bounded memory curator batch',
+        },
+      }))
+      await handle.agent.whenIdle()
+      await this.ctx.sessions.flush(handle.agent.session)
+      const after = await this.ctx.sessionQuery.observeSession(agentSessionId, { signal, projectionMode: 'none' })
+      let suffix: SessionEvent[]
+      try {
+        suffix = after.events.filter(event => event.seq >= firstSeq)
+      } finally {
+        after[Symbol.dispose]()
+      }
+      const outcome = turnOutcome(suffix)
+      if (outcome !== 'completed' && outcome !== 'max-tokens') {
+        throw new Error(`curator Agent did not complete (${outcome})`)
+      }
+      const parsed = parseCuratorOutput(lastAssistantText(suffix), evidence)
+
+      // Guardrails: only catalog-listed ids are touchable; every proposal is
+      // advisory until the store's own checks accept it.
+      const catalogIds = new Set(bounded.map((entry) => entry.id))
+      const absorbed = new Set<string>()
+      for (const proposal of parsed.merge) {
+        if (!catalogIds.has(proposal.survivor) || !catalogIds.has(proposal.absorbed) || absorbed.has(proposal.absorbed) || absorbed.has(proposal.survivor)) {
+          progress.curatorRejected += 1
+          continue
+        }
+        try {
+          await this.memo.mergeMemories({
+            survivorId: proposal.survivor,
+            absorbedId: proposal.absorbed,
+            reason: 'curator merge: near-duplicate of the survivor',
+          })
+          absorbed.add(proposal.absorbed)
+          progress.curatorMerged += 1
+        } catch (error) {
+          progress.curatorRejected += 1
+          this.logFailure('curator merge proposal', error)
+        }
+      }
+      for (const proposal of parsed.refresh) {
+        if (!catalogIds.has(proposal.id)) {
+          progress.curatorRejected += 1
+          continue
+        }
+        try {
+          await this.memo.refreshEvidence({
+            id: proposal.id,
+            evidencedAt: new Date(proposal.evidence.time).toISOString(),
+            source: {
+              type: 'cross_session_inference',
+              session_id: proposal.evidence.sessionId,
+              event_seq: proposal.evidence.seq,
+              message_id: proposal.evidence.messageId,
+              quote_hash: proposal.quoteHash,
+              quote_preview: proposal.quote,
+              observed_at: new Date(proposal.evidence.time).toISOString(),
+            },
+            reason: 'curator refresh: evidence window restates the fact',
+          })
+          progress.curatorRefreshed += 1
+        } catch (error) {
+          progress.curatorRejected += 1
+          this.logFailure('curator refresh proposal', error)
+        }
+      }
+    } catch (error) {
+      if (signal.aborted) throw error
+      progress.curatorError = errorMessage(error)
+      this.logFailure('curator segment', error)
     }
   }
 
@@ -779,10 +959,23 @@ export class OhMyMemoManager extends TypertRemoteService {
       memoriesRejected: result.progress.memoriesRejected,
       items: cancelled ? [] : result.progress.items,
       truncated: cancelled ? false : result.progress.truncated,
+      expiredMemories: result.progress.expiredMemories,
+      expiredCandidates: result.progress.expiredCandidates,
+      curatorRefreshed: result.progress.curatorRefreshed,
+      curatorMerged: result.progress.curatorMerged,
+      curatorRejected: result.progress.curatorRejected,
       detail: cancelled ? 'cancelled before commit' : null,
     }
     if (!cancelled && summary.truncated) {
       summary.detail = `output hit the model's max-token ceiling; ${summary.memoriesCreated} memor(y/ies) salvaged from the complete prefix`
+    }
+    if (!cancelled && result.progress.maintenanceError !== null) {
+      const suffix = `lifecycle maintenance failed: ${result.progress.maintenanceError}`
+      summary.detail = summary.detail === null ? suffix : `${summary.detail}; ${suffix}`
+    }
+    if (!cancelled && result.progress.curatorError !== null) {
+      const suffix = `curator failed: ${result.progress.curatorError}`
+      summary.detail = summary.detail === null ? suffix : `${summary.detail}; ${suffix}`
     }
     await this.persistAudit(auditFrom(request, result.progress, summary))
     if (cancelled) {
@@ -853,6 +1046,11 @@ export class OhMyMemoManager extends TypertRemoteService {
       memoriesRejected: progress.memoriesRejected,
       items: [],
       truncated: progress.truncated,
+      expiredMemories: progress.expiredMemories,
+      expiredCandidates: progress.expiredCandidates,
+      curatorRefreshed: progress.curatorRefreshed,
+      curatorMerged: progress.curatorMerged,
+      curatorRejected: progress.curatorRejected,
       detail: deadLettered
         ? `${detail}; dead-lettered after ${this.config.deadLetterThreshold} consecutive failures, evidence window skipped`
         : detail,
@@ -945,6 +1143,11 @@ export class OhMyMemoManager extends TypertRemoteService {
       memoriesRejected: 0,
       items: [],
       truncated: false,
+      expiredMemories: 0,
+      expiredCandidates: 0,
+      curatorRefreshed: 0,
+      curatorMerged: 0,
+      curatorRejected: 0,
       detail: 'previous process ended before the dream-memory run settled',
     }
     await this.replaceState({
@@ -1020,6 +1223,13 @@ function emptyProgress(): RunProgress {
     items: [],
     cursors: {},
     truncated: false,
+    expiredMemories: 0,
+    expiredCandidates: 0,
+    maintenanceError: null,
+    curatorRefreshed: 0,
+    curatorMerged: 0,
+    curatorRejected: 0,
+    curatorError: null,
   }
 }
 
@@ -1040,6 +1250,11 @@ function auditFrom(request: RunRequest, progress: RunProgress, summary: DreamRun
     memoriesCreated: [...progress.memoriesCreated],
     memoriesRejected: progress.memoriesRejected,
     truncated: progress.truncated,
+    expiredMemories: progress.expiredMemories,
+    expiredCandidates: progress.expiredCandidates,
+    curatorRefreshed: progress.curatorRefreshed,
+    curatorMerged: progress.curatorMerged,
+    curatorRejected: progress.curatorRejected,
     detail: summary.detail,
   }
 }

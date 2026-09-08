@@ -111,6 +111,7 @@ export function apply(ctx: Context): void {
         ...(input.workspaceScope !== undefined ? { workspaceScope: input.workspaceScope } : {}),
         budgetBytes: input.budgetBytes,
         now: new Date(),
+        decayHorizons: input.decayHorizons,
       })
       signal.throwIfAborted()
 

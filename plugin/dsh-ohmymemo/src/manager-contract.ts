@@ -31,6 +31,15 @@ export const dreamRunSummarySchema = z.object({
    *  Older persisted runs predate the field; they default to false so a
    *  stored record never blocks boot after an upgrade. */
   truncated: z.boolean().default(false),
+  /** Deterministic lifecycle maintenance counts (nightly no-LLM segment).
+   *  Older persisted runs predate the fields; they default to 0 so a stored
+   *  record never blocks boot after an upgrade. */
+  expiredMemories: z.number().int().nonnegative().default(0),
+  expiredCandidates: z.number().int().nonnegative().default(0),
+  /** Curator (auto_consolidation) counts; older runs default to 0. */
+  curatorRefreshed: z.number().int().nonnegative().default(0),
+  curatorMerged: z.number().int().nonnegative().default(0),
+  curatorRejected: z.number().int().nonnegative().default(0),
   detail: z.string().nullable(),
 }).strict()
 export type DreamRunSummary = z.infer<typeof dreamRunSummarySchema>
@@ -78,6 +87,13 @@ export const dreamRunAuditSchema = z.object({
   memoriesCreated: z.array(z.string()),
   memoriesRejected: z.number().int().nonnegative(),
   truncated: z.boolean().default(false),
+  /** Lifecycle maintenance counts; older persisted audits default to 0. */
+  expiredMemories: z.number().int().nonnegative().default(0),
+  expiredCandidates: z.number().int().nonnegative().default(0),
+  /** Curator (auto_consolidation) counts; older persisted audits default to 0. */
+  curatorRefreshed: z.number().int().nonnegative().default(0),
+  curatorMerged: z.number().int().nonnegative().default(0),
+  curatorRejected: z.number().int().nonnegative().default(0),
   detail: z.string().nullable(),
 }).strict()
 export type DreamRunAudit = z.infer<typeof dreamRunAuditSchema>
@@ -94,7 +110,7 @@ export const memoryFileSchema = z.object({
     id: z.string(),
     scope: z.string(),
     kind: z.enum(['semantic', 'episodic', 'procedural']),
-    status: z.enum(['candidate', 'active', 'disputed', 'superseded']),
+    status: z.enum(['candidate', 'active', 'disputed', 'superseded', 'expired']),
     privacy: z.enum(['normal', 'sensitive', 'secret-ref']),
     quarantined: z.boolean(),
   }).strict().optional(),
@@ -119,7 +135,7 @@ export const memoryDocumentSchema = z.object({
     revision: z.number().int().positive().optional(),
     scope: z.string().optional(),
     kind: z.enum(['semantic', 'episodic', 'procedural']).optional(),
-    status: z.enum(['candidate', 'active', 'disputed', 'superseded']).optional(),
+    status: z.enum(['candidate', 'active', 'disputed', 'superseded', 'expired']).optional(),
     tags: z.array(z.string()).optional(),
   }).strict(),
 }).strict()
@@ -151,6 +167,10 @@ export const memoryOverviewSchema = z.object({
     candidate: z.number().int().nonnegative(),
     disputed: z.number().int().nonnegative(),
     superseded: z.number().int().nonnegative(),
+    /** Lifecycle-expired records (valid_until passed or silence past the
+     *  decay horizon). Older persisted overviews predate the field; default
+     *  0 keeps stored records bootable after an upgrade. */
+    expired: z.number().int().nonnegative().default(0),
     quarantined: z.number().int().nonnegative(),
     tombstones: z.number().int().nonnegative(),
     scopes: z.number().int().nonnegative(),

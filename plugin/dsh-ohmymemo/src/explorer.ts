@@ -61,14 +61,14 @@ export interface MemoryDisplayDocument {
 }
 
 /** Build a bounded browser-facing file index from catalog records and views. */
-export function listDisplayFiles(root: string, catalog: MemoryCatalog, limit: number, maxViewBytes: number): MemoryDisplayTree {
+export function listDisplayFiles(root: string, catalog: MemoryCatalog, limit: number, maxViewBytes: number, now: Date = new Date()): MemoryDisplayTree {
   const boundedLimit = Math.max(1, Math.floor(limit))
   // readableEntries applies the tombstone memory-id barrier: a lingering
   // forgotten body (deferred deletion) never appears in the browser.
   const records = catalog.readableEntries()
     .filter((entry) => isDisplayRecordPath(entry.relPath))
     .sort((left, right) => left.relPath.localeCompare(right.relPath))
-  const viewResult = collectViewFiles(root, catalog, boundedLimit + 1, maxViewBytes)
+  const viewResult = collectViewFiles(root, catalog, boundedLimit + 1, maxViewBytes, now)
   const views = viewResult.files
   const files: MemoryDisplayFile[] = []
   for (const entry of records) {
@@ -207,8 +207,9 @@ function collectViewFiles(
   catalog: MemoryCatalog,
   limit: number,
   maxBytes: number,
+  now: Date,
 ): { files: MemoryDisplayFile[]; truncated: boolean } {
-  const core = catalog.allEntries().filter(isCoreViewEntry)
+  const core = catalog.allEntries().filter((entry) => isCoreViewEntry(entry, now))
   const specs: GeneratedViewSpec[] = [{
     path: 'views/user-profile.md',
     name: 'user-profile.md',
