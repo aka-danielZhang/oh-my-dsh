@@ -16,8 +16,11 @@ dsh plugin --profile web add <repo>/plugin/dsh-model-image-input
 ```
 
 The bundle patch mounts the `dsh-model-image-input` client row for every Web
-profile that installs the package. It requires the stock locale, connection,
-and ui-settings settings-scope peers supplied by a normal `dsh web` profile.
+profile that installs the package. It requires the stock locale, the typed
+`remote.settings` Remote (supplied by the api-gateway client), and the
+ui-settings settings-scope peers provided by a normal `dsh web` profile
+(0.1.2+ posture — writes go through `remote.settings.mutate`, not the removed
+`connection.api` facade).
 
 ## Behavior
 

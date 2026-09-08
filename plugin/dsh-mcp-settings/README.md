@@ -15,7 +15,7 @@ The bundle inserts these rows into a compatible Web profile. The profile must no
 ## Requirements
 
 - A matching DeepSeek Harness development build whose `web` profile already supplies the DSH peer packages listed in `package.json`.
-- The fork runtime `v0.1.1-rc.1+zw.1` or another Harness build that emits `mcp-client/status`; the published official `dsh-mcp-client@0.1.1-rc.1` does not emit this event.
+- The fork runtime `v0.1.2-rc.1+zw.1` / `@crazx/dsh-mcp-client@0.1.2-rc.1.zw.1` that emits `mcp-client/status`; official `dsh-mcp-client` does not emit this event.
 - Node.js `^22.19.0 || >=24`.
 - pnpm 10 or newer when installing directly from GitHub.
 
@@ -88,12 +88,9 @@ Restart the Web profile. The bundle rows disappear while user settings remain in
 
 ## Develop
 
-The typecheck and test setup follows the DSH out-of-tree plugin convention: keep a Harness checkout in the sibling directory `../deepseek-harness`.
+Typechecking, tests, and builds use pinned npm packages. No sibling Harness checkout is required.
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git ../deepseek-harness
-cd ../deepseek-harness && pnpm install
-cd ../dsh-mcp-settings
 pnpm install
 pnpm run typecheck
 pnpm test
@@ -110,13 +107,13 @@ pnpm run dev:web
 
 `dsh web` always mounts the client HMR receiver. The watcher rebuilds this out-of-tree package's Host and Client bundles; the running Host observes the changed bundle revision and reloads the browser plugin without a page refresh. Harness's root `pnpm run dev:web` only watches in-tree `packages/*/*` client plugins and does not replace this package-local watcher.
 
-`prepare` uses the self-contained `tsdown.config.ts` and `tsconfig.prepare.json`, so a consumer installing from GitHub does not need the sibling Harness checkout. Type checking and tests do require it.
+`prepare` uses the self-contained `tsdown.config.ts` and `tsconfig.prepare.json`. Host Zod and its shared chunks are bundled for desktop extraction.
 
-GitHub CI verifies the consumer-side install, bundle, JavaScript syntax, and packed distribution without a Harness checkout. The full typecheck and test suite runs against a matching sibling Harness fork tree. Source-checkout development pins `@deepseek-ai/dsh-mcp-client` to the status-capable `@crazx` npm alias so Node cannot silently load the official build and leave every connected server displayed as connecting.
+Tests exercise the published host package and browser factories. The MCP client is pinned to the status-capable `@crazx` npm alias so Node cannot silently load the official build and leave every connected server displayed as connecting. Desktop 0.3.0-rc.34 includes this plugin automatically.
 
 ## Compatibility
 
-Current compatible DeepSeek Harness baseline: **fork `v0.1.1-rc.1+zw.1`**. The manager mirrors reconnect defaults and the server-name pattern locally, but live status still requires the fork's `mcp-client/status` event. The source-checkout devDependency therefore aliases `@deepseek-ai/dsh-mcp-client` to `@crazx/dsh-mcp-client@0.1.1-rc.1.zw.1`; production profiles must provide the same status-capable peer.
+Current compatible DeepSeek Harness baseline: **fork `v0.1.2-rc.1+zw.1`**. The manager mirrors reconnect defaults and the server-name pattern locally, but live status still requires the fork's `mcp-client/status` event. The source-checkout devDependency therefore aliases `@deepseek-ai/dsh-mcp-client` to `@crazx/dsh-mcp-client@0.1.2-rc.1.zw.1`; production profiles must provide the same status-capable peer.
 
 This bundle replaces extension points present in the current DeepSeek Harness release-candidate line and deliberately reuses the in-box `@deepseek-ai/dsh-mcp-client`. DSH is pre-release software; update the peer ranges, Typert descriptor, and bundle patch together when those extension points change.
 

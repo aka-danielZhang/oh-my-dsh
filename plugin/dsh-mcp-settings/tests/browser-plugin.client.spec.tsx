@@ -3,13 +3,34 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup } from '@testing-library/react'
 import { LocaleRuntime } from '@deepseek-ai/dsh-client-locale/client'
-import { SlotRegistry } from '@deepseek-ai/dsh-client-runtime/client'
+import { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import { resolveSlotLabel } from '@deepseek-ai/dsh-client-ui-slots'
-import { stubSettingsScope, usePinnedBrowserLanguages } from '@deepseek-ai/dsh-client-test-runtime'
+import { stubSettingsScope, usePinnedBrowserLanguages } from './browser-fixtures.ts'
 import { apply, inject, NS } from '../src/client/index.ts'
 import { McpSettingsSection } from '../src/client/McpSettingsSection.tsx'
 import type { McpSettingsSectionInjected } from '../src/client/McpSettingsSection.tsx'
 import type { McpInventorySnapshot } from '../src/inventory-types.ts'
+
+vi.mock('@deepseek-ai/dsh-client-locale/client', async () => {
+  const { loadBrowserModule } = await import('./browser-fixtures.ts')
+  return loadBrowserModule('@deepseek-ai/dsh-client-locale/client', {
+    'react': await import('react'),
+    'react/jsx-runtime': await import('react/jsx-runtime'),
+    '@deepseek-ai/dsh-client-ui-primitives': await import('@deepseek-ai/dsh-client-ui-primitives'),
+    '@deepseek-ai/dsh-client-store': await import('@deepseek-ai/dsh-client-store'),
+  })
+})
+vi.mock('@deepseek-ai/dsh-client-ui-renderer/client', async () => {
+  const { loadBrowserModule } = await import('./browser-fixtures.ts')
+  return loadBrowserModule('@deepseek-ai/dsh-client-ui-renderer/client', {
+    'react': await import('react'),
+    'react-dom': await import('react-dom'),
+    'react-dom/client': await import('react-dom/client'),
+    'react/jsx-runtime': await import('react/jsx-runtime'),
+    '@deepseek-ai/cordis': await import('@deepseek-ai/cordis'),
+    '@deepseek-ai/dsh-client-ui-slots': await import('@deepseek-ai/dsh-client-ui-slots'),
+  })
+})
 
 usePinnedBrowserLanguages('zh-CN')
 afterEach(cleanup)
@@ -54,7 +75,7 @@ function declare(slots: SlotRegistry): () => void {
 
 describe('ui-settings-mcp browser plugin', () => {
   it('declares only the services used by the Settings contribution', () => {
-    expect(inject).toEqual(['slots', 'locale', 'connection', 'remote', 'settingsScope'])
+    expect(inject).toEqual(['slots', 'locale', 'remote', 'settingsScope'])
   })
 
   it('mounts its inventory Remote when the standard assembly has not selected it', async () => {

@@ -2,6 +2,45 @@
 
 Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的，不在这里重复。发版时 `scripts/release-notes.mjs` 抽取对应 `## [version]`（没有则回退 `## [Unreleased]`）写入 GitHub Release 与 `latest-mac.yml` / `latest.yml` 的 `releaseNotes`。
 
+## [Unreleased]
+
+## [0.3.0-rc.37] - 2026-09-08
+
+### Fixed
+
+- 修复模型设置卡内「推理档位」与「图片输入」两个内联编辑器的写入按钮报「写入失败：Cannot read proper…」：上游 0.1.2 运行时移除了 `connection.api` 门面，两个插件的写入调用在发出请求前就抛 `Cannot read properties of undefined (reading 'settings')`。现改走 typed `remote.settings.mutate`（dsh-thread 同款姿势），档位/图片声明对所有模型（含手动添加的 GPT-6-Astra 这类新模型）恢复可写；两插件升 0.1.2。
+
+## [0.3.0-rc.36] - 2026-09-07
+
+### Fixed
+
+- 修复全新安装后「创造模式」加载失败：运行时升级到 `v0.1.2-rc.1+zw.2`，fork 的 npm 包保留配置和代码使用的原始依赖名称，通过 npm alias 引用 fork 实现。无需清空用户数据或额外重启来补装依赖。
+- 发版冒烟新增四种内置模式的实际 Agent 挂载和工具注册检查，在隔离数据目录连续启动两次，防止「插件安装成功，但模式不可用」再次漏检。
+- 冒烟探针使用标准 file URL，兼容 Windows 的 ESM 加载规则。rc.35 因该测试路径问题未正式发布，本版包含其全部修复。
+
+## [0.3.0-rc.34] - 2026-09-07
+
+### Fixed
+
+- 修复 Windows 首装时目录插件添加后锁文件未同步导致事务回滚：在隔离事务内刷新锁文件，再执行冻结校验。rc.33 因 Windows 冒烟失败未正式发布，本版包含其全部修复。
+- 首次接管已有 DSH 数据时，从安装包的 revision manifest 读取插件名单，不再访问打包后不存在的源码目录。
+- 随包加入适配当前运行时的 MCP Settings 0.2.6；全新安装即可使用「设置 → MCP」，随包清单共 12 个插件。
+- 开发启动按随包清单构建插件并保留构建失败；无构建脚本插件的本地 prepare 与裸源码插件的 tsx 冒烟解析路径保持一致。安装冒烟改用桌面真实事务，并验证重复启动幂等。
+
+## [0.3.0-rc.32] - 2026-09-07
+
+### Added
+
+- 桌面安装包随包插件从 7 个扩展到 11 个：新增 branding、fs-observation-log、provider-balance、reasoning-efforts 四个此前需要手动 `dsh plugin add` 的插件。全新环境首次启动即获得完整插件集；已有 Profile 下次启动自动补装缺失插件，无需手动操作。provider-balance 保持裸源码分发形态（runtime tsx 直载 TS），打包清单经新增的 `dsh.desktop.pack` 覆盖显式声明，不再假设 `lib/` 布局；无构建脚本的插件在 prepare 与 CI 名单校验中按 `--if-present` 跳过。
+- `mcp-settings` 本次暂不入包：其 tsc/vitest 解析表还锚在旧 harness 基线（rc.1 重组移除了 `packages/client/runtime`），移植完成前继续手动 `dsh plugin add dsh-mcp-settings`。
+
+## [0.3.0-rc.31] - 2026-09-04
+
+### Changed
+
+- Runtime 钉到 `v0.1.2-rc.1+zw.1`（`1b138a9e5b403a00f942cc90d3650d6584926cdc`，官方 `dsh-v0.1.2-rc.1`，fork [PR #13](https://github.com/aka-danielZhang/deepseek-harness/pull/13)）。0.1.2 用 `seq` / `eventAt()` / `snapshotEvents()` 取代 `Session.events`，并区分 `SessionSeq` 与 `SessionLogOffset`；`dsh-thread` 已改读 `snapshotEvents()`。`@crazx/*@0.1.2-rc.1.zw.1` 已上 npm。
+- 运行中且草稿有内容时，composer 主按钮保持发送、整行没有停止入口。本版随包装入 `dsh-send-while-running` 0.2.0：该状态在发送旁补一颗红色 Stop（点击即中断当前回合），草稿清空后自动退场。0.1.x 的孪生 Send 作废（stock 已能在运行中发送）。
+
 ## [0.3.0-rc.30] - 2026-09-03
 
 ### Fixed

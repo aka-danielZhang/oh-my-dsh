@@ -15,7 +15,7 @@ bundle 会把这三个插件行插入兼容的 Web profile。该 profile 不能�
 ## 环境要求
 
 - 匹配的 DeepSeek Harness 开发版本；它的 `web` profile 必须已经提供 `package.json` 中列出的 DSH peer 包。
-- fork runtime `v0.1.1-rc.1+zw.1`，或其他会发出 `mcp-client/status` 的 Harness 构建；官方发布的 `dsh-mcp-client@0.1.1-rc.1` 不发出该事件。
+- fork runtime `v0.1.2-rc.1+zw.1` / `@crazx/dsh-mcp-client@0.1.2-rc.1.zw.1`，或其他会发出 `mcp-client/status` 的 Harness 构建；官方 `dsh-mcp-client` 不发出该事件。
 - Node.js `^22.19.0 || >=24`。
 - 从 GitHub 直接安装时使用 pnpm 10 或更高版本。
 
@@ -88,12 +88,9 @@ dsh plugin --profile web remove dsh-mcp-settings
 
 ## 开发
 
-类型检查和测试遵循 DSH 仓库外插件约定：在相邻目录 `../deepseek-harness` 保留一个 Harness checkout。
+类型检查、测试与构建均使用钉版 npm 包，不需要相邻 Harness checkout。
 
 ```sh
-git clone https://github.com/deepseek-ai/deepseek-harness.git ../deepseek-harness
-cd ../deepseek-harness && pnpm install
-cd ../dsh-mcp-settings
 pnpm install
 pnpm run typecheck
 pnpm test
@@ -110,13 +107,13 @@ pnpm run dev:web
 
 `dsh web` 始终挂载 Client HMR 接收端。watcher 会重建这个仓库外插件的 Host 和 Client bundle；运行中的 Host 发现 bundle revision 变化后，会让浏览器插件自动热替换，无需刷新页面。Harness 根目录的 `pnpm run dev:web` 只监视仓库内 `packages/*/*` 的 Client 插件，不能替代本插件自己的 watcher。
 
-`prepare` 使用自包含的 `tsdown.config.ts` 与 `tsconfig.prepare.json`，因此 GitHub 安装方不需要相邻 Harness checkout；类型检查与测试需要它。
+`prepare` 使用自包含的 `tsdown.config.ts` 与 `tsconfig.prepare.json`；Host Zod 与生成的共享 chunk 随包分发，桌面解包无需另装私有依赖。
 
-GitHub CI 会在没有 Harness checkout 的情况下验证消费端安装、bundle、JavaScript 语法和打包产物。完整类型检查与测试针对匹配的相邻 Harness fork 树运行。源码 checkout 开发态把 `@deepseek-ai/dsh-mcp-client` 钉到带状态事件的 `@crazx` npm alias，防止 Node 静默加载官方构建，导致已连接服务器仍一直显示为连接中。
+测试覆盖已发布 Host 包和浏览器工厂。MCP client 钉到带状态事件的 `@crazx` npm alias，防止 Node 静默加载官方构建，导致已连接服务器仍一直显示为连接中。Desktop 0.3.0-rc.34 起自动随包安装本插件。
 
 ## 兼容性
 
-当前兼容的 DeepSeek Harness 基线：**fork `v0.1.1-rc.1+zw.1`**。manager 会在本地镜像重连默认值与服务器名 pattern，但实时状态仍依赖 fork 的 `mcp-client/status` 事件。因此源码 checkout 的 devDependency 把 `@deepseek-ai/dsh-mcp-client` alias 到 `@crazx/dsh-mcp-client@0.1.1-rc.1.zw.1`；生产 profile 也必须提供同样带状态事件的 peer。
+当前兼容的 DeepSeek Harness 基线：**fork `v0.1.2-rc.1+zw.1`**。manager 会在本地镜像重连默认值与服务器名 pattern，但实时状态仍依赖 fork 的 `mcp-client/status` 事件。因此源码 checkout 的 devDependency 把 `@deepseek-ai/dsh-mcp-client` alias 到 `@crazx/dsh-mcp-client@0.1.2-rc.1.zw.1`；生产 profile 也必须提供同样带状态事件的 peer。
 
 该 bundle 替换当前 DeepSeek Harness RC 版本线提供的扩展点，并复用内置 `@deepseek-ai/dsh-mcp-client`。DSH 仍处于预发布阶段；这些扩展点变化时，需要一起更新 peer 范围、Typert descriptor 和 bundle patch。
 

@@ -1,7 +1,9 @@
 /** MCP server configuration and live status registered into Web Settings. */
 
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-api-gateway/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import TYPERT_REMOTE from '../typert.remote-client.ts'
 import type { McpServerEntry } from './drafts.ts'
@@ -25,7 +27,7 @@ export const NS = 'settings.mcp'
 export const MCP_SETTINGS_NS = 'mcp'
 
 /** Services required by the Settings registration, the settings transport, and the status Remote. */
-export const inject = ['slots', 'locale', 'connection', 'remote', 'settingsScope']
+export const inject = ['slots', 'locale', 'remote', 'settingsScope']
 
 /** Contribute the MCP server manager to the Settings panel. */
 export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {

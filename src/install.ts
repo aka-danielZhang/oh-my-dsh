@@ -157,7 +157,10 @@ export function runDesktopPluginInstall(
         runCli(runtime, ['plugin', '--profile', profileName, 'add', plugin.dir], shadowHome, logs)
       }
     }
-    runCli(runtime, ['plugin', '--profile', profileName, 'install'], shadowHome, logs)
+    // pnpm's Windows directory-add path can leave new link specs out of the
+    // lockfile. Resolve the deliberate mutation before validating it frozen.
+    runCli(runtime, ['plugin', '--profile', profileName, 'install', '--no-frozen-lockfile'], shadowHome, logs)
+    runCli(runtime, ['plugin', '--profile', profileName, 'install', '--frozen-lockfile'], shadowHome, logs)
     for (const plugin of plugins) {
       if (!pluginAlreadyInProfile(plugin.dir, plugin.package, shadowHome, profileName)) {
         throw new Error(`staged ${plugin.package} does not resolve to ${plugin.dir}`)

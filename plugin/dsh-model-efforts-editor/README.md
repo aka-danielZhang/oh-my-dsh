@@ -26,7 +26,7 @@ dsh plugin --profile web add <repo>/plugin/dsh-model-efforts-editor
 
 - 只在带「获取可用模型」动作的卡片（即 pi-ai 手写模型卡）注入，DeepSeek 目录卡天然排除；
 - 行与存储行的锚定沿用 dsh-provider-balance / dsh-model-image-input 的姿势：卡片行 id 序列必须精确等于某路由的存储序列，改未保存草稿或目录路由不可编辑（fail-invisible，DOM 失配只是按钮不出现）；
-- 写入走 `settings.mutate` 整组 models 数组 op（携带读时 revision），即时生效，无需重启；
+- 写入走 typed `remote.settings.mutate` 整组 models 数组 op（携带读时 revision；0.1.2 起的姿势——上游已移除 `connection.api` 门面），即时生效，无需重启；
 - 已有声明按整键替换（本插件的职责就是设这个键），compat 之外的兄弟字段原样保留。
 
 ## 开发

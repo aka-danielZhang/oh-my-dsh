@@ -19,7 +19,17 @@ const profile = path.join(process.env.DSH_HOME, 'profiles', profileName)
 
 if (args[0] === 'plugin') {
   const command = args[profileFlag + 2]
-  if (command === 'install') process.exit(0)
+  if (command === 'install') {
+    const dirty = path.join(profile, '.test-stale-lock')
+    if (args.includes('--no-frozen-lockfile')) {
+      fs.rmSync(dirty, { force: true })
+      fs.appendFileSync(path.join(profile, '.test-install-phases'), 'resolve\\n')
+    } else {
+      if (fs.existsSync(dirty)) process.exit(65)
+      fs.appendFileSync(path.join(profile, '.test-install-phases'), 'frozen\\n')
+    }
+    process.exit(0)
+  }
   if (command !== 'add') process.exit(64)
   const pluginDir = args[profileFlag + 3]
   if (pluginDir === undefined) process.exit(64)
@@ -38,6 +48,7 @@ if (args[0] === 'plugin') {
     manifest.dsh.profile.bundles.push(pluginManifest.name)
   }
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\\n')
+  fs.writeFileSync(path.join(profile, '.test-stale-lock'), 'directory add did not update the lockfile')
   const link = path.join(profile, 'node_modules', pluginManifest.name)
   fs.rmSync(link, { recursive: true, force: true })
   fs.symlinkSync(pluginDir, link, 'junction')
@@ -103,6 +114,7 @@ test('installs desktop packages into a completely missing profile', () => {
 
     const profile = path.join(fixture.home, 'profiles', 'web')
     assert.ok(fs.statSync(path.join(profile, 'package.json')).isFile())
+    assert.equal(fs.readFileSync(path.join(profile, '.test-install-phases'), 'utf8'), 'resolve\nfrozen\n')
     assert.match(fs.readFileSync(path.join(profile, 'cordis.patch.yml'), 'utf8'), /\[\]/)
     assert.match(fs.readFileSync(path.join(profile, 'pnpm-workspace.yaml'), 'utf8'), /nodeLinker: hoisted/)
     assert.equal(

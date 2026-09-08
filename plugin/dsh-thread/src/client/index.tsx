@@ -90,7 +90,7 @@ function ContinueButton(props: {
   const [phase, setPhase] = React.useState<'idle' | 'running' | 'syncing' | 'complete' | 'failed'>('idle')
   const [error, setError] = React.useState<string | null>(null)
   const [target, setTarget] = React.useState<SessionId | null>(null)
-  const visible = props.useSessions(state => target !== null && state.byId[target] !== undefined)
+  const visible = props.useSessions((state) => target !== null && state.byId[target] !== undefined)
 
   // Rehydrate from the durable link: a draft already consumed by an earlier
   // confirmation (possibly before a reload) renders its outcome, never a
@@ -286,11 +286,11 @@ function ThreadCapsuleOverlay(props: ThreadOverlayProps): React.ReactElement | n
     props.threadFace.isPanelOpen,
     props.threadFace.isPanelOpen,
   )
-  const sessionId = props.useSessions(state => state.current)
+  const sessionId = props.useSessions((state) => state.current)
   // Blank (not-yet-started) Sessions never show the capsule: the store may
   // stay open across navigation, but rendering and placement both gate on a
   // started Session so a fresh chat never gets the empty Thread surface.
-  const currentBlank = props.useSessions(state =>
+  const currentBlank = props.useSessions((state) =>
     state.current === undefined ? true : (state.byId[state.current]?.blank ?? true))
   // The master switch hides the capsule without disturbing the open state.
   const enabled = React.useSyncExternalStore(
@@ -377,7 +377,7 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
         agentPreset: plan.createPlan.agentPreset,
         ...(plan.createPlan.workspaceId === undefined
           ? {}
-          : { workspaceId: plan.createPlan.workspaceId as never }),
+          : { workspaceId: plan.createPlan.workspaceId }),
         ...(plan.createPlan.cwd === undefined ? {} : { cwd: plan.createPlan.cwd }),
       })
       if (!created.ok) throw new Error(`${created.error.code}: ${created.error.message}`)

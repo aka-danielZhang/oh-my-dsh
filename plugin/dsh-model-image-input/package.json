@@ -1,6 +1,6 @@
 {
   "name": "dsh-model-image-input",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Per-model image-input controls injected into custom pi-ai model rows in Web Settings",
   "type": "module",
   "main": "lib/index.js",
@@ -20,10 +20,9 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-gateway",
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-connection"
+        "@deepseek-ai/dsh-client-ui-settings"
       ],
       "platform": "web"
     },
@@ -32,7 +31,7 @@
       "tarball": "model-image-input.tar.gz",
       "dest": "plugins/dsh-model-image-input",
       "env": "DSH_DESKTOP_MODEL_IMAGE_INPUT_PLUGIN",
-      "pin": "0.1.1"
+      "pin": "0.1.2"
     }
   },
   "scripts": {
@@ -63,25 +62,27 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0-rc.7 <5",
-    "@deepseek-ai/dsh-client-runtime": ">=0.0.1-rc.1 <1",
-    "@deepseek-ai/dsh-client-ui-slots": ">=0.0.1-rc.1 <1",
+    "@deepseek-ai/dsh-api-gateway": ">=0.1.2-alpha.3 <1",
+    "@deepseek-ai/dsh-client-locale": ">=0.1.0-rc.8 <1",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.0-rc.8 <1",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.0-rc.8 <1",
     "react": "^18.2.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
-    "@deepseek-ai/dsh-api-remotes": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-locale": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-runtime": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-primitives": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-settings": "0.1.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-slots": "0.1.1-rc.2",
+    "@deepseek-ai/dsh-api-remotes": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-locale": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.2-rc.1",
     "@types/node": "^24.13.3",
     "@types/react": "~18.3.1",
     "react": "^18.2.0",
     "react-dom": "18.3.1",
     "tsdown": "^0.22.2",
     "tsx": "^4.19.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "@deepseek-ai/dsh-api-settings-controller": "0.1.2-rc.1"
   },
   "packageManager": "pnpm@10.28.0"
 }

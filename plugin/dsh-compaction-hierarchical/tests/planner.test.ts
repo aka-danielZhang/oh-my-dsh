@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  CallId,
+  ToolCallId,
   createAssistantMessage,
   createToolResultMessage,
   createUserMessage,
@@ -39,8 +39,8 @@ test('planMessageChunks greedily fills the budget in order', () => {
 })
 
 test('tool calls and their results stay in one indivisible unit', () => {
-  const callA = CallId('call-a')
-  const callB = CallId('call-b')
+  const callA = ToolCallId('call-a')
+  const callB = ToolCallId('call-b')
   const request = user('run both')
   const assistant = createAssistantMessage({
     content: [
@@ -115,7 +115,7 @@ test('one oversized balanced unit fails instead of crossing the provider limit',
 })
 
 test('planner rejects corrupt or unbalanced tool history', () => {
-  const call = CallId('missing')
+  const call = ToolCallId('missing')
   const orphan = createToolResultMessage({
     callId: call,
     content: [{ type: 'text', text: 'orphan' }],

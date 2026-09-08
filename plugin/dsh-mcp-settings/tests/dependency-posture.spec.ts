@@ -9,7 +9,7 @@ const packageJson = JSON.parse(
 
 test('source installs use the status-capable fork MCP client', () => {
   expect(packageJson.devDependencies?.['@deepseek-ai/dsh-mcp-client']).toBe(
-    'npm:@crazx/dsh-mcp-client@0.1.1-rc.1.zw.1',
+    'npm:@crazx/dsh-mcp-client@0.1.2-rc.1.zw.1',
   )
 
   const clientPackage = require('@deepseek-ai/dsh-mcp-client/package.json') as {
@@ -18,7 +18,7 @@ test('source installs use the status-capable fork MCP client', () => {
   }
   expect(clientPackage).toMatchObject({
     name: '@crazx/dsh-mcp-client',
-    version: '0.1.1-rc.1.zw.1',
+    version: '0.1.2-rc.1.zw.1',
   })
   expect(readFileSync(require.resolve('@deepseek-ai/dsh-mcp-client'), 'utf8')).toContain(
     'ctx.emit("mcp-client/status"',

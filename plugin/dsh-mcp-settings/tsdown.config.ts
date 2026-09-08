@@ -16,7 +16,7 @@ const CLIENT_EXTERNALS = [
 const DECORATOR_SYNTAX = /^\s*@[A-Za-z_$][\w$]*/m
 
 /** Compile standard TypeScript decorators before Rolldown parses Host modules. */
-function standardDecoratorPlugin() {
+export function standardDecoratorPlugin() {
   return {
     name: 'dsh-standard-decorators',
     enforce: 'pre' as const,
@@ -59,6 +59,7 @@ const host = {
   dts: false,
   clean: false,
   tsconfig: 'tsconfig.prepare.json',
+  deps: { onlyBundle: ['zod'] },
   plugins: [standardDecoratorPlugin()],
 }
 

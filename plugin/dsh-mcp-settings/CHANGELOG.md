@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.2.6] - 2026-09-07
+
+### Fixed
+
+- Replace the removed client-runtime entry with the current gateway, renderer, and settings packages on the 0.1.2-rc.1 baseline.
+- Typecheck and test against pinned npm packages without a sibling source checkout. Browser registration tests execute the published module factories; MCP SDK mocks remain active inside the published host package.
+- Bundle Zod and include generated shared chunks in the distribution, so desktop extraction needs no private dependency install. Declare desktop shipping metadata.
+
 ## [0.2.5] - 2026-08-21
 
 ### Fixed

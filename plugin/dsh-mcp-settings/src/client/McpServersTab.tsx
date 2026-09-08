@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { McpInventorySnapshot, McpServerStatus } from '../inventory-types.ts'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
 import {
   Button,
   IconChevronDownOutline14,
