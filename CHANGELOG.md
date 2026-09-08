@@ -4,10 +4,11 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 
 ## [Unreleased]
 
-## [0.3.0-rc.36] - 2026-09-07
+## [0.3.0-rc.36] - 2026-09-08
 
 ### Fixed
 
+- 修复模型设置卡内「推理档位」与「图片输入」两个内联编辑器的写入按钮报「写入失败：Cannot read proper…」：上游 0.1.2 运行时移除了 `connection.api` 门面，两个插件的写入调用在发出请求前就抛 `Cannot read properties of undefined (reading 'settings')`。现改走 typed `remote.settings.mutate`（dsh-thread 同款姿势），档位/图片声明对所有模型（含手动添加的 GPT-6-Astra 这类新模型）恢复可写；两插件升 0.1.2。
 - 修复全新安装后「创造模式」加载失败：运行时升级到 `v0.1.2-rc.1+zw.2`，fork 的 npm 包保留配置和代码使用的原始依赖名称，通过 npm alias 引用 fork 实现。无需清空用户数据或额外重启来补装依赖。
 - 发版冒烟新增四种内置模式的实际 Agent 挂载和工具注册检查，在隔离数据目录连续启动两次，防止「插件安装成功，但模式不可用」再次漏检。
 - 冒烟探针使用标准 file URL，兼容 Windows 的 ESM 加载规则。rc.35 因该测试路径问题未正式发布，本版包含其全部修复。
