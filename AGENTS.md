@@ -57,6 +57,7 @@ docs/                        packaging-playbook.md + notes/（决策记录住仓
 
 ### 跨包纪律
 
+- **开发插件接入已安装 Desktop 前必读**：[Desktop 插件接入与故障恢复](docs/desktop-plugin-integration.md)。禁止以复制构建文件、手改正式 Profile 或在正式插件目录临时安装依赖，替代 runtime 基线适配、同实例依赖链接和隔离产物验证。源码 `ship: true` 不会改变旧客户端包内的随包清单；Host 多入口与 Client 都须验证。文档任务不授权修改正式 Profile、记忆库或发布新版本。
 - 跨插件只走 slot 与 ctx 服务，禁止 import 另一插件的实现符号；harness 包只做 type-only import（构建时擦除）。
 - 决策记录一律 `docs/notes/`（仓根），不跟包走。包内 README 只写该包的安装与行为。
 
