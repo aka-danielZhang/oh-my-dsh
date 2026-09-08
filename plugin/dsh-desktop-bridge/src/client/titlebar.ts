@@ -60,13 +60,22 @@ export function titlebarCss(zonePx: number): string {
 
 /**
  * Append the frame-padding stylesheet to the document head.
+ *
+ * Pre-claimed with `data-plugin`/`data-plugin-css` and dedup-guarded exactly
+ * like installRailCss (rail.ts) — see the 2026-09-08 incident note: an
+ * untagged sheet gets attributed to whichever plugin materializes next and
+ * is deleted by that plugin's next HMR reload.
  * @param doc - the document to patch (injected for tests).
  * @param zonePx - reserved band height in px.
- * @returns the disposer removing the style element.
+ * @returns the disposer removing the style element (no-op when deduped).
  */
 export function installTitlebarCss(doc: Document, zonePx: number): () => void {
+  const tagId = 'dsh-desktop-bridge/titlebar'
+  if (doc.querySelector(`style[data-plugin-css="${tagId}"]`) !== null) return () => {}
   const style = doc.createElement('style')
   style.setAttribute('data-desktop-titlebar', '')
+  style.dataset.plugin = 'dsh-desktop-bridge'
+  style.dataset.pluginCss = tagId
   style.textContent = titlebarCss(zonePx)
   doc.head.append(style)
   return () => { style.remove() }

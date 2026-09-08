@@ -96,6 +96,7 @@ export function stopWhileRunningCss(): string {
 
 /** Structural slice of a style element the installer touches (test-friendly). */
 export interface InstalledStyle {
+  readonly dataset: Record<string, string>
   setAttribute(name: string, value: string): void
   textContent: string | null
   remove(): void
@@ -103,18 +104,32 @@ export interface InstalledStyle {
 
 /** Structural slice of Document the installer touches (test-friendly). */
 export interface StylesheetHost {
+  querySelector(selectors: string): unknown
   createElement(tagName: string): InstalledStyle
   head: { append(...nodes: unknown[]): void }
 }
 
 /**
  * Append the stop-while-running stylesheet to a document head.
+ *
+ * Pre-claimed with `data-plugin`/`data-plugin-css` (the stock build-time CSS
+ * emission convention) and dedup-guarded: the client module system's
+ * `claimStyles` attributes every UNTAGGED `<style>` to whichever plugin
+ * materializes next, and that plugin's next HMR reload deletes the claimed
+ * sheet (the 2026-09-08 bridge incident — this installer had the same
+ * latent defect; its live sheet was in fact claimed by ui-jobs). A claimed
+ * tag is only touched by a rebuild of THIS plugin, whose reload re-inserts
+ * the sheet anyway.
  * @param doc - the document to style (injected for tests).
- * @returns the disposer removing the style element.
+ * @returns the disposer removing the style element (no-op when deduped).
  */
 export function installStopWhileRunningCss(doc: StylesheetHost): () => void {
+  const tagId = 'dsh-send-while-running/stop-while-running'
+  if (doc.querySelector(`style[data-plugin-css="${tagId}"]`) !== null) return () => {}
   const style = doc.createElement('style')
   style.setAttribute('data-dsh-stop-while-running', '')
+  style.dataset.plugin = 'dsh-send-while-running'
+  style.dataset.pluginCss = tagId
   style.textContent = stopWhileRunningCss()
   doc.head.append(style)
   return () => { style.remove() }

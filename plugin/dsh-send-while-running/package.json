@@ -1,6 +1,6 @@
 {
   "name": "dsh-send-while-running",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DSH web plugin: keeps a Stop button beside the Send primary in the composer while the agent turn is running and the draft has content (the one state the 0.1.2 composer offers no stop), and recolors every stock Stop danger-red",
   "type": "module",
   "main": "lib/index.js",

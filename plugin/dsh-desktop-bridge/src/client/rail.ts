@@ -71,12 +71,28 @@ export function railCss(): string {
 
 /**
  * Append the collapsed-rail stylesheet to the document head.
+ *
+ * The tag is pre-claimed with `data-plugin`/`data-plugin-css` (the build-time
+ * CSS emission convention, tsdown.client.ts): the client module system's
+ * `claimStyles` attributes every UNTAGGED `<style>` in the document to
+ * whichever plugin materializes next, and a later HMR reload of that plugin
+ * would delete the claimed sheet via `removeOwnedStyles` — the 2026-09-08
+ * incident where ohmymemo dev rebuilds stripped this stylesheet from the
+ * live page (rail controls fell back to unstyled static layout). A claimed
+ * tag is only touched by a rebuild of THIS plugin, whose reload re-inserts
+ * the sheet anyway. The dedup guard keeps a double apply from stacking
+ * identical sheets (same rationale as the stock emission's idempotency
+ * check).
  * @param doc - the document to patch (injected for tests).
- * @returns the disposer removing the style element.
+ * @returns the disposer removing the style element (no-op when deduped).
  */
 export function installRailCss(doc: Document): () => void {
+  const tagId = 'dsh-desktop-bridge/rail'
+  if (doc.querySelector(`style[data-plugin-css="${tagId}"]`) !== null) return () => {}
   const style = doc.createElement('style')
   style.setAttribute('data-desktop-rail', '')
+  style.dataset.plugin = 'dsh-desktop-bridge'
+  style.dataset.pluginCss = tagId
   style.textContent = railCss()
   doc.head.append(style)
   return () => { style.remove() }

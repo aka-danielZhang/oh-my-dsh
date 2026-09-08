@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { collapseRailTemplate, railCss } from '../src/client/rail.ts'
+import { collapseRailTemplate, installRailCss, railCss } from '../src/client/rail.ts'
 
 describe('collapseRailTemplate', () => {
   it('zeroes the first track of the AppFrame template (details closed)', () => {
@@ -61,5 +61,49 @@ describe('railCss', () => {
     assert.ok(css.includes('var(--dsw-alias-label-primary)'))
     assert.ok(css.includes('var(--dsw-alias-interactive-bg-hover)'))
     assert.ok(!css.includes('#'), 'no literal colors')
+  })
+})
+
+describe('installRailCss', () => {
+  class StubStyle {
+    readonly attributes: Record<string, string> = {}
+    readonly dataset: Record<string, string> = {}
+    textContent: string | null = null
+    removed = false
+    setAttribute(name: string, value: string): void { this.attributes[name] = value }
+    remove(): void { this.removed = true }
+  }
+  function stubDoc(existing: unknown = null) {
+    const appended: StubStyle[] = []
+    return {
+      appended,
+      doc: {
+        querySelector: () => existing,
+        createElement: (tagName: string) => {
+          assert.equal(tagName, 'style')
+          return new StubStyle()
+        },
+        head: { append(...nodes: unknown[]): void { appended.push(...(nodes as StubStyle[])) } },
+      },
+    }
+  }
+
+  it('appends a claimed style element (data-plugin + data-plugin-css + marker)', () => {
+    const { doc, appended } = stubDoc()
+    const dispose = installRailCss(doc as unknown as Document)
+    assert.equal(appended.length, 1)
+    assert.equal(appended[0].dataset.plugin, 'dsh-desktop-bridge')
+    assert.equal(appended[0].dataset.pluginCss, 'dsh-desktop-bridge/rail')
+    assert.equal(appended[0].attributes['data-desktop-rail'], '')
+    assert.equal(appended[0].textContent, railCss())
+    assert.equal(appended[0].removed, false)
+    dispose()
+    assert.equal(appended[0].removed, true)
+  })
+  it('dedups against a live tag and returns a no-op disposer', () => {
+    const { doc, appended } = stubDoc({ dataset: { pluginCss: 'dsh-desktop-bridge/rail' } })
+    const dispose = installRailCss(doc as unknown as Document)
+    assert.equal(appended.length, 0)
+    dispose()
   })
 })

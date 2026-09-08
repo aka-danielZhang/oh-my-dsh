@@ -459,10 +459,20 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
     })
 
     // Hover affordance for the sidebar view's token-styled rows, plus the
-    // General settings row's switch vocabulary.
+    // General settings row's switch vocabulary. Pre-claimed with
+    // `data-plugin`/`data-plugin-css` (the stock build-time CSS emission
+    // convention) and dedup-guarded: the client module system's claimStyles
+    // attributes every UNTAGGED <style> to whichever plugin materializes
+    // next, and that plugin's next HMR reload deletes the claimed sheet
+    // (the 2026-09-08 bridge incident). A claimed tag is only touched by a
+    // rebuild of THIS plugin, whose reload re-inserts the sheet anyway.
     ctx.effect(() => {
+      const tagId = 'dsh-thread/client-css'
+      if (document.querySelector(`style[data-plugin-css="${tagId}"]`) !== null) return () => {}
       const style = document.createElement('style')
       style.dataset.dshThread = 'client-css'
+      style.dataset.plugin = 'dsh-thread'
+      style.dataset.pluginCss = tagId
       style.textContent = THREAD_SIDEBAR_CSS + '\n' + THREAD_SETTINGS_ROW_CSS
       document.head.appendChild(style)
       return () => { style.remove() }

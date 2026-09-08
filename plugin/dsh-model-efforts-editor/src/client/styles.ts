@@ -70,9 +70,23 @@ button.mee-btn[data-on="1"] { color: var(--dsw-primary, #3b82f6); }
 .mee-err { color: var(--dsw-danger, #ef4444); font-size: 11px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `
 
-/** Insert the style element once and return its disposer. */
+/**
+ * Insert the style element once and return its disposer.
+ *
+ * Pre-claimed with `data-plugin`/`data-plugin-css` (the stock build-time CSS
+ * emission convention) and dedup-guarded: the client module system's
+ * `claimStyles` attributes every UNTAGGED `<style>` to whichever plugin
+ * materializes next, and that plugin's next HMR reload deletes the claimed
+ * sheet (the 2026-09-08 bridge incident). A claimed tag is only touched by
+ * a rebuild of THIS plugin, whose reload re-inserts the sheet anyway.
+ * @returns the disposer removing the style element (no-op when deduped).
+ */
 export function injectStyles(): () => void {
+  const tagId = 'dsh-model-efforts-editor'
+  if (document.querySelector(`style[data-plugin-css="${tagId}"]`) !== null) return () => {}
   const el = document.createElement('style')
+  el.dataset.plugin = tagId
+  el.dataset.pluginCss = tagId
   el.textContent = CSS
   document.head.appendChild(el)
   return () => {

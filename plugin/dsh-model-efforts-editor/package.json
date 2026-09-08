@@ -1,6 +1,6 @@
 {
   "name": "dsh-model-efforts-editor",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Edit per-model reasoning efforts (and dispatch compat) inline in the stock Models settings card - the GUI field llm-pi-ai exposes but stock settings never edits",
   "type": "module",
   "main": "lib/index.js",

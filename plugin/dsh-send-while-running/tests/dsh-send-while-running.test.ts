@@ -117,16 +117,18 @@ test('order override is scoped to the extra button being mounted', () => {
   )
 })
 
-test('stylesheet installer appends and removes the style element', () => {
+test('stylesheet installer appends a claimed style element and removes it', () => {
   class StubStyle {
     textContent: string | null = null
     readonly attributes: Record<string, string> = {}
+    readonly dataset: Record<string, string> = {}
     removed = false
     setAttribute(name: string, value: string): void { this.attributes[name] = value }
     remove(): void { this.removed = true }
   }
   const appended: StubStyle[] = []
   const doc = {
+    querySelector: () => null,
     createElement(tagName: string): StubStyle {
       assert.equal(tagName, 'style')
       return new StubStyle()
@@ -136,8 +138,21 @@ test('stylesheet installer appends and removes the style element', () => {
   const dispose = installStopWhileRunningCss(doc)
   assert.equal(appended.length, 1)
   assert.equal(appended[0].attributes['data-dsh-stop-while-running'], '')
+  assert.equal(appended[0].dataset.plugin, 'dsh-send-while-running')
+  assert.equal(appended[0].dataset.pluginCss, 'dsh-send-while-running/stop-while-running')
   assert.equal(appended[0].textContent, stopWhileRunningCss())
   assert.equal(appended[0].removed, false)
   dispose()
   assert.equal(appended[0].removed, true)
+})
+
+test('stylesheet installer dedups against a live tag (no-op disposer)', () => {
+  const appended: unknown[] = []
+  const dispose = installStopWhileRunningCss({
+    querySelector: () => ({ dataset: { pluginCss: 'dsh-send-while-running/stop-while-running' } }),
+    createElement: () => { throw new Error('must not create a second style element') },
+    head: { append(...nodes: unknown[]): void { appended.push(...nodes) } },
+  })
+  assert.equal(appended.length, 0)
+  dispose()
 })
