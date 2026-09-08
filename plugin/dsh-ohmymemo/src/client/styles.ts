@@ -1,7 +1,7 @@
 /** Dynamic stylesheet for the Memory settings section. */
 
 export const MEMORY_SETTINGS_CSS = `
-.omm-root{container-type:inline-size;display:flex;min-width:0;min-height:480px;max-height:min(680px,calc(100vh - 168px));height:calc(100vh - 208px);flex-direction:column;color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5;letter-spacing:0;}
+.omm-root{container-type:inline-size;display:flex;min-width:0;flex-direction:column;color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5;letter-spacing:0;}
 .omm-header{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:40px;margin-bottom:10px;}
 .omm-title{margin:0;font-size:18px;font-weight:600;line-height:26px;letter-spacing:0;}
 .omm-header-actions{display:flex;align-items:center;gap:8px;}
@@ -10,7 +10,7 @@ export const MEMORY_SETTINGS_CSS = `
 .omm-tab{min-width:92px;height:28px;padding:0 12px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;cursor:pointer;}
 .omm-tab[aria-selected=true]{background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-primary);font-weight:600;}
 .omm-tab:focus-visible,.omm-tree-row:focus-visible,.omm-switch:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:2px;}
-.omm-body{min-height:0;flex:1;overflow:auto;padding-right:4px;}
+.omm-body{min-height:0;}
 .omm-loading,.omm-empty{display:flex;min-height:220px;align-items:center;justify-content:center;flex-direction:column;gap:10px;color:var(--dsw-alias-label-tertiary);text-align:center;}
 .omm-spin{animation:omm-spin 900ms linear infinite;}
 @keyframes omm-spin{to{transform:rotate(360deg);}}
@@ -54,7 +54,7 @@ export const MEMORY_SETTINGS_CSS = `
 .omm-dot{width:7px;height:7px;flex:none;border-radius:50%;background:var(--dsw-alias-label-tertiary);}
 .omm-dot[data-state=active]{background:var(--dsw-alias-state-success-primary);}
 .omm-dot[data-state=warning]{background:var(--dsw-alias-state-error-primary);}
-.omm-space{display:grid;min-height:0;height:100%;grid-template-columns:214px minmax(0,1fr);border:1px solid var(--dsw-alias-border-l2);border-radius:6px;overflow:hidden;background:var(--dsw-alias-bg-layer-1);}
+.omm-space{display:grid;min-height:320px;height:min(520px,calc(100vh - 320px));grid-template-columns:214px minmax(0,1fr);border:1px solid var(--dsw-alias-border-l2);border-radius:6px;overflow:hidden;background:var(--dsw-alias-bg-layer-1);}
 .omm-tree-pane{min-width:0;overflow:auto;border-right:1px solid var(--dsw-alias-border-l2);padding:7px 5px;}
 .omm-tree-head{padding:5px 8px 8px;color:var(--dsw-alias-label-tertiary);font-size:11px;font-weight:600;}
 .omm-tree-row{display:flex;box-sizing:border-box;width:100%;height:28px;align-items:center;gap:6px;padding:0 7px;border:0;border-radius:4px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;text-align:left;cursor:pointer;}
