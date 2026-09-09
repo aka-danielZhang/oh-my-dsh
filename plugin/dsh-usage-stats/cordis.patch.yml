@@ -1,0 +1,19 @@
+# dsh-usage-stats bundle patch: three rows —
+#   collector: folds assistant/message usage (live session/event + history
+#     backfill through sessionQuery) into $DSH_HOME/usage-stats/
+#   gateway:   Typert Remote serving summary/daily/activity/breakdown
+#   main row:  strict typert registration + the browser settings page
+# (see dsh-web-search-toggle for the same host-gateway + client shape).
+# The collector accepts a config row, e.g.
+#     - id: dsh-usage-stats-collector
+#       config: { retentionDays: 400 }
+# Rows carrying the browser half keep the entry id equal to the client
+# bundle id (the package name) so the loader can serve
+# /plugins/dsh-usage-stats/client.js.
+- insert:
+    - id: dsh-usage-stats-collector
+      name: dsh-usage-stats/collector
+    - id: dsh-usage-stats-gateway
+      name: dsh-usage-stats/gateway
+    - id: dsh-usage-stats
+      name: dsh-usage-stats

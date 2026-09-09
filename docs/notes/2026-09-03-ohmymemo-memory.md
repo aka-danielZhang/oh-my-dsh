@@ -2,7 +2,7 @@
 
 日期：2026-09-03
 
-状态：Phase 1 与 Phase 2 已实现；Phase 3 的 evidence-grounded candidate 生成/增量游标及 Phase 4 的每日受限维护 Run/只读“记忆空间”已实现（见 `2026-09-04-ohmymemo-dream-memory-and-ui.md`）；候选确认与冲突治理、语义 consolidation 和治理 UI 未实现
+状态：Phase 1 已实现（`plugin/dsh-ohmymemo`，见 `2026-09-03-ohmymemo-store-phase1.md`）；Phase 2–4 未开始
 
 计划包：`plugin/dsh-ohmymemo`
 
@@ -930,7 +930,6 @@ schema: ohmymemo-config/v1
 capture_mode: direct
 remember_direct_facts: true
 allow_inference_candidates: false
-dream_schedule_local_time: '02:00'
 auto_consolidation: false
 watch: true
 max_record_bytes: 16384
@@ -954,8 +953,6 @@ v2 采用“即时候选 + 增量整理 + 用户最终控制”：
 
 不得把 `agent/turn-stopping` 变成阻塞用户响应的模型整理阶段。候选提取和整理应在 Agent 空闲后作为有界后台 Job 执行。
 
-当前已交付的首段只做每日或手动触发的增量候选提取：默认关闭，按 Host 本地时间每日 `02:00`，只读 append-origin direct-human `user/message`，每次最多一个受限 Agent 调用；严格验证证据原文后只写 `privacy: sensitive` candidate。即时候选、语义 merge/dispute/reject 与自动 promotion 仍未实现。当前 DSH Session Query 不提供带 direct-user provenance 的分页读取，因此 Session/消息/transcript 上限只约束后续选择和模型输入，不宣称底层 corpus/log I/O 有界。
-
 ### 维护 Run
 
 语义维护使用受限运行环境，只允许：
@@ -967,7 +964,7 @@ v2 采用“即时候选 + 增量整理 + 用户最终控制”：
 
 不开放 Shell、网络、任意 Workspace 文件写入或普通记忆忘记权限。
 
-维护 Run 不应污染普通 Session 列表。优先使用 DSH Jobs 与插件自有 Run 记录表达；在 Harness 尚无系统维护 Session 契约时，不自行伪造 `SessionHeader.kind`。当前首段为了满足 model-visible 输入可回放，仍把 prompt 持久化在 `ohmymemo-maintenance-*` root Session；它可能出现在普通历史并按 Session Persistence 策略保留，这是已知平台缺口。未来若平台提供 maintenance Session，再接入其标准可见性与删除语义。
+维护 Run 不应污染普通 Session 列表。优先使用 DSH Jobs 与插件自有 Run 记录表达；在 Harness 尚无系统维护 Session 契约时，不自行伪造 `SessionHeader.kind`。未来若平台提供 maintenance Session，再接入其标准可见性语义。
 
 Run 记录：
 
@@ -1006,13 +1003,11 @@ result:
 - 日志和错误只记录 ID、key、hash、路径和状态；normal 模式不记录正文。
 - 敏感匹配器是防误写策略，不是完整 DLP；疑似 secret 时 fail closed。
 
-## UI
+## 后续 UI
 
-Client 插件已在顶级设置菜单提供“记忆”，但不改变 Store 语义。当前“概览”展示梦境记忆开关、每日时间、Host 时区、last/next Run、活动状态、最近错误、目录统计与 watcher 健康，并提供手动运行和活动 Run 取消；“记忆空间”提供 allowlist Markdown 树与 Host 解析后的只读正文，窄屏在文件列表与正文间显式返回。
+v1 依靠 Tools 和文件系统即可完整工作。后续 Client 插件提供“记忆空间”，但不改变 Store 语义。
 
-当前刻意不在浏览器中展示 manifest/config、journal、锁、storage-domain Run 状态、事务、缓存、tombstone 或其他内部文件。sensitive 正文 redacted，generated view 的内部生成头不渲染，文件路径经规范化、generation、symlink、类型与大小检查。
-
-后续治理视图：
+建议视图：
 
 - 核心画像：当前注入的 user/workspace 记忆。
 - 全部记忆：按 scope、kind、状态和 tag 筛选。
@@ -1088,25 +1083,23 @@ Host 日志事件建议：
 
 ### Phase 3：候选与冲突治理
 
-已交付首段：
+交付：
 
-- 自动提取只产生 `candidate`，并固定 `confirmed: false`、`pinned: false`。
-- 只接受 direct-human 来源；fork seed、subagent、维护 Session、外部结果与疑似凭据均不进入提取。
-- 精确来源保留 Session/event seq、quote hash 与受限 quote preview；增量 cursor 只在 Run 成功后提交。
-- candidate key 从规范化正文与证据确定性派生，同一候选可幂等跳过。
-
-待交付：candidate 确认/拒绝、TTL 清理、完整 inference/subagent 权限流、原子 conflict/dispute/supersede 治理与 dangling provenance 工作流。
+- candidate 状态和确认/拒绝流程。
+- direct statement、inference、subagent 的权限分流。
+- conflict/dispute/supersede 关系。
+- 来源 Session/event 定位与 dangling provenance。
+- candidate TTL 和增量 extraction cursors。
 
 ### Phase 4：维护 Agent 与 UI
 
-已交付首段：
+交付：
 
-- 默认关闭的 Host 本地每日 one-shot 调度、最近边界补跑、进程/跨进程单飞。
-- 无可见 Tools 且执行 guard 拒绝工具调用的 root maintenance Agent；模型输出经 strict JSON、证据原文和 secret 校验。
-- storage domain 持久 Run 状态/审计，Jobs 仅镜像活动状态与取消；设置页展示 last/next/status/error 并支持手动运行和取消。
-- 顶级“记忆”设置菜单与“概览/记忆空间”本地页签；只读 Markdown tree/viewer 覆盖 desktop 与 narrow 布局。
-
-待交付：语义 consolidation、usage/cost 日月预算、候选确认、冲突裁决、来源跳转和忘记预览；达到规模阈值后再评估 SQLite FTS 和 embedding cache。
+- 确定性维护和语义维护分离。
+- 受限维护 Jobs、usage/cost 预算和 Run 审计。
+- “记忆空间”Client UI。
+- 候选确认、冲突裁决、来源跳转和忘记预览。
+- 达到规模阈值后再评估 SQLite FTS 和 embedding cache。
 
 ## 验收场景
 
@@ -1161,15 +1154,6 @@ Host 日志事件建议：
 4. 注入内容以持久 `user/message` 出现在 Session 日志并可回放。
 5. 记忆正文中的命令性文字不获得系统指令权限。
 
-### 梦境记忆与设置
-
-1. 默认关闭时无定时器和新增模型调用；设置页显示本地时区、`02:00`、空闲状态及无 next Run。
-2. 开启后用 config hash CAS 持久化，计算下一本地边界；睡眠或重启只补最近且仍在窗口内的一个边界。
-3. Run 只读取符合来源策略的 direct-human 消息；模型返回的 evidence quote 必须是原消息精确子串，失败不推进 cursor。
-4. 合法建议只进入 candidate，不能确认、置顶、覆盖 active 或绕过 tombstone/secret 检查。
-5. 活动 Run 显示 Job id 并可取消；完成、失败和取消均落持久审计，UI 展示真实状态和错误。
-6. desktop 显示文件树与 Markdown 双栏；narrow 显示单栏文件列表，进入正文后提供返回；内部运行文件永不出现在树中。
-
 ## 测试策略
 
 - 纯函数单测：路径映射、frontmatter schema、key 规范化、冲突判定、排序、视图预算、secret 检测。
@@ -1178,7 +1162,7 @@ Host 日志事件建议：
 - 真实 Cordis 集成：Store + Tools + Agent Loop + Session Persistence，验证 model-visible 日志不变量。
 - 两进程测试：共享 scratch `DSH_HOME`，覆盖 writer lock 和 stale lock 恢复。
 - 组装快照：Tool schema、system prompt 增量和 Session transcript。
-- 梦境记忆增加调度边界、来源过滤、strict response/evidence、Manager Remote、取消与文件浏览安全测试；真实 scratch Web Profile 做冷启动以及 desktop/narrow 浏览器冒烟，UI 验证不替代 Host 合约。
+- Web e2e 留到 UI 阶段；v1/v2 不以 UI 测试替代 Host 合约。
 
 所有测试使用 scratch `DSH_HOME`，不得读取或污染真实 `~/.dsh/ohmymemo`。
 
