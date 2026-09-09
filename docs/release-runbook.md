@@ -6,7 +6,7 @@
 
 | 发什么 | tag | Release 产物 | latest 指针 |
 |---|---|---|---|
-| 桌面公证版 | `v<semver>`（如 `v0.3.0-rc.1`） | 完整 DMG + **瘦** zip（无 `runtime.tar.gz`）+ Windows NSIS + `runtime-<sha>-<platform>.tar.gz` + latest-mac.yml + latest.yml + blockmap | **独占**（`make_latest: true`） |
+| 桌面公证版 | `v<semver>`（如 `v0.3.0-rc.1`） | 完整 DMG + **瘦** zip（无 `runtime.tar.gz`）+ Windows NSIS + `runtime-<sha>-<platform>.tar.gz` + `runtime-revision-<platform>-<arch>.json` + npm runtime 分片 + latest-mac.yml + latest.yml + blockmap | **独占**（`make_latest: true`） |
 | 插件 | `<包名>-v<semver>`（如 `dsh-mcp-settings-v0.2.3`） | git archive 的插件源码 tarball + 安装说明 | **永不**（`make_latest: false`） |
 | runtime fork | `v<基线>+zw.<补丁>`（如 `v0.1.0-rc.7+zw.1`，在 fork 仓库） | 无 Release，仅 git tag 供 revision.json 钉 | — |
 
@@ -90,7 +90,7 @@ bash scripts/notarize-mac-artifacts.sh release/*.dmg release/*.zip
 | 后台没有出现更新入口 | 未打包构建会跳过检查；离线 / Release 还没发过 latest-mac.yml 都走静默软失败。桌面 `v*` tag 推了但 publish 失败时，必须删掉该 tag（否则旧版 `-rc` 客户端刮 atom 会命中空 tag、图标不出现）；新版壳已钉 `allowPrerelease=false`，只认 `/releases/latest` |
 | 更新下载后校验失败 | 标题带入口保留目标版本并进入可重试失败态；核对 electron-builder 签名与 GitHub 附件是否同一次构建 |
 | 每次热更都下整包 | 看 `~/.dsh-desktop/logs/updater.log` 是否 `Unable to locate previous update.zip`（DMG 第一次是预期）。清过 `~/Library/Caches/oh-my-dsh-updater/` 也会再整包。国内慢先设 `HTTPS_PROXY`，不要指望换 updater 超时 |
-| 热更后 sidecar 起不来 / missing runtime.tar.gz | 确认该 Release 有 `runtime-<sha>-*.tar.gz`，且 `~/.dsh-desktop/runtime/<sha>/.ok` 与 revision 哈希一致或能从 GitHub 补拉 |
+| 热更后 sidecar 起不来 / missing runtime.tar.gz | 确认该 Release 有 `runtime-<sha>-*.tar.gz` 与 `runtime-revision-<triple>.json`，npm 上有 `@crazx/dsh-desktop-runtime-<triple>-0@<版>`，且 `~/.dsh-desktop/runtime/<sha>/.ok` 与 revision 哈希一致；更新必须先下完 zip+runtime 才允许重启 |
 | DMG 安装页退化成默认布局 | `bash scripts/verify-dmg-layout.sh <dmg>` |
 | 平台产物已传 draft 但 Release 还是草稿 | `desktop-publish` 需要 mac/win 双 `success`；`actions/cache` 的 **post 收尾步**偶发 OOM / 拖满超时把 job 染红（rc.27 实案：mac post cache 崩溃、win post cache 卡到 120min 取消），构建/公证/上传其实全成。核对 draft 附件齐（dmg / zip / exe / 双 yml / 双平台 runtime tar），然后站在对应 tag 的 checkout 上本地补跑 publish 三步：`node scripts/release-notes.mjs <ver> > dist/release-notes.md`、`node scripts/tauri-cutover-latest-json.mjs <ver> dist/latest.json`、`gh release upload v<ver> dist/latest.json --clobber && gh release edit v<ver> --draft=false --latest --notes-file dist/release-notes.md`。不要整条 rerun——重烧 40 分钟还可能撞附件 clobber |
 

@@ -1,6 +1,9 @@
 /**
  * Copy src/resources/runtime.tar.gz to release/runtime-<sha>-<platform-arch>.tar.gz
- * so GitHub Releases can serve it when a slim updater zip omitted the bundled tar.
+ * and the per-platform runtime-revision-<platform>-<arch>.json so GitHub
+ * Releases can serve both when a slim updater zip omitted the bundled tar.
+ * The revision JSON is tiny and lets the updater prefetch the tar as soon as
+ * an update is available, before the user clicks download.
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -10,6 +13,10 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 export function runtimeArtifactName(sha, platform = process.platform, arch = process.arch) {
   return `runtime-${sha}-${platform}-${arch}.tar.gz`
+}
+
+export function runtimeRevisionAssetName(platform = process.platform, arch = process.arch) {
+  return `runtime-revision-${platform}-${arch}.json`
 }
 
 export function stageRuntimeArtifact() {
@@ -27,7 +34,10 @@ export function stageRuntimeArtifact() {
   mkdirSync(destDir, { recursive: true })
   const dest = join(destDir, runtimeArtifactName(sha))
   copyFileSync(tar, dest)
+  const revisionDest = join(destDir, runtimeRevisionAssetName())
+  copyFileSync(revisionPath, revisionDest)
   console.log(`stage-runtime-artifact: ${dest}`)
+  console.log(`stage-runtime-artifact: ${revisionDest}`)
   return dest
 }
 
