@@ -1,6 +1,6 @@
 # 桌面端内容顶到窗口上沿（消灭 28px 空带）设计方案
 
-2026-09-09 · 叠加在 dsh-desktop-bridge 0.2.0-rc.11（分段拖拽条）之上 · 状态：**已实施（bridge 0.2.0-rc.12），待实机验收与随壳发布**
+2026-09-09 · 叠加在 dsh-desktop-bridge 0.2.0-rc.11（分段拖拽条）之上 · 状态：**已实施（bridge 0.2.0-rc.13，含文末 rc.13 修订），待实机验收与随壳发布**
 
 ## 背景与目标
 
@@ -39,7 +39,7 @@ div:has(> [data-shell-overlay])>div:nth-child(1){box-sizing:border-box;padding-t
 ```
 
 - `push`/`float`：**不偏移**，头部顶到 y=0，与中间 header 同线。
-- `fullscreen`：保留 28px 下压。原因是该模式 z-40 盖住 overlay 层——若 top:0，面板会盖住 rail 控件（侧栏开关/通知/新会话，overlay z-20 内，层叠出不去）且页签条撞红绿灯；保留 top:28 则灯排、rail 控件、拖拽带全部留在上方正常工作。bottom 仍为 0，高度自然收缩。
+- `fullscreen`：~~保留 28px 下压。原因是该模式 z-40 盖住 overlay 层——若 top:0，面板会盖住 rail 控件（侧栏开关/通知/新会话，overlay z-20 内，层叠出不去）且页签条撞红绿灯；保留 top:28 则灯排、rail 控件、拖拽带全部留在上方正常工作。bottom 仍为 0，高度自然收缩。~~ **rc.13 修订否决，改为真接管全窗，见文末修订节。**
 
 ### 3. 挖洞范围放宽到全文档（drag-strip.ts）
 
@@ -89,4 +89,31 @@ div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation
 
 - reconciler 有 ≤100ms 的跟随延迟，模式切换瞬间点击带内按钮理论上可能被段吞一次——与 rc.11 同级，可接受。
 - `[data-sidebar-right-panel]` / `[data-dockkit-strip]` / `[data-slot="conversation.session.header"]` / `data-sidebar-collapsed` 均为稳定锚点（数据属性与槽包装，非哈希类名）；右侧栏包或 ui-layout 结构变更时需同步（与既有 rail 锚点同性质）。
-- fullscreen 保留 top:28 是对「z-40 盖住 overlay」的让步，视觉上 fullscreen 面板比中间栏内容低 28px——fullscreen 下中间栏不可见，无对比突兀。
+- ~~fullscreen 保留 top:28 是对「z-40 盖住 overlay」的让步，视觉上 fullscreen 面板比中间栏内容低 28px——fullscreen 下中间栏不可见，无对比突兀。~~ **已被 rc.13 修订否决**：实机效果是面板掉到第二行、与中间栏 header 叠看，不符合全屏语义；rc.13 改为真接管 + 页签条让灯排 + 页签条自带拖拽。
+
+## 修订（rc.13 方案）：fullscreen 真正接管全窗
+
+**起因**：rc.12 落地后实机验收发现——fullscreen 保留 `top:28px` 的结果是面板整体「掉到第二行」：中间栏 header 仍露在 y0–28，下方才是全宽面板，两行 chrome 叠看，语义上也不是用户预期的「全屏」。原方案「fullscreen 保留下压」的取舍被否决，改为**真·全屏接管 + 页签条让灯排 + 页签条自带拖拽**。
+
+### fullscreen 目标态
+
+- 面板恢复原生 `position:fixed; inset:0`（**删除 rc.12 的 `[data-sidebar-right-panel="fullscreen"]{top:28px!important}`**，`titlebar.ts:78`）：面板盖住整个窗口，包括中间栏 header、rail 控件与拖拽段——这才符合「全屏」语义。
+- **让灯排**：`[data-sidebar-right-panel="fullscreen"] [data-dockkit-pane]:first-of-type [data-dockkit-strip]{padding-left:80px;}`——红绿灯（x≈16–70）下只压 strip 背景（非交互），页签从 x=80 起（与 rail 控件 `left:86px` 同标线）。分栏后有两个 pane 时只让第一个（`:first-of-type`），其余 strip 不加。锚点 `[data-dockkit-pane]` / `[data-dockkit-strip]` 是 dockkit 包的稳定数据属性（已核实：tab 是 `role="tab"` div，关闭是 `button`，均有 `data-dockkit-tab` / `data-dockkit-tab-close`）。
+- **拖拽面**：面板 z-40 盖住 overlay（z-20），拖拽段在 fullscreen 下整体失效，因此把拖拽面直接交给页签条：
+  ```
+  [data-sidebar-right-panel="fullscreen"] [data-dockkit-strip]{-webkit-app-region:drag;}
+  [data-sidebar-right-panel="fullscreen"] [data-dockkit-strip] :is(button, a[href], [role="button"], [role="tab"], input, textarea, [contenteditable="true"]){-webkit-app-region:no-drag;}
+  ```
+  strip 背景（空隙）拖窗；页签（role=tab）、关闭钮、控制钮 no-drag 正常点击。挖洞 reconciler 无需改动（段在面板之下，挖不挖都不影响命中；fullscreen 下段本就够不到）。
+- **rail 控件取舍**：fullscreen 期间 rail 控件（侧栏开关/通知/新会话）与更新入口被面板盖住不可用——可接受：fullscreen 是专注态，退出走面板自己的「全屏/分栏/关闭」按钮；左栏在面板后面展开也无意义。不为其提升 z-index（层叠出不去 overlay 层，硬抬只能动 overlay 根，风险大于收益）。
+
+### 非 fullscreen 模式
+
+push/float 维持 rc.12 现状（top:0 顶到上沿 + 全文档挖洞）。rc.12 其余规则（首栏 padding、收起态 header 让灯排、分段拖拽条）全部不变。
+
+### 变更与验收增量
+
+- 变更仅 `titlebar.ts`：删 fullscreen top 规则、加两条 fullscreen strip 规则；`tests/titlebar.test.ts` 更新断言（断言不再有 fullscreen top 偏移、有 strip drag/no-drag 与首个 pane 让灯规则）。bridge 升 0.2.0-rc.13，AGENTS.md 发版条目同步。
+- 验收在 rc.12 清单上改第 4 条并追加：
+  4'. 右栏 fullscreen：面板盖住全窗（中间栏 header 不再露出）；页签条左端让出红绿灯；页签切换/关闭、分栏、退出全屏各钮悬停稳定且可点；页签条空隙可拖窗；分栏成两个 pane 后仅左侧 strip 让灯。
+  4''. 退出 fullscreen 回 push：rc.12 第 3 条行为不变；rail 控件恢复。

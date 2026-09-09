@@ -41,13 +41,18 @@ export function shouldFuseTitlebar(platform: string): boolean {
  * own rules:
  *
  * - `[data-sidebar-right-panel]` is the runtime's ABSOLUTE right-sidebar
- *   surface (positioned against its zero-width grid column). Only the
- *   `fullscreen` mode keeps a `top` offset: that mode is `position:fixed;
- *   z-index:40` and covers the overlay layer (z-20) where the rail controls
- *   and the drag segments live — stacked above them it can neither be holed
- *   through nor share the band, so it must stay below it. `push`/`float`
+ *   surface (positioned against its zero-width grid column). `push`/`float`
  *   (z-10, under the overlay layer) stay at y=0 and get their strip holed
- *   like every other band control.
+ *   like every other band control. `fullscreen` (0.2.0-rc.13) keeps its
+ *   native `position:fixed; inset:0` and truly takes over the window — an
+ *   rc.12 attempt to hold it below the band instead stranded it on a second
+ *   row beside the still-visible center header. While fullscreen the panel
+ *   (z-40) covers the overlay layer, so the drag segments cannot reach the
+ *   band: the first pane's strip background becomes the drag surface (every
+ *   interactive child opts out) and pads its left edge past the traffic
+ *   lights. The band rail controls stay covered for the whole fullscreen
+ *   session — a deliberate tradeoff; exit goes through the panel's own
+ *   buttons.
  * - when the sidebar is collapsed the first grid track is 0px wide, so the
  *   center column starts at x=0 and its session header would slide under
  *   the traffic lights: the collapsed frame carves the light row out of the
@@ -75,7 +80,15 @@ export function titlebarCss(zonePx: number): string {
   return [
     'html,body{overflow:hidden;}',
     `div:has(> [data-shell-overlay])>div:nth-child(1){box-sizing:border-box;padding-top:${band};}`,
-    `[data-sidebar-right-panel="fullscreen"]{top:${band}!important;}`,
+    // rc.13: fullscreen truly takes over (native fixed inset:0, no top
+    // offset). The lights only overlap the first pane's strip background;
+    // tabs start at x=80 — the same baseline the rail controls sit on.
+    '[data-sidebar-right-panel="fullscreen"] [data-dockkit-pane]:first-of-type [data-dockkit-strip]{padding-left:80px;}',
+    // The z-40 panel covers the overlay layer, so the drag segments cannot
+    // reach the band while fullscreen — the strip background becomes the
+    // drag surface and every interactive child opts out.
+    '[data-sidebar-right-panel="fullscreen"] [data-dockkit-strip]{-webkit-app-region:drag;}',
+    '[data-sidebar-right-panel="fullscreen"] [data-dockkit-strip] :is(button, a[href], [role="button"], [role="tab"], input, textarea, [contenteditable="true"]){-webkit-app-region:no-drag;}',
     `div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:80px;}`,
     '[data-desktop-drag-strip]{pointer-events:none;}',
     '[data-desktop-drag-seg]{position:absolute;top:0;bottom:0;-webkit-app-region:drag;pointer-events:auto;}',

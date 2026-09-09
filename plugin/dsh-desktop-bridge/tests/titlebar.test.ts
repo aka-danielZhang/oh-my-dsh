@@ -29,10 +29,13 @@ describe('titlebarCss', () => {
     assert.ok(css.includes('[data-desktop-drag-strip]{pointer-events:none;}'), 'the host stays click-through so band controls keep their events')
     assert.ok(!css.includes('[data-desktop-drag-strip]{-webkit-app-region:drag;}'), 'a full-width drag strip covers band controls')
   })
-  it('offsets only the fullscreen right-sidebar panel below the band', () => {
+  it('lets the fullscreen right-sidebar panel truly take over the window', () => {
     const css = titlebarCss(28)
-    assert.ok(css.includes('[data-sidebar-right-panel="fullscreen"]{top:28px!important;}'), 'fullscreen is fixed z-40 above the overlay layer and cannot be holed through')
+    assert.ok(!css.includes('[data-sidebar-right-panel="fullscreen"]{top:'), 'fullscreen keeps native fixed inset:0 — a top offset strands it on a second row beside the center header')
     assert.ok(!css.includes('[data-sidebar-right-panel]{'), 'push/float stay at y=0 — the overlay layer holes their strip like any band control')
+    assert.ok(css.includes('[data-sidebar-right-panel="fullscreen"] [data-dockkit-pane]:first-of-type [data-dockkit-strip]{padding-left:80px;}'), 'the first pane strip clears the traffic lights (rail-controls baseline); a second split pane needs no carve')
+    assert.ok(css.includes('[data-sidebar-right-panel="fullscreen"] [data-dockkit-strip]{-webkit-app-region:drag;}'), 'the strip background is the drag surface while the z-40 panel covers the overlay layer')
+    assert.ok(css.includes('[data-sidebar-right-panel="fullscreen"] [data-dockkit-strip] :is(button, a[href], [role="button"], [role="tab"], input, textarea, [contenteditable="true"]){-webkit-app-region:no-drag;}'), 'strip interactive children (tabs are role=tab, close is a button) keep their clicks')
   })
   it('carves the traffic-light row out of the collapsed session header', () => {
     assert.ok(titlebarCss(28).includes('div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:80px;}'), 'collapsed center column starts at x=0 and must clear the lights (rail-controls left:86px baseline)')
