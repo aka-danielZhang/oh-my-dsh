@@ -183,3 +183,65 @@ test('updateSettings refetches the models snapshot so effort/model pickers refle
   assert.equal(controller.store.getSnapshot().overview?.configRevision, 'sha256:next')
   controller.dispose()
 })
+
+/**
+ * Wire shape of a Remote failure. `OHMYMEMO_TREE_STALE` is an OhMyMemo
+ * StoreError code the typert type map does not declare, so the duck-typed
+ * payload is cast onto the declared result branch (never) at the stub.
+ */
+function staleTreeFailure(): never {
+  return {
+    ok: false,
+    error: {
+      code: 'OHMYMEMO_TREE_STALE',
+      message: 'memory file index changed; refresh before reading',
+      details: undefined,
+      isDSHRemoteError: true,
+      name: 'RemoteError',
+    },
+  } as never
+}
+
+test('controller retries a stale-tree read once against the fresh generation', async () => {
+  let currentTree = tree
+  let readCalls = 0
+  const readGenerations: string[] = []
+  const controller = new MemorySettingsController(remote({
+    tree: async () => ({ ok: true, value: currentTree }),
+    read: async request => {
+      readCalls += 1
+      readGenerations.push(request.generation)
+      if (readCalls === 1) {
+        // The store rebuilt views (config update) between listing and read.
+        currentTree = {
+          ...tree,
+          generation: 'sha256:tree-fresh',
+          files: tree.files.map(file => ({ ...file, hash: 'sha256:file-fresh' })),
+        }
+        return staleTreeFailure()
+      }
+      return { ok: true, value: { ...document, hash: 'sha256:file-fresh' } }
+    },
+  }))
+  await controller.load()
+  await controller.read('views/user-profile.md')
+  const snapshot = controller.store.getSnapshot()
+  assert.equal(readCalls, 2)
+  assert.deepEqual(readGenerations, ['sha256:tree', 'sha256:tree-fresh'])
+  assert.equal(snapshot.error, null)
+  assert.equal(snapshot.document?.markdown, '# User profile')
+  assert.equal(snapshot.tree?.generation, 'sha256:tree-fresh', 'the page adopts the fresh index')
+  controller.dispose()
+})
+
+test('controller surfaces the guard error when the retried read is stale again', async () => {
+  const controller = new MemorySettingsController(remote({
+    read: async () => staleTreeFailure(),
+  }))
+  await controller.load()
+  await controller.read('views/user-profile.md')
+  const snapshot = controller.store.getSnapshot()
+  assert.ok(String(snapshot.error).includes('OHMYMEMO_TREE_STALE'))
+  assert.equal(snapshot.document, null)
+  controller.dispose()
+})

@@ -13,6 +13,7 @@
 import { hashText, writeFileAtomic } from './atomic.ts'
 import type { MemoryCatalog } from './catalog.ts'
 import type { CatalogEntry, MemoryRecord, StoreUserConfig } from './types.ts'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -88,7 +89,45 @@ export function publishView(root: string, relPath: string, text: string): void {
   writeFileAtomic(join(root, ...relPath.split('/')), text)
 }
 
-/** Rebuild every view from the catalog; returns the written relative paths. */
+/**
+ * The only nondeterministic line of a view header — masked when comparing
+ * an on-disk view against a freshly composed candidate.
+ */
+const GENERATED_AT_LINE = /^generated_at: .*$/m
+const GENERATED_AT_MASK = 'generated_at: <stamp>'
+
+/** True when two view texts differ only in their generation stamp. */
+function sameViewText(previous: string, next: string): boolean {
+  return previous.replace(GENERATED_AT_LINE, GENERATED_AT_MASK) === next.replace(GENERATED_AT_LINE, GENERATED_AT_MASK)
+}
+
+/**
+ * Write one view file unless the on-disk text already matches the candidate
+ * modulo the generation stamp. Store events that do not touch view data —
+ * notably `config-updated` — used to rewrite every file anyway, bumping
+ * `generated_at`, the file hash and therefore the browser tree generation,
+ * stranding every open page on a stale index. Skipping no-op writes keeps
+ * the stamp (and the hash) stable; a real change — including validity
+ * windows closing at the new generation time — still differs outside the
+ * stamp line and rewrites as before. Hand edits never match and are
+ * overwritten, unchanged behavior.
+ */
+function publishViewIfChanged(root: string, relPath: string, text: string): void {
+  const abs = join(root, ...relPath.split('/'))
+  let previous: string | undefined
+  try {
+    previous = readFileSync(abs, 'utf8')
+  } catch {
+    previous = undefined
+  }
+  if (previous !== undefined && sameViewText(previous, text)) return
+  writeFileAtomic(abs, text)
+}
+
+/**
+ * Rebuild every view from the catalog; returns the ensured relative paths
+ * (files whose content already matched keep their previous bytes).
+ */
 export function rebuildViews(root: string, catalog: Pick<MemoryCatalog, 'allEntries' | 'scopes'>, config: StoreUserConfig, generatedAt: string): string[] {
   void config
   const written: string[] = []
@@ -97,13 +136,13 @@ export function rebuildViews(root: string, catalog: Pick<MemoryCatalog, 'allEntr
   const now = new Date(generatedAt)
   const all = catalog.allEntries().filter((entry) => isCoreViewEntry(entry, now))
   const userEntries = all.filter((entry) => entry.record.scope === 'user')
-  publishView(root, 'views/user-profile.md', composeView('User profile', 'user', userEntries, generatedAt))
+  publishViewIfChanged(root, 'views/user-profile.md', composeView('User profile', 'user', userEntries, generatedAt))
   written.push('views/user-profile.md')
   for (const scopeEntry of catalog.scopes().values()) {
     const scopeValue = `workspace:${scopeEntry.wsId}`
     const scoped = all.filter((entry) => entry.record.scope === scopeValue)
     const rel = `views/workspaces/${scopeEntry.wsId}.md`
-    publishView(root, rel, composeView(`Workspace ${scopeEntry.wsId}`, scopeValue, scoped, generatedAt))
+    publishViewIfChanged(root, rel, composeView(`Workspace ${scopeEntry.wsId}`, scopeValue, scoped, generatedAt))
     written.push(rel)
   }
   return written

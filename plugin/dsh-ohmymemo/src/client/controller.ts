@@ -223,7 +223,14 @@ export class MemorySettingsController {
     }
   }
 
-  /** Read one file against the generation that produced its tree row. */
+  /**
+   * Read one file against the generation that produced its tree row. A stale
+   * index — the store rewrote a view or a memory changed between the listing
+   * and this read (e.g. a config update triggered a view rebuild) — is a
+   * normal concurrency case, not an error for the user: refetch the tree
+   * once and retry against the fresh generation; only a second failure (or
+   * the file genuinely leaving the index) surfaces as feedback.
+   */
   async read(path: string): Promise<void> {
     const snapshot = this.store.getSnapshot()
     const tree = snapshot.tree
@@ -236,7 +243,18 @@ export class MemorySettingsController {
       state.error = null
     })
     try {
-      const document = await unwrap(this.remote.read({ path, generation: tree.generation }))
+      let document: MemoryDocument
+      try {
+        document = await unwrap(this.remote.read({ path, generation: tree.generation }))
+      } catch (error) {
+        if (!isStaleTreeError(error)) throw error
+        const fresh = await unwrap(this.remote.tree())
+        if (!this.isCurrent(generation)) return
+        this.store.update((state) => {
+          state.tree = fresh
+        })
+        document = await unwrap(this.remote.read({ path, generation: fresh.generation }))
+      }
       if (!this.isCurrent(generation)) return
       this.store.update((state) => {
         state.operation = null
@@ -273,8 +291,19 @@ export class MemorySettingsController {
 
 async function unwrap<T>(result: Promise<RemoteResult<T>>): Promise<T> {
   const settled = await result
-  if (!settled.ok) throw new Error(`${settled.error.code}: ${settled.error.message}`)
+  if (!settled.ok) {
+    // Carry the store error code so callers can branch on it (the stale-tree
+    // retry below) without parsing the message back apart.
+    const error = new Error(`${settled.error.code}: ${settled.error.message}`) as Error & { code: string }
+    error.code = settled.error.code
+    throw error
+  }
   return settled.value
+}
+
+/** The page's tree index fell behind the store; a refresh can recover. */
+function isStaleTreeError(error: unknown): boolean {
+  return error instanceof Error && (error as Error & { code?: string }).code === 'OHMYMEMO_TREE_STALE'
 }
 
 function errorMessage(error: unknown): string {

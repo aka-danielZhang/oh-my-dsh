@@ -86,3 +86,45 @@ test('rebuildViews writes the user profile and one file per workspace scope', ()
   assert.ok(wsView.includes('mem_ws'))
   assert.equal(existsSync(join(root, 'views', 'user-profile.md')), true)
 })
+
+test('rebuildViews keeps bytes and stamp when nothing changed (config-only rebuild)', () => {
+  const root = scratchRoot()
+  const catalog = {
+    allEntries: () => [entry('mem_user', { pinned: true })],
+    scopes: () => new Map(),
+  }
+  const first = rebuildViews(root, catalog, defaultStoreConfig(), '2026-09-09T10:00:00.000Z')
+  const before = readFileSync(join(root, 'views', 'user-profile.md'), 'utf8')
+  // A later no-op rebuild — e.g. the `config-updated` store event — must not
+  // rewrite the file: generated_at, the file hash and the browser tree
+  // generation all stay stable, so open pages keep their index.
+  const second = rebuildViews(root, catalog, defaultStoreConfig(), '2026-09-09T19:47:41.000Z')
+  assert.deepEqual(second, first)
+  const after = readFileSync(join(root, 'views', 'user-profile.md'), 'utf8')
+  assert.equal(after, before)
+  assert.ok(before.includes('generated_at: 2026-09-09T10:00:00.000Z'), 'the stamp is preserved on the skip')
+
+  // A real data change still rewrites with the new stamp.
+  const changed = {
+    allEntries: () => [entry('mem_user', { pinned: true }), entry('mem_new', { pinned: true })],
+    scopes: () => new Map(),
+  }
+  rebuildViews(root, changed, defaultStoreConfig(), '2026-09-09T19:47:43.000Z')
+  const rewritten = readFileSync(join(root, 'views', 'user-profile.md'), 'utf8')
+  assert.ok(rewritten.includes('mem_new'))
+  assert.ok(rewritten.includes('generated_at: 2026-09-09T19:47:43.000Z'))
+})
+
+test('rebuildViews still rewrites when a validity window closes between generations', () => {
+  const root = scratchRoot()
+  const catalog = {
+    allEntries: () => [entry('mem_temp', { pinned: true, valid_until: '2026-09-09T12:00:00.000Z', valid_from: null })],
+    scopes: () => new Map(),
+  }
+  rebuildViews(root, catalog, defaultStoreConfig(), '2026-09-09T10:00:00.000Z')
+  assert.ok(readFileSync(join(root, 'views', 'user-profile.md'), 'utf8').includes('mem_temp'))
+  rebuildViews(root, catalog, defaultStoreConfig(), '2026-09-09T13:00:00.000Z')
+  const expired = readFileSync(join(root, 'views', 'user-profile.md'), 'utf8')
+  assert.ok(!expired.includes('mem_temp'), 'the entry left the view once valid_until passed')
+  assert.ok(expired.includes('generated_at: 2026-09-09T13:00:00.000Z'))
+})
