@@ -3,11 +3,13 @@
  * `TitleBarStyle::Overlay` and hides the painted title
  * (`NSWindowTitleVisibility::Hidden`): the traffic lights float over the page
  * and no native chrome is drawn. This module owns the CSS half of that
- * contract — the app's columns run edge to edge (their surfaces paint under
- * the lights) while each column's content keeps clearing the reserved top
- * band, so no interactive row sits under the lights; the drag region the
- * Overlay style requires is a shell.overlay entry (titlebar.tsx). Gated on
- * the shell platform: platforms that keep a native title bar get zero
+ * contract — the app's columns run edge to edge and their content tops out
+ * at y=0 (macOS toolbar look), except the sidebar column whose surface sits
+ * under the floating lights and whose content keeps clearing the reserved
+ * top band; the drag region the Overlay style requires is a shell.overlay
+ * entry (titlebar.tsx). Band controls that moved up to y=0 keep their events
+ * via the segmented drag surface's holes (drag-strip.ts). Gated on the
+ * shell platform: platforms that keep a native title bar get zero
  * DOM/CSS side effects.
  */
 
@@ -26,17 +28,31 @@ export function shouldFuseTitlebar(platform: string): boolean {
 }
 
 /**
- * The column-inset rule. The app frame is the div whose direct child carries
+ * The band rules. The app frame is the div whose direct child carries
  * `data-shell-overlay` (ui-layout's overlay layer); its first three element
- * children are the sidebar / center / details grid columns. Padding the
- * frame itself (the previous contract) pushed the column SURFACES below the
- * band too, leaving a blank strip under the floating lights. Padding each
- * column instead keeps every surface edge to edge — the sidebar fill runs
- * under the traffic lights, the native-app look — while the content of all
- * three columns starts below the band. The absolutely-positioned overlay
- * layer still spans the full frame, so the drag strip lands exactly inside
- * the band. `:has()` and `:nth-child(-n+3)` are supported by every WKWebView
- * new enough to run Tauri 2.
+ * children are the sidebar / center / details grid columns.
+ *
+ * Only the FIRST column keeps the band inset (0.2.0-rc.12): the sidebar
+ * surface paints under the floating traffic lights, so its content must
+ * clear the band, while the center/details columns run their content up to
+ * y=0 — the conversation header and the right-sidebar strip land inside the
+ * band like a native macOS toolbar and the blank strip under the lights is
+ * gone. Column padding cannot reach two kinds of surfaces, so they get their
+ * own rules:
+ *
+ * - `[data-sidebar-right-panel]` is the runtime's ABSOLUTE right-sidebar
+ *   surface (positioned against its zero-width grid column). Only the
+ *   `fullscreen` mode keeps a `top` offset: that mode is `position:fixed;
+ *   z-index:40` and covers the overlay layer (z-20) where the rail controls
+ *   and the drag segments live — stacked above them it can neither be holed
+ *   through nor share the band, so it must stay below it. `push`/`float`
+ *   (z-10, under the overlay layer) stay at y=0 and get their strip holed
+ *   like every other band control.
+ * - when the sidebar is collapsed the first grid track is 0px wide, so the
+ *   center column starts at x=0 and its session header would slide under
+ *   the traffic lights: the collapsed frame carves the light row out of the
+ *   header's padding (80px — the same baseline the rail controls' left:86px
+ *   sits on; the expanded header already clears the lights at x≥280).
  *
  * The same sheet locks the document itself non-scrollable: the app is a
  * fixed-viewport shell (html/body/#root height 100%), and any scrollable
@@ -47,16 +63,10 @@ export function shouldFuseTitlebar(platform: string): boolean {
  * "drifting up" until a resize clamps it). `overflow: hidden` on the root
  * pair makes the document unscrollable so the band geometry stays put.
  *
- * Two more rules complete the band contract:
- * - `[data-sidebar-right-panel]` is the runtime's ABSOLUTE right-sidebar
- *   surface (positioned against its zero-width grid column), so the column
- *   padding above never reaches it: without an explicit top offset its
- *   dockkit tab strip renders at y=0 — inside the band (docked) or under
- *   the floating traffic lights (maximized). Pushing its top edge down by
- *   the band height aligns it with the padded columns in every panel mode.
- * - the drag surface is a set of gap segments inside the slot-rendered host
- *   (drag-strip.ts); the segments carry `-webkit-app-region: drag` while the
- *   host stays click-through so holes let band controls receive events.
+ * The drag surface itself is a set of gap segments inside the slot-rendered
+ * host (drag-strip.ts); the segments carry `-webkit-app-region: drag` while
+ * the host stays click-through so holes let band controls receive events.
+ * `:has()` is supported by every WKWebView new enough to run the shells.
  * @param zonePx - reserved band height in px.
  * @returns the stylesheet text.
  */
@@ -64,8 +74,9 @@ export function titlebarCss(zonePx: number): string {
   const band = `${String(zonePx)}px`
   return [
     'html,body{overflow:hidden;}',
-    `div:has(> [data-shell-overlay])>div:nth-child(-n+3){box-sizing:border-box;padding-top:${band};}`,
-    `[data-sidebar-right-panel]{top:${band}!important;}`,
+    `div:has(> [data-shell-overlay])>div:nth-child(1){box-sizing:border-box;padding-top:${band};}`,
+    `[data-sidebar-right-panel="fullscreen"]{top:${band}!important;}`,
+    `div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:80px;}`,
     '[data-desktop-drag-strip]{pointer-events:none;}',
     '[data-desktop-drag-seg]{position:absolute;top:0;bottom:0;-webkit-app-region:drag;pointer-events:auto;}',
   ].join('')

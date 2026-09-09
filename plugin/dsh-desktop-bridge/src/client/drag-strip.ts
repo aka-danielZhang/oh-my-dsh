@@ -12,13 +12,18 @@
  * mid-gesture and clicks were swallowed as drags.
  *
  * The replacement is a set of drag SEGMENTS that tile only the band's empty
- * gaps: a reconciler measures every interactive element inside the
- * right-sidebar panel that intersects the band, pads each rect, merges the
- * intervals, and renders one segment per gap. Buttons sit in the holes with
- * nothing above them; the gaps remain native drag regions. Scrolled
- * conversation content may also transit the band while clipped by its scroll
- * container, so hole carving is restricted to the panel surface (and is a
- * no-op for clipped content by construction of the anchor).
+ * gaps: a reconciler measures every interactive element in the document that
+ * intersects the band, pads each rect, merges the intervals, and renders one
+ * segment per gap. Buttons sit in the holes with nothing above them; the
+ * gaps remain native drag regions. Since 0.2.0-rc.12 the center/details
+ * columns also run their content up to y=0, so band controls are no longer
+ * confined to the right-sidebar panel — the conversation header's
+ * utilities/tabs and any other y=0 row must carve holes exactly like the
+ * panel strip or the segments swallow them (the pre-rc.11 failure). Clipped
+ * scroll content is a non-issue in this layout (the conversation scroller
+ * starts below the header, so nothing scrolls into the band); should a
+ * future layout clip content under the band anyway, the worst case is an
+ * extra hole — drag area shrinks slightly, no control loses events.
  *
  * Pure interval math lives in computeDragSegments; DOM wiring in
  * installDragSegments, owned by the titlebar-fusion effect in index.ts.
@@ -37,9 +42,6 @@ export const DRAG_SEGMENT_MIN_WIDTH_PX = 12
  * surfaces: native buttons/links and ARIA action roles.
  */
 const BAND_INTERACTIVE_SELECTOR = 'button, a[href], [role="button"], [role="tab"], input, textarea, [contenteditable="true"]'
-
-/** Absolute panel surfaces whose band-intersecting controls carve holes. */
-const BAND_PANEL_SELECTOR = '[data-sidebar-right-panel]'
 
 /**
  * Merge, clamp, and complement padded hole intervals into drag segments.
@@ -75,9 +77,11 @@ export function computeDragSegments(width: number, holes: readonly Interval[], m
 
 /**
  * Collect the padded hole intervals for one reconcile pass: every interactive
- * element inside a panel surface whose rect intersects the reserved band.
- * Invisible controls (hidden, zero-opacity) do not carve — they take no
- * events, so the drag segment may keep their pixels.
+ * element in the document whose rect intersects the reserved band — right
+ * panel strip, conversation header utilities/tabs, any y=0 control row
+ * (0.2.0-rc.12: document-wide, not just the right-sidebar panel; see the
+ * module header). Invisible controls (hidden, zero-opacity) do not carve —
+ * they take no events, so the drag segment may keep their pixels.
  * @param doc - the document to measure.
  * @param win - the window for viewport bounds and computed styles.
  * @param bandPx - reserved band height in px.
@@ -85,17 +89,14 @@ export function computeDragSegments(width: number, holes: readonly Interval[], m
  */
 export function collectBandHoles(doc: Document, win: Window, bandPx: number): Interval[] {
   const holes: Interval[] = []
-  const panels = doc.querySelectorAll(BAND_PANEL_SELECTOR)
-  for (const panel of panels) {
-    const controls = panel.querySelectorAll(BAND_INTERACTIVE_SELECTOR)
-    for (const el of controls) {
-      const rect = el.getBoundingClientRect()
-      if (rect.width < 2 || rect.height < 2) continue
-      if (rect.top >= bandPx || rect.bottom <= 0) continue
-      const style = win.getComputedStyle(el)
-      if (style.visibility === 'hidden' || Number(style.opacity) === 0) continue
-      holes.push([rect.left - DRAG_SEGMENT_HOLE_PAD_PX, rect.right + DRAG_SEGMENT_HOLE_PAD_PX])
-    }
+  const controls = doc.querySelectorAll(BAND_INTERACTIVE_SELECTOR)
+  for (const el of controls) {
+    const rect = el.getBoundingClientRect()
+    if (rect.width < 2 || rect.height < 2) continue
+    if (rect.top >= bandPx || rect.bottom <= 0) continue
+    const style = win.getComputedStyle(el)
+    if (style.visibility === 'hidden' || Number(style.opacity) === 0) continue
+    holes.push([rect.left - DRAG_SEGMENT_HOLE_PAD_PX, rect.right + DRAG_SEGMENT_HOLE_PAD_PX])
   }
   return holes
 }

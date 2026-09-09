@@ -12,10 +12,11 @@ describe('shouldFuseTitlebar', () => {
 })
 
 describe('titlebarCss', () => {
-  it('insets the three frame columns via the overlay-layer anchor', () => {
+  it('insets only the sidebar column via the overlay-layer anchor', () => {
     const css = titlebarCss(28)
     assert.ok(css.includes('div:has(> [data-shell-overlay])'))
-    assert.ok(css.includes('>div:nth-child(-n+3)'), 'the sidebar/center/details columns')
+    assert.ok(css.includes('>div:nth-child(1)'), 'only the sidebar column clears the band (its surface sits under the lights)')
+    assert.ok(!css.includes('>div:nth-child(-n+3)'), 'the center/details columns run their content to y=0 (toolbar look)')
     assert.ok(css.includes('padding-top:28px'))
     assert.ok(css.includes('box-sizing:border-box'))
   })
@@ -28,8 +29,13 @@ describe('titlebarCss', () => {
     assert.ok(css.includes('[data-desktop-drag-strip]{pointer-events:none;}'), 'the host stays click-through so band controls keep their events')
     assert.ok(!css.includes('[data-desktop-drag-strip]{-webkit-app-region:drag;}'), 'a full-width drag strip covers band controls')
   })
-  it('pushes the absolute right-sidebar panel below the band', () => {
-    assert.ok(titlebarCss(28).includes('[data-sidebar-right-panel]{top:28px!important;}'))
+  it('offsets only the fullscreen right-sidebar panel below the band', () => {
+    const css = titlebarCss(28)
+    assert.ok(css.includes('[data-sidebar-right-panel="fullscreen"]{top:28px!important;}'), 'fullscreen is fixed z-40 above the overlay layer and cannot be holed through')
+    assert.ok(!css.includes('[data-sidebar-right-panel]{'), 'push/float stay at y=0 — the overlay layer holes their strip like any band control')
+  })
+  it('carves the traffic-light row out of the collapsed session header', () => {
+    assert.ok(titlebarCss(28).includes('div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:80px;}'), 'collapsed center column starts at x=0 and must clear the lights (rail-controls left:86px baseline)')
   })
   it('embeds the configured band height', () => {
     assert.ok(titlebarCss(TITLEBAR_ZONE_PX).includes(`padding-top:${String(TITLEBAR_ZONE_PX)}px`))
