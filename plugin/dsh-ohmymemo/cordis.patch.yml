@@ -1,0 +1,14 @@
+# dsh-ohmymemo bundle patch: one shared Markdown Store, its explicit model
+# consumers, and the global dream-memory/UI gateway. All rows live in the Host
+# composition because memory policy and nightly work span Sessions.
+- insert:
+    - id: ohmymemo-store
+      name: dsh-ohmymemo
+    - id: ohmymemo-tools
+      name: dsh-ohmymemo/tools
+    - id: ohmymemo-context
+      name: dsh-ohmymemo/context
+    - id: ohmymemo-manager
+      name: dsh-ohmymemo/manager
+    - id: ohmymemo-api
+      name: dsh-ohmymemo/api

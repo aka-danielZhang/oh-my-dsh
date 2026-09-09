@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OhMyMemo 记忆生命周期时序 — 清扫与 Curator 维护</title>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600&family=Noto+Serif+SC:wght@400&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#f7f9fc; --paper-2:#edf2fa; --ink:#0f1e4a; --muted:#3a4a7d;
+    --soft:#7d89ad; --rule:rgba(15,30,74,0.10); --accent:#4a80f0;
+    --accent-tint:rgba(74,128,240,0.08); --link:#2a5ac9;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;}
+  body{background:var(--paper);color:var(--ink);
+    font-family:'Geist','Noto Sans SC',sans-serif;padding:3rem 2.5rem;}
+  .eyebrow{font-family:'Geist Mono',monospace;font-size:11px;letter-spacing:0.22em;
+    text-transform:uppercase;color:var(--soft);margin-bottom:0.75rem;}
+  h1{font-family:'Instrument Serif','Noto Serif SC',serif;font-weight:400;
+    font-size:1.9rem;line-height:1.2;margin-bottom:0.5rem;}
+  .subtitle{font-size:13px;color:var(--muted);max-width:760px;line-height:1.7;margin-bottom:2.25rem;}
+  .diagram{max-width:1280px;margin:0 auto;}
+  svg{width:100%;height:auto;display:block;}
+  .aside-note{max-width:1280px;margin:1.5rem auto 0;background:#ffffff;
+    border:1px solid rgba(15,30,74,0.12);border-radius:6px;padding:1rem 1.25rem;
+    display:flex;gap:0.9rem;align-items:baseline;}
+  .aside-note .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);
+    flex:none;transform:translateY(-1px);}
+  .aside-note p{font-family:'Instrument Serif','Noto Serif SC',serif;font-style:italic;
+    font-size:14.5px;color:var(--muted);line-height:1.75;}
+  footer{max-width:1280px;margin:2.5rem auto 0;padding-top:1rem;
+    border-top:1px solid var(--rule);font-family:'Geist Mono',monospace;
+    font-size:9px;color:var(--soft);letter-spacing:0.1em;
+    display:flex;justify-content:space-between;}
+</style>
+</head>
+<body>
+  <p class="eyebrow">SEQUENCE · DSH-OHYMEMO LIFECYCLE</p>
+  <h1>记忆生命周期时序：提取 → 确定性清扫 → Curator 维护</h1>
+  <p class="subtitle">「记忆只进不出」的补位设计（决策记录 2026-09-08）。每日 02:00 与「立即整理」同路径：Turn 1 提取（细节见既有提取时序图）之后，Manager 先做无 LLM 的确定性维护——候选过期删除、valid_until 到期与沉默超水位线归档为 expired（走 archive/，绝不走 tombstone，允许日后再提取入库）；auto_consolidation 开启时追加 Turn 2 Curator，LLM 只提议 refresh / merge，护栏在代码侧裁决。审计两段计数，旧记录后兼容。</p>
+
+  <div class="diagram">
+  <svg viewBox="0 0 1280 820" role="img" aria-labelledby="omlseq-title omlseq-desc" xmlns="http://www.w3.org/2000/svg">
+    <title id="omlseq-title">OhMyMemo 记忆生命周期时序图</title>
+    <desc id="omlseq-desc">时序图展示梦境记忆运行的生命周期维护段：Manager 收集证据窗口并发起提取回合后，先执行确定性清扫（候选过期删除、到期与沉默记忆归档 expired），再在 auto_consolidation 开启时发起 Curator 回合，由 LLM 提议 refresh 与 merge、代码护栏裁决后写入记忆库，最终落运行审计。</desc>
+    <defs>
+      <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#3a4a7d"/>
+      </marker>
+      <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#4a80f0"/>
+      </marker>
+      <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="#2a5ac9"/>
+      </marker>
+      <marker id="arrow-open" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+        <polyline points="0 0, 8 3, 0 6" fill="none" stroke="#3a4a7d" stroke-width="1.2"/>
+      </marker>
+    </defs>
+
+    <rect width="100%" height="100%" fill="#f7f9fc"/>
+
+    <!-- lifelines -->
+    <line x1="152" y1="88" x2="152" y2="720" stroke="rgba(15,30,74,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+    <line x1="472" y1="88" x2="472" y2="720" stroke="rgba(15,30,74,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+    <line x1="792" y1="88" x2="792" y2="720" stroke="rgba(15,30,74,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+    <line x1="1112" y1="88" x2="1112" y2="720" stroke="rgba(15,30,74,0.20)" stroke-width="1" stroke-dasharray="3,3"/>
+
+    <!-- activation bars -->
+    <rect x="148" y="132" width="8" height="544" fill="rgba(15,30,74,0.06)" stroke="#3a4a7d" stroke-width="0.8"/>
+    <rect x="468" y="180" width="8" height="48" fill="rgba(15,30,74,0.06)" stroke="#3a4a7d" stroke-width="0.8"/>
+    <rect x="468" y="452" width="8" height="48" fill="rgba(15,30,74,0.06)" stroke="#3a4a7d" stroke-width="0.8"/>
+    <rect x="788" y="264" width="8" height="24" fill="rgba(15,30,74,0.06)" stroke="#3a4a7d" stroke-width="0.8"/>
+    <rect x="788" y="352" width="8" height="24" fill="rgba(15,30,74,0.06)" stroke="#3a4a7d" stroke-width="0.8"/>
+    <rect x="788" y="592" width="8" height="24" fill="rgba(15,30,74,0.06)" stroke="#3a4a7d" stroke-width="0.8"/>
+    <rect x="1108" y="664" width="8" height="24" fill="rgba(15,30,74,0.06)" stroke="#3a4a7d" stroke-width="0.8"/>
+
+    <!-- OPT fragment frame (drawn before arrows; wash sits behind) -->
+    <rect x="128" y="388" width="688" height="240" rx="4"
+          fill="rgba(15,30,74,0.02)" stroke="rgba(15,30,74,0.22)" stroke-width="1"/>
+    <rect x="128" y="388" width="40" height="16" rx="2"
+          fill="#f7f9fc" stroke="rgba(15,30,74,0.22)" stroke-width="1"/>
+    <text x="148" y="400" fill="#3a4a7d" font-size="8" font-family="'Geist Mono',monospace"
+          text-anchor="middle" letter-spacing="0.12em">OPT</text>
+    <text x="140" y="424" fill="#3a4a7d" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          letter-spacing="0.04em">[auto_consolidation 开启 · LLM 仅提议，代码裁决]</text>
+
+    <!-- ===== messages ===== -->
+    <!-- m1 Manager self: nightly trigger + evidence window -->
+    <path d="M 156 132 h 28 q 4 0 4 4 v 12 q 0 4 -4 4 h -28" fill="none"
+          stroke="#3a4a7d" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <text x="200" y="136" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          letter-spacing="0.04em">每日 02:00 触发 · 收集证据窗口</text>
+    <text x="200" y="148" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          letter-spacing="0.04em">cursor 水位规则不变（细节见提取时序图）</text>
+
+    <!-- m2 Manager -> Agent: turn 1 extraction prompt -->
+    <line x1="156" y1="184" x2="464" y2="184" stroke="#3a4a7d" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <rect x="216" y="164" width="188" height="12" rx="2" fill="#f7f9fc"/>
+    <text x="310" y="172" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          text-anchor="middle" letter-spacing="0.06em">Turn 1 · 提取提示词（证据 NDJSON）</text>
+
+    <!-- m3 Agent --> Manager: strict JSON (return) -->
+    <line x1="464" y1="224" x2="160" y2="224" stroke="#3a4a7d" stroke-width="1.2"
+          stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+    <rect x="236" y="204" width="152" height="12" rx="2" fill="#f7f9fc"/>
+    <text x="312" y="212" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          text-anchor="middle" letter-spacing="0.06em">{memories[] · valid_until?}</text>
+
+    <!-- m4 Manager -> Store: write grounded memories -->
+    <line x1="156" y1="268" x2="784" y2="268" stroke="#3a4a7d" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <rect x="580" y="248" width="140" height="12" rx="2" fill="#f7f9fc"/>
+    <text x="650" y="256" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          text-anchor="middle" letter-spacing="0.06em">grounding 校验后写正式记忆</text>
+
+    <!-- m5 Manager self: deterministic adjudication -->
+    <path d="M 156 312 h 28 q 4 0 4 4 v 12 q 0 4 -4 4 h -28" fill="none"
+          stroke="#3a4a7d" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <text x="200" y="316" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          letter-spacing="0.04em">确定性裁决：valid_until 到期 · 沉默超 2H</text>
+    <text x="200" y="328" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          letter-spacing="0.04em">未 confirmed 且未被再证实 → expired → archive/</text>
+
+    <!-- m6 Manager -> Store: sweep writes -->
+    <line x1="156" y1="356" x2="784" y2="356" stroke="#3a4a7d" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <rect x="596" y="336" width="164" height="12" rx="2" fill="#f7f9fc"/>
+    <text x="678" y="344" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          text-anchor="middle" letter-spacing="0.06em">确定性清扫：候选删除 · expired 归档</text>
+
+    <!-- m7 Manager -> Agent: turn 2 curator prompt (inside OPT) -->
+    <line x1="156" y1="456" x2="464" y2="456" stroke="#3a4a7d" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <rect x="204" y="436" width="212" height="12" rx="2" fill="#f7f9fc"/>
+    <text x="310" y="444" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          text-anchor="middle" letter-spacing="0.06em">Turn 2 · Curator 提示词（目录 + 证据窗口）</text>
+
+    <!-- m8 Agent --> Manager: proposals (return, inside OPT) -->
+    <line x1="464" y1="496" x2="160" y2="496" stroke="#3a4a7d" stroke-width="1.2"
+          stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+    <rect x="240" y="476" width="144" height="12" rx="2" fill="#f7f9fc"/>
+    <text x="312" y="484" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          text-anchor="middle" letter-spacing="0.06em">{refresh, merge, keep}</text>
+
+    <!-- m9 Manager self: guardrail adjudication (inside OPT) -->
+    <path d="M 156 540 h 28 q 4 0 4 4 v 12 q 0 4 -4 4 h -28" fill="none"
+          stroke="#3a4a7d" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <text x="200" y="544" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          letter-spacing="0.04em">护栏裁决：grounding · 同 scope+kind</text>
+    <text x="200" y="556" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          letter-spacing="0.04em">unsure → keep · confirmed / sensitive 豁免</text>
+
+    <!-- m10 Manager -> Store: adjudicated lifecycle writes (headline accent, inside OPT) -->
+    <line x1="156" y1="596" x2="784" y2="596" stroke="#4a80f0" stroke-width="1.6" marker-end="url(#arrow-accent)"/>
+    <rect x="560" y="576" width="196" height="12" rx="2" fill="#f7f9fc"/>
+    <text x="658" y="584" fill="#4a80f0" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          text-anchor="middle" letter-spacing="0.06em">refresh 刷 last_evidenced_at · merge 归档</text>
+
+    <!-- m11 Manager -> Audit: persist run audit -->
+    <line x1="156" y1="668" x2="1104" y2="668" stroke="#3a4a7d" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <rect x="832" y="648" width="164" height="12" rx="2" fill="#f7f9fc"/>
+    <text x="914" y="656" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace"
+          text-anchor="middle" letter-spacing="0.06em">落 run 审计（提取 + 维护两段）</text>
+
+    <!-- ===== actors (drawn last) ===== -->
+    <!-- 1 Manager (host) -->
+    <rect x="60" y="36" width="184" height="52" rx="6" fill="#f7f9fc"/>
+    <rect x="60" y="36" width="184" height="52" rx="6" fill="#ffffff" stroke="#0f1e4a" stroke-width="1"/>
+    <rect x="68" y="44" width="40" height="12" rx="2" fill="none" stroke="rgba(15,30,74,0.40)" stroke-width="0.8"/>
+    <text x="88" y="52" fill="rgba(15,30,74,0.80)" font-size="7" font-family="'Geist Mono',monospace"
+          text-anchor="middle" letter-spacing="0.08em">HOST</text>
+    <text x="152" y="68" fill="#0f1e4a" font-size="12" font-weight="600"
+          font-family="'Geist','Noto Sans SC',sans-serif" text-anchor="middle">Manager 守护行</text>
+    <text x="152" y="84" fill="#3a4a7d" font-size="9"
+          font-family="'Geist Mono',monospace" text-anchor="middle">ohmymemo-manager</text>
+
+    <!-- 2 Maintenance agent (focal) -->
+    <rect x="380" y="36" width="184" height="52" rx="6" fill="#f7f9fc"/>
+    <rect x="380" y="36" width="184" height="52" rx="6" fill="rgba(74,128,240,0.08)" stroke="#4a80f0" stroke-width="1.2"/>
+    <rect x="388" y="44" width="44" height="12" rx="2" fill="none" stroke="rgba(74,128,240,0.40)" stroke-width="0.8"/>
+    <text x="410" y="52" fill="rgba(74,128,240,0.90)" font-size="7" font-family="'Geist Mono',monospace"
+          text-anchor="middle" letter-spacing="0.08em">AGENT</text>
+    <text x="472" y="68" fill="#0f1e4a" font-size="12" font-weight="600"
+          font-family="'Geist','Noto Sans SC',sans-serif" text-anchor="middle">维护会话</text>
+    <text x="472" y="84" fill="#3a4a7d" font-size="9"
+          font-family="'Geist Mono',monospace" text-anchor="middle">零工具 · 双回合</text>
+
+    <!-- 3 Store -->
+    <rect x="700" y="36" width="184" height="52" rx="6" fill="#f7f9fc"/>
+    <rect x="700" y="36" width="184" height="52" rx="6" fill="rgba(15,30,74,0.05)" stroke="#3a4a7d" stroke-width="1"/>
+    <rect x="708" y="44" width="48" height="12" rx="2" fill="none" stroke="rgba(58,74,125,0.40)" stroke-width="0.8"/>
+    <text x="732" y="52" fill="rgba(58,74,125,0.80)" font-size="7" font-family="'Geist Mono',monospace"
+          text-anchor="middle" letter-spacing="0.08em">STORE</text>
+    <text x="792" y="68" fill="#0f1e4a" font-size="12" font-weight="600"
+          font-family="'Geist','Noto Sans SC',sans-serif" text-anchor="middle">Markdown 记忆库</text>
+    <text x="792" y="84" fill="#3a4a7d" font-size="9"
+          font-family="'Geist Mono',monospace" text-anchor="middle">~/.dsh/ohmymemo</text>
+
+    <!-- 4 Run audit -->
+    <rect x="1020" y="36" width="184" height="52" rx="6" fill="#f7f9fc"/>
+    <rect x="1020" y="36" width="184" height="52" rx="6" fill="rgba(15,30,74,0.03)" stroke="rgba(15,30,74,0.30)" stroke-width="1"/>
+    <rect x="1028" y="44" width="28" height="12" rx="2" fill="none" stroke="rgba(15,30,74,0.30)" stroke-width="0.8"/>
+    <text x="1042" y="52" fill="rgba(15,30,74,0.70)" font-size="7" font-family="'Geist Mono',monospace"
+          text-anchor="middle" letter-spacing="0.08em">KV</text>
+    <text x="1112" y="68" fill="#0f1e4a" font-size="12" font-weight="600"
+          font-family="'Geist','Noto Sans SC',sans-serif" text-anchor="middle">Run 审计</text>
+    <text x="1112" y="84" fill="#3a4a7d" font-size="9"
+          font-family="'Geist Mono',monospace" text-anchor="middle">runs table</text>
+
+    <!-- legend -->
+    <line x1="32" y1="744" x2="1248" y2="744" stroke="rgba(15,30,74,0.10)" stroke-width="0.8"/>
+    <text x="32" y="764" fill="#3a4a7d" font-size="8" font-family="'Geist Mono',monospace"
+          letter-spacing="0.14em">LEGEND</text>
+    <line x1="100" y1="760" x2="128" y2="760" stroke="#3a4a7d" stroke-width="1.2" marker-end="url(#arrow)"/>
+    <text x="136" y="764" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace">调用</text>
+    <line x1="180" y1="760" x2="208" y2="760" stroke="#3a4a7d" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+    <text x="216" y="764" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace">返回（虚线）</text>
+    <line x1="300" y1="760" x2="328" y2="760" stroke="#4a80f0" stroke-width="1.6" marker-end="url(#arrow-accent)"/>
+    <text x="336" y="764" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace">焦点：裁决后的维护写</text>
+    <rect x="540" y="752" width="16" height="12" rx="2" fill="rgba(15,30,74,0.02)" stroke="rgba(15,30,74,0.22)" stroke-width="1"/>
+    <text x="564" y="764" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace">OPT 门控片段</text>
+    <text x="32" y="792" fill="#7d89ad" font-size="8" font-family="'Geist Mono','Noto Sans SC',monospace">Turn 1 提取细节见 memory-extraction-sequence.html · 归档走 archive/ 而非 tombstone：允许日后重新提取入库</text>
+  </svg>
+  </div>
+
+  <div class="aside-note">
+    <span class="dot"></span>
+    <p>读时衰减不在本图：之后每个会话的 agent/pre-step 注入路径上，composeCapsule 以 now 纯函数计算 weight = importance × decay(age)，零写盘；weight 归零即出 capsule，但记忆仍在库、仍可 search —— 真正的归档只由上图的夜间维护段完成。「再证实续命，沉默衰减」：refresh 只认 Curator 带回的真实证据，绝不在注入/召回路径上 touch 时间戳。</p>
+  </div>
+
+  <footer>
+    <span>DSH-OHYMEMO · SEQUENCE · 2026-09-08</span>
+    <span>四生命线 · 十一消息 · 一 OPT 片段 · OH MY DSH 品牌皮肤</span>
+  </footer>
+</body>
+</html>
