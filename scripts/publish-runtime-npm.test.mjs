@@ -37,3 +37,10 @@ test('splitFileIntoChunks splits by the byte budget', async () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('npmPublishTag keeps prereleases off latest', async () => {
+  const mod = await import('./publish-runtime-npm.mjs')
+  assert.equal(mod.npmPublishTag('0.3.0-rc.42'), 'rc')
+  assert.equal(mod.npmPublishTag('0.3.0'), 'latest')
+  assert.equal(mod.npmPublishTag('0.3.0-rc.42+zw.1'), 'rc', 'build metadata is not a prerelease marker')
+})

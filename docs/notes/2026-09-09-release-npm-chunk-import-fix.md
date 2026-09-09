@@ -30,3 +30,15 @@ SyntaxError: The requested module 'node:os' does not provide an export named 'mk
 
 - `v0.3.0-rc.41` 成为死 tag（无 Release 对象）：不移动已推送的 tag，rc.42 直接接续发布。`releases.atom` 只列已发布 Release，空 tag 对更新器不可见、无毒化。
 - 经验：给 Release workflow 增加任何脚本步骤时，必须在 main CI 有对应执行面（import 冒烟或行为测试），否则发布流水线就是第一现场。
+
+## 追记（rc.42 第二层雷）
+
+导入修复后 rc.42 的发布跑过链接期，在同一发布步骤暴露第二个问题：
+
+```
+npm error You must specify a tag using --tag when publishing a prerelease version.
+```
+
+分片包用桌面版本号（`0.3.0-rc.N`，semver 预发布）作包版本，`npm publish` 强制要求显式 dist-tag。修复：新增 `npmPublishTag(version)`——预发布打 `rc`、稳定版显式 `latest`，`publishChunk` 传入 `--tag`。客户端按精确版本解析分片（`@crazx/...@<version>`），dist-tag 不影响取包，只保证预发布不污染 `latest`。测试补 tag 判定用例（含 build metadata 非预发布标记的边界）。
+
+两层雷的共同教训不变：这段发布流程在 rc.41 之前从未端到端执行过（脚本是 `218109e` 新增，rc.40 早于它），首次真实执行连续踩坑。rc.42 亦成死 tag，rc.43 接续。

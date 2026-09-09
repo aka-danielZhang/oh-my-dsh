@@ -52,6 +52,15 @@ function npmViewExists(name, version) {
   }
 }
 
+/**
+ * npm refuses prerelease versions unless an explicit dist-tag is passed.
+ * Chunks are exact-version download artifacts, so the tag only matters for
+ * dist-tag hygiene: prereleases go to `rc`, stable releases keep `latest`.
+ */
+export function npmPublishTag(version) {
+  return /^\d+\.\d+\.\d+-/.test(version.split('+')[0]) ? 'rc' : 'latest'
+}
+
 function publishChunk(chunkPath, name, version, meta) {
   if (npmViewExists(name, version)) {
     console.log(`publish-runtime-npm: ${name}@${version} already on the registry, skipping`)
@@ -69,7 +78,7 @@ function publishChunk(chunkPath, name, version, meta) {
       dshDesktopRuntime: meta,
     }, null, 2) + '\n')
     copyFileSync(chunkPath, join(dir, 'payload.bin'))
-    execNpm(['publish', '--access', 'public'], { cwd: dir, stdio: 'inherit' })
+    execNpm(['publish', '--access', 'public', '--tag', npmPublishTag(version)], { cwd: dir, stdio: 'inherit' })
     console.log(`publish-runtime-npm: published ${name}@${version}`)
   } finally {
     rmSync(dir, { recursive: true, force: true })
