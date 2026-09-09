@@ -4,14 +4,14 @@
 
 ## 问题
 
-桌面端（macOS 隐藏式标题栏）更新到 runtime 0.1.2 后出现：
+桌面端（macOS 隐藏式标题栏）更新到 runtime 0.1.5-alpha.1 后出现：
 
 1. 右侧栏（dockkit 面板）停靠时，其页签条上的控制按钮（向右分栏/全屏显示侧栏/收起侧栏/关闭）**悬停高亮闪失、点击被吞**——稳定复现；
 2. 右侧栏最大化时，页签头整体压在左上角**红绿灯下**（丑且同样不可点）。
 
 ## 根因（实机 DOM 证据）
 
-- 0.1.2 的右侧栏面板是**绝对定位**表面：`div.panel[data-sidebar-right-panel="push"]`，`position:absolute; top:0; inset:0 0 0 -<w>px`，相对于零宽的 `rightbarCol` 定位。栏目的 `padding-top:28px`（标题带预留）只影响常规流内容，**管不到绝对定位面板**，所以它的页签条（`[data-dockkit-strip]`）落在 y≈1–38 的标题带里。
+- 0.1.5-alpha.1 的右侧栏面板是**绝对定位**表面：`div.panel[data-sidebar-right-panel="push"]`，`position:absolute; top:0; inset:0 0 0 -<w>px`，相对于零宽的 `rightbarCol` 定位。栏目的 `padding-top:28px`（标题带预留）只影响常规流内容，**管不到绝对定位面板**，所以它的页签条（`[data-dockkit-strip]`）落在 y≈1–38 的标题带里。
 - 桥插件的窗口拖拽面是一条 1920px 整宽透明条（`shell.overlay` 条目，`-webkit-app-region:drag`），overlay 层 z-20 压在所有栏目之上。带内按钮在 CSS 命中测试里就落在拖拽条上，OS 层面该区域又是拖拽区：悬停被拖拽判定抢走（高亮闪失），点击被当成拖窗口（点击失灵）。
 - 最大化时面板 `left` 归零、页签头到左上，撞红绿灯。
 - 浏览器端没有拖拽条，所以只在桌面端出现。

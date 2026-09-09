@@ -1,7 +1,7 @@
 /**
  * The titlebar drag host, browser half. A macOS Overlay titlebar paints no
  * draggable chrome, so the desktop supplies the drag surface itself. The
- * surface is NOT one full-width strip: the 0.1.2 runtime renders the
+ * surface is NOT one full-width strip: the 0.1.5-alpha.1 runtime renders the
  * right-sidebar panel as an absolute surface whose tab strip and pane
  * controls live inside the reserved top band, and a full-width overlay strip
  * above them made those pixels OS-level window-drag (hover cancelled, clicks

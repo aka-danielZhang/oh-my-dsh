@@ -3,7 +3,7 @@
  *
  * Historical form: one full-width transparent strip in shell.overlay carried
  * `-webkit-app-region: drag`. That worked while the top band held only window
- * chrome. The 0.1.2 runtime renders the right-sidebar panel as an ABSOLUTE
+ * chrome. The 0.1.5-alpha.1 runtime renders the right-sidebar panel as an ABSOLUTE
  * surface (`[data-sidebar-right-panel]`, positioned against its zero-width
  * grid column, `top: 0`) whose dockkit tab strip and pane controls (split /
  * maximize / collapse / close) live inside the reserved 28px band. The

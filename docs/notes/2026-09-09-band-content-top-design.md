@@ -12,7 +12,7 @@ rc.11 修复了右侧栏按钮被拖拽条吞点击/悬停的问题，但保留�
 
 仅影响 macOS 标题栏融合（`shouldFuseTitlebar`）；Windows/Linux 保留原生标题栏，零变化。归档 Tauri 壳经段上 `data-tauri-drag-region` 保留拖拽。
 
-## 关键事实（实机测量，0.1.2 运行时 + Electron 37）
+## 关键事实（实机测量，0.1.5-alpha.1 运行时 + Electron 37）
 
 - frame 结构：`div:has(> [data-shell-overlay])` 的前三个子元素是侧栏/中间/右栏网格列；收起态由 frame 的 `data-sidebar-collapsed` 标记。
 - 右侧栏面板是绝对/固定定位表面：`div[data-sidebar-right-panel]`，模式值 `"push"`（停靠，absolute，top:0）/ `"fullscreen"`（**fixed inset:0，z-index:40**）/ 代码中另有 `"float"`。栏列 padding 对 absolute/fixed 无效——这就是 rc.11 要单独压它 28px 的原因。
