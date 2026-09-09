@@ -3,19 +3,29 @@ import { autoUpdater, type UpdateInfo } from 'electron-updater'
 import fs from 'node:fs'
 import path from 'node:path'
 
+import { extractBundleTar } from './extract.ts'
 import { shellRoot } from './paths.ts'
 import {
+  RUNTIME_BIN_MARKER,
   downloadRuntimeTarballAsync,
+  downloadUrlToFile,
   readBundledRevisionFromZip,
   runtimeArtifactName,
+  runtimeRevisionDownloadUrls,
   runtimeShaDirReady,
   shouldPrestageRuntime,
 } from './runtime-artifact.ts'
+import {
+  fetchRuntimeRevisionFromUrls,
+  isRuntimePayloadReady,
+  planAtomicUpdateReady,
+} from './runtime-registry.ts'
 import {
   electronProxyRules,
   readProxyUrl,
   readUpdateMirror,
   rewriteGithubReleaseDownloadUrl,
+  withMirrorFallback,
 } from './update-mirror.ts'
 import {
   claimUpdateCheck,
@@ -155,6 +165,9 @@ export async function checkUpdate(): Promise<{ update: { version: string; notes:
     const notes = notesOf(info)
     lastUpdateNotes = notes
     setUpdateStatus({ phase: 'available', version: info.version, notes })
+    // Start the ~350MB runtime fetch now so a later click is often a cache
+    // hit. Failures stay quiet: download_update still has its own pre-stage.
+    prefetchRuntimeForVersion(info.version)
     return { update: { version: info.version, notes } }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
@@ -172,6 +185,7 @@ export async function downloadUpdate(): Promise<void> {
   const expected = claimUpdateDownload()
   const updater = configureUpdater()
   cancelRequested = false
+  stagedRuntime = undefined
   let token: UpdateCancellation | undefined
   try {
     const result = await updater.checkForUpdates()
@@ -207,17 +221,26 @@ export async function downloadUpdate(): Promise<void> {
     } finally {
       updater.removeListener('update-downloaded', onDownloaded)
     }
-    // Slim mac zips carry no runtime.tar.gz: pre-stage the new runtime while
-    // the user is still on the working app. Otherwise the post-restart boot
-    // stalls on an invisible ~370MB download (the 2026-08-31 restart failure's
-    // second half). ready means every payload is local.
-    if (process.platform === 'darwin' && downloadedFile !== undefined) {
+    // Slim mac zips carry no runtime.tar.gz. The cutover is atomic: both
+    // this zip and the matching runtime must be local before `ready`.
+    // Prefetch may have already filled the tar cache; this still waits.
+    if (process.platform === 'darwin') {
+      if (downloadedFile === undefined) {
+        throw new Error('update zip path missing; cannot atomically stage runtime')
+      }
       setUpdateStatus({ phase: 'downloading', version: info.version, downloaded: 0 })
       await prestageRuntime(downloadedFile, info.version)
     }
     if (cancelRequested) {
       setUpdateStatus({ phase: 'available', version: info.version, notes: lastUpdateNotes })
       return
+    }
+    const cutover = planAtomicUpdateReady({
+      zipReady: process.platform !== 'darwin' || downloadedFile !== undefined,
+      runtimeReady: process.platform !== 'darwin' || stagedRuntimeReady(),
+    })
+    if (cutover !== 'ready') {
+      throw new Error(`update payloads incomplete (${cutover})`)
     }
     setUpdateStatus({ phase: 'ready', version: info.version, notes: notesOf(info) })
   } catch (error) {
@@ -240,25 +263,76 @@ export async function downloadUpdate(): Promise<void> {
   }
 }
 
+function readRevisionFromUrl(url: string): string {
+  const tmp = path.join(shellRoot(), 'logs', `runtime-revision-${Date.now()}.json`)
+  try {
+    downloadUrlToFile(url, tmp)
+    return fs.readFileSync(tmp, 'utf8')
+  } finally {
+    fs.rmSync(tmp, { force: true })
+  }
+}
+
+function prefetchRuntimeForVersion(version: string): void {
+  if (process.platform !== 'darwin') return
+  void Promise.resolve().then(() => {
+    const mirror = readUpdateMirror()
+    const urls = runtimeRevisionDownloadUrls({ version }).flatMap((url) => withMirrorFallback(url, mirror))
+    const revision = fetchRuntimeRevisionFromUrls(urls, readRevisionFromUrl)
+    if (revision === undefined) {
+      writeUpdaterLog('info', [`runtime prefetch skipped: no revision JSON for ${version}`])
+      return
+    }
+    const extracted = path.join(shellRoot(), 'runtime', revision.sha)
+    const okFile = path.join(extracted, '.ok')
+    const okMatches = fs.existsSync(okFile) && fs.readFileSync(okFile, 'utf8').trim() === revision.runtimeTarball
+    const shaDirReady = runtimeShaDirReady(extracted)
+    if (!shouldPrestageRuntime({ okMatches, shaDirReady })) {
+      writeUpdaterLog('info', [`runtime ${revision.sha.slice(0, 12)} already present; prefetch skipped`])
+      return
+    }
+    writeUpdaterLog('info', [`prefetching runtime ${revision.sha.slice(0, 12)} in the background`])
+    void downloadRuntimeTarballAsync({
+      sha: revision.sha,
+      expectedSha256: revision.runtimeTarball,
+      version,
+      dest: path.join(shellRoot(), 'runtime-tarballs', runtimeArtifactName(revision.sha)),
+    }).catch((error) => {
+      writeUpdaterLog('warn', [
+        `runtime prefetch failed: ${error instanceof Error ? error.message : String(error)}`,
+      ])
+    })
+  })
+}
+
+let stagedRuntime: { sha: string; expectedSha256: string; dest: string; extractDir: string } | undefined
+
+function stagedRuntimeReady(): boolean {
+  if (stagedRuntime === undefined) return false
+  const okFile = path.join(stagedRuntime.extractDir, '.ok')
+  const okMatches = fs.existsSync(okFile) && fs.readFileSync(okFile, 'utf8').trim() === stagedRuntime.expectedSha256
+  const shaDirReady = runtimeShaDirReady(stagedRuntime.extractDir)
+  return isRuntimePayloadReady({ okMatches, shaDirReady })
+}
+
 /**
- * Pre-stage the slim zip's runtime tarball into the shellRoot cache so the
- * post-restart boot extracts a local tar. Cache hits (extracted .ok or an
- * already fetched tarball) make this a no-op. Fail loud: a runtime that
- * cannot be fetched now would also fail at boot, and failing here keeps the
- * user on the working app with a retryable error.
+ * Pre-stage the slim zip's matching runtime so install is atomic: new shell
+ * and new runtime are both on disk before `ready`. Cache hits are a no-op.
+ * Missing revision or a failed fetch throws — ready must not proceed.
  */
 async function prestageRuntime(zipPath: string, version: string): Promise<void> {
   const revision = readBundledRevisionFromZip(zipPath)
   const sha = typeof revision?.sha === 'string' ? revision.sha : ''
   const expected = typeof revision?.runtimeTarball === 'string' ? revision.runtimeTarball : ''
   if (sha === '' || expected === '') {
-    writeUpdaterLog('warn', [`runtime pre-stage skipped: no runtime-revision.json in ${zipPath}`])
-    return
+    throw new Error(`update zip has no runtime-revision.json: ${zipPath}`)
   }
-  const extracted = path.join(shellRoot(), 'runtime', sha)
-  const okFile = path.join(extracted, '.ok')
+  const extractDir = path.join(shellRoot(), 'runtime', sha)
+  const dest = path.join(shellRoot(), 'runtime-tarballs', runtimeArtifactName(sha))
+  stagedRuntime = { sha, expectedSha256: expected, dest, extractDir }
+  const okFile = path.join(extractDir, '.ok')
   const okMatches = fs.existsSync(okFile) && fs.readFileSync(okFile, 'utf8').trim() === expected
-  const shaDirReady = runtimeShaDirReady(extracted)
+  const shaDirReady = runtimeShaDirReady(extractDir)
   if (!shouldPrestageRuntime({ okMatches, shaDirReady })) {
     writeUpdaterLog('info', [`runtime ${sha.slice(0, 12)} already present; pre-stage skipped`])
     return
@@ -266,11 +340,11 @@ async function prestageRuntime(zipPath: string, version: string): Promise<void> 
   const controller = new AbortController()
   activePrestage = controller
   try {
-    await downloadRuntimeTarballAsync({
+    const tar = await downloadRuntimeTarballAsync({
       sha,
       expectedSha256: expected,
       version,
-      dest: path.join(shellRoot(), 'runtime-tarballs', runtimeArtifactName(sha)),
+      dest,
       signal: controller.signal,
       onBytes: (bytes) => {
         if (!controller.signal.aborted) {
@@ -278,8 +352,15 @@ async function prestageRuntime(zipPath: string, version: string): Promise<void> 
         }
       },
     })
+    if (!controller.signal.aborted) {
+      extractBundleTar(tar, extractDir, RUNTIME_BIN_MARKER, expected)
+      writeUpdaterLog('info', [`runtime ${sha.slice(0, 12)} extracted for atomic cutover`])
+    }
   } finally {
     if (activePrestage === controller) activePrestage = undefined
+  }
+  if (!controller.signal.aborted && !stagedRuntimeReady()) {
+    throw new Error(`matching runtime ${sha.slice(0, 12)} is not extracted; refusing ready`)
   }
 }
 
@@ -298,6 +379,9 @@ export function cancelUpdate(): void {
 }
 
 export function installUpdate(): never {
+  if (process.platform === 'darwin' && !stagedRuntimeReady()) {
+    throw new Error('refusing to install: matching runtime is not staged')
+  }
   const expected = claimUpdateInstall()
   setUpdateStatus({ phase: 'restarting', version: expected })
   configureUpdater().quitAndInstall(false, true)

@@ -28,7 +28,7 @@ pnpm desktop:build
 产物：
 
 - macOS：完整 `release/Oh-My-DSH-<ver>-arm64.dmg`（含 `runtime.tar.gz`）；**瘦** updater zip（electron-builder 只打 DMG；`scripts/slim-mac-updater-zip.mjs` 从已签 `.app` 剥 runtime 后写 zip + `.blockmap` + 完整 `latest-mac.yml`）
-- 两个平台都另放 `release/runtime-<sha>-<platform>-<arch>.tar.gz`，给瘦 zip / 缓存未命中时按 sha 补拉
+- 两个平台都另放 `release/runtime-<sha>-<platform>-<arch>.tar.gz` 与 `runtime-revision-<platform>-<arch>.json`，给瘦 zip / 缓存未命中时按 sha 补拉；发版同时把同一份 tar 切成 npm 分片（`scripts/publish-runtime-npm.mjs`），OTA 优先从 npm/pnpm registry 拉
 - Windows：完整 `release/Oh My DSH-<ver>-setup.exe`（NSIS 仍自带 runtime，离线能装）
 
 `src/resources/` 与 `dist-electron/`、`release/` 均 gitignored。
@@ -44,7 +44,7 @@ pnpm desktop:build
 
 runtime 与三个桌面自有插件以 **tar.gz 资源**进包（不是散目录拷贝）：runtime 树是 pnpm 安装产物（3k+ 符号链接），electron-builder 对目录 extraResources 不承诺保链接（解引用拷贝会让 .pnpm store 膨胀到 GB 级）；tar 往返链接感知。此外 tarball 方案让 App Translocation 不再影响可写性（解压到 home 后树恒可写），并允许 prepare 在归档前对 runtime 树里的每个 Mach-O 统一签名。注意 notarytool 会展开扫描 tarball，归档本身不能隐藏未签名二进制。
 
-Mac 热更新 zip **不含** `runtime.tar.gz`（sha 未变时不必再传约 115MB）。DMG / NSIS 仍自带，离线首装不变。打包态 `releaseRuntimeDir`：`.ok` 哈希命中 → 用 `~/.dsh-desktop/runtime/<sha>`；否则抽包内 tar；再否则按 `runtime-<sha>-<platform>-<arch>.tar.gz` 从该次 GitHub Release 下载并校 sha256。瘦 zip 与这条补拉必须同发，否则 OTA 用户会撞上 `bundled tarball missing`。
+Mac 热更新 zip **不含** `runtime.tar.gz`（sha 未变时不必再传约 115MB）。DMG / NSIS 仍自带，离线首装不变。打包态 `releaseRuntimeDir`：`.ok` 哈希命中 → 用 `~/.dsh-desktop/runtime/<sha>`；否则抽包内 tar；再否则先拼 npm 分片、失败再按 `runtime-<sha>-<platform>-<arch>.tar.gz` 从该次 GitHub Release 下载并校 sha256。`ready` / 重启要求本版 zip 与对应 runtime 都已就绪。瘦 zip、revision JSON、npm 分片与这条补拉必须同发，否则 OTA 用户会撞上 `bundled tarball missing`。
 
 首次启动时壳把资源原子解压到 home：
 

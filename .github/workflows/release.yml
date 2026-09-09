@@ -1,7 +1,7 @@
 name: Release
 
 # 增量发布流水线，tag 分流（见 AGENTS.md「发版」，无斜杠命名）：
-#   v<semver>             → 桌面公证版（完整 DMG + 瘦 zip + Windows NSIS + runtime-<sha>-*.tar.gz + latest-mac.yml / latest.yml）
+#   v<semver>             → 桌面公证版（完整 DMG + 瘦 zip + Windows NSIS + runtime-<sha>-*.tar.gz + runtime-revision-<platform>-<arch>.json + npm 分片 + latest-mac.yml / latest.yml）
 #   dsh-<name>-v<semver>  → 插件 Release（git archive 附件；allowlist 双通道插件
 #                           另发 npm——dsh-mcp-settings / dsh-provider-balance，见
 #                           plugin job 的 npm channel gate 与 AGENTS.md「发版」）
@@ -172,7 +172,7 @@ jobs:
           shopt -s nullglob
           # electron-updater yml uses hyphenated names (Oh-My-DSH-…).
           # Never strip spaces to OhMyDSH — that 404s the updater.
-          for f in release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml release/runtime-*.tar.gz; do
+          for f in release/*.dmg release/*.zip release/*.blockmap release/latest-mac.yml release/runtime-*.tar.gz release/runtime-revision-*.json; do
             [ -e "$f" ] || continue
             cp "$f" "dist/$(basename "${f// /-}")"
           done
@@ -180,6 +180,16 @@ jobs:
           grep -q '\.zip$' dist/latest-mac.yml || { echo "::error::latest-mac.yml must point at the slim zip, not the dmg"; exit 1; }
           ls dist/*.zip >/dev/null || { echo "::error::missing slim updater zip"; exit 1; }
           ls dist/runtime-*.tar.gz >/dev/null || { echo "::error::missing runtime-<sha>-<platform>.tar.gz"; exit 1; }
+          ls dist/runtime-revision-*.json >/dev/null || { echo "::error::missing runtime-revision-<platform>-<arch>.json"; exit 1; }
+
+      - name: Publish runtime tarball to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DSH_PUBLISH_RUNTIME_NPM: '1'
+        run: |
+          set -euo pipefail
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$HOME/.npmrc"
+          node scripts/publish-runtime-npm.mjs
 
       - name: Upload to draft Release
         env:
@@ -305,12 +315,23 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           shopt -s nullglob
-          for f in release/*.exe release/*.blockmap release/latest.yml release/runtime-*.tar.gz; do
+          for f in release/*.exe release/*.blockmap release/latest.yml release/runtime-*.tar.gz release/runtime-revision-*.json; do
             [ -e "$f" ] || continue
             cp "$f" "dist/$(basename "${f// /-}")"
           done
           [ -f dist/latest.yml ] || { echo "::error::missing latest.yml"; exit 1; }
           ls dist/runtime-*.tar.gz >/dev/null || { echo "::error::missing runtime-<sha>-<platform>.tar.gz"; exit 1; }
+          ls dist/runtime-revision-*.json >/dev/null || { echo "::error::missing runtime-revision-<platform>-<arch>.json"; exit 1; }
+
+      - name: Publish runtime tarball to npm
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DSH_PUBLISH_RUNTIME_NPM: '1'
+        run: |
+          set -euo pipefail
+          echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > "$HOME/.npmrc"
+          node scripts/publish-runtime-npm.mjs
 
       - name: Upload to draft Release
         shell: bash
@@ -368,6 +389,8 @@ jobs:
           echo "$ASSETS" | grep -q 'latest.yml' || { echo "::error::draft missing latest.yml"; exit 1; }
           echo "$ASSETS" | grep -q 'runtime-.*-darwin-' || { echo "::error::draft missing mac runtime tarball"; exit 1; }
           echo "$ASSETS" | grep -q 'runtime-.*-win32-' || { echo "::error::draft missing windows runtime tarball"; exit 1; }
+          echo "$ASSETS" | grep -q 'runtime-revision-darwin-' || { echo "::error::draft missing mac runtime-revision JSON"; exit 1; }
+          echo "$ASSETS" | grep -q 'runtime-revision-win32-' || { echo "::error::draft missing windows runtime-revision JSON"; exit 1; }
           gh release upload "$TAG" dist/latest.json --clobber
           gh release edit "$TAG" --draft=false --latest --notes-file dist/release-notes.md
 

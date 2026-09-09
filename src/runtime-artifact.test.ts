@@ -16,6 +16,7 @@ import {
   runtimeArtifactName,
   readBundledRevisionFromZip,
   runtimeDownloadUrls,
+  runtimeRevisionDownloadUrls,
   shouldPrestageRuntime,
   stripRuntimeResources,
   withDestLock,
@@ -158,6 +159,19 @@ describe('runtime artifact names', () => {
     })
     assert.equal(urls[0], 'https://github.com/aka-danielZhang/oh-my-dsh/releases/download/v0.3.0-rc.4/runtime-abc-darwin-arm64.tar.gz')
     assert.ok(urls[1]?.includes('/releases/latest/download/runtime-abc-darwin-arm64.tar.gz'))
+  })
+
+  it('lists the per-platform revision JSON for prefetch', () => {
+    const urls = runtimeRevisionDownloadUrls({
+      version: '0.3.0-rc.40',
+      platform: 'darwin',
+      arch: 'arm64',
+    })
+    assert.equal(
+      urls[0],
+      'https://github.com/aka-danielZhang/oh-my-dsh/releases/download/v0.3.0-rc.40/runtime-revision-darwin-arm64.json',
+    )
+    assert.ok(urls[1]?.includes('/releases/latest/download/runtime-revision-darwin-arm64.json'))
   })
 })
 
