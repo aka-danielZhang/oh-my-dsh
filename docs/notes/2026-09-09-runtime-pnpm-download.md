@@ -19,6 +19,6 @@
 
 - `src/runtime-registry.test.ts`：分片往返、registry 顺序、原子 ready 判定、mac 下载/安装门。
 - `src/runtime-artifact.test.ts`：revision JSON URL、既有 boot 回落/预置跳过、loopback 不走代理。
-- `src/runtime-update.integration.test.ts`：本地 HTTP registry 按 npm tarball URL 提供分片 → curl 下载（故意带死代理）→ concat → sha256 → 解压后才 ready；哈希不匹配 / 缺分片失败；async + abort；zip 内 revision 不能被旧 sha 树顶替。
+- `src/runtime-update.integration.test.ts`：子进程 HTTP registry 按 npm tarball URL 提供分片（必须在子进程：`downloadUrlToFile` 的 `spawnSync` 会冻住本进程事件循环，同进程 server 会接 SYN 却永不回包）→ curl 下载（故意带死代理）→ concat → sha256 → 解压后才 ready；哈希不匹配 / 缺分片失败；async + abort；zip 内 revision 不能被旧 sha 树顶替。
 - 发版：平台 job 发布 npm 分片并上传 `runtime-revision-<triple>.json`；`desktop-publish` 校验两侧 revision 附件。
 - 未覆盖：已打包 Electron 对 GitHub/`npmjs` 的真机 OTA（需正式 Release 附件）。
