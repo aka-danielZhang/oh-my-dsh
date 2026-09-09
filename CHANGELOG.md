@@ -4,9 +4,17 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 
 ## [Unreleased]
 
-### Fixed
+## [0.3.0-rc.40] - 2026-09-09
 
+### Added
+
+- 记忆系统 OhMyMemo 随桌面首发（第 13 个随包插件）：设置页新增「记忆」面板（概览 / 记忆空间 / 梦境记忆定时整理与提取模型选择），会话内提供 `memory_*` 工具族（搜索 / 回读 / 记住 / 修订 / 遗忘，root Agent 写权限门控）；存储为 `$DSH_HOME/ohmymemo` 下一记忆一 Markdown（YAML frontmatter），跨进程写锁、revision+hash CAS 与原子发布保证手编与工具写并发安全。
 - Thread 交接的承接会话现在继承来源会话的模型选择（provider/模型/推理档位），不再落到「新建会话默认模型」：授权时读取来源会话的当前选择并验证路由（模型已不可用时明确报 `source-model-unavailable`，绝不静默降级），激活时以 `model/selection` 事件写入目标会话——刻意不走 `selectModel` 通道，避免每次交接悄悄改写全局默认模型。来源会话从未选过模型时维持部署默认（与来源实际行为一致）。
+
+### Changed
+
+- 运行时基线随 fork 升级：`0.1.2-rc.1+zw.2` → `0.1.5-alpha.1+zw.2`（fork tag `v0.1.5-alpha.1+zw.2`，npm `@crazx/*@0.1.5-alpha.1.zw.2`；zw.2 修复了 zw.1 发布包 peer 依赖不可解析的问题，桌面全部依赖直接落在 zw.2）。会话日志自动迁移 V2 → V3：系统提示成为持久事件、序号引用重映射，旧世代文件原样保留。**V3 不承诺降级读取**：回滚方式是恢复升级前的完整备份，而不是用旧版打开已迁移数据。
+- 随包插件全部适配 0.1.5 运行时：`dsh-client-runtime` 聚合入口删除后改为按服务的显式 owner 导入；层次压缩兼容 Provider 在检测到新版 stock 已内建层级时完全委托；Web Search 开关对 `system-prompt/assemble` 异步全局瀑布的适配；MCP 设置 / 模型图片输入 / 档位编辑器 / 运行中补位 Stop / Thread / OhMyMemo 同批跟进。
 
 ## [0.3.0-rc.39] - 2026-09-08
 
