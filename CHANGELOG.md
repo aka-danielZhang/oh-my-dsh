@@ -11,6 +11,10 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 - 热更新改为原子切过：先把本版 shell（瘦 zip）和对应 runtime 都下载并校验完毕，才进入「重启以更新」。缺一边不会换壳。发现新版本后即后台预拉 runtime，点下载时多半只需补瘦 zip。
 - runtime 补拉优先走 npm/pnpm 源（用户 `.npmrc` / 国内镜像 / npmjs 的分片包），失败再回落 GitHub Releases。国内网络下不必再整包硬拉 GitHub。
 
+### Fixed
+
+- 本机 / `127.0.0.1` registry 下载不再走 `HTTP_PROXY`，避免企业代理把 loopback 劫持成超时。
+
 ## [0.3.0-rc.40] - 2026-09-09
 
 ### Added
