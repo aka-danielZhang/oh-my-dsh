@@ -52,7 +52,10 @@ export function MemorySettingsSection(props: MemorySettingsSectionProps): React.
   return (
     <section className="omm-root">
       <header className="omm-header">
-        <h2 className="omm-title">{props.t('title')}</h2>
+        <h2 className="omm-title">
+          {props.t('title')}
+          <span className="omm-beta-badge">{props.t('betaBadge')}</span>
+        </h2>
         <div className="omm-header-actions">
           <Tooltip label={props.t('refresh')} side="bottom">
             <Button

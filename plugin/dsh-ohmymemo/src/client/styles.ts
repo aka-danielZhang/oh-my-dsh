@@ -4,6 +4,7 @@ export const MEMORY_SETTINGS_CSS = `
 .omm-root{container-type:inline-size;display:flex;min-width:0;flex-direction:column;color:var(--dsw-alias-label-primary);font-size:13px;line-height:1.5;letter-spacing:0;}
 .omm-header{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:40px;margin-bottom:10px;}
 .omm-title{margin:0;font-size:18px;font-weight:600;line-height:26px;letter-spacing:0;}
+.omm-beta-badge{display:inline-block;margin-left:8px;padding:0 7px;border:1px solid var(--dsw-alias-border-l2);border-radius:999px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);font-size:10px;font-weight:600;line-height:16px;letter-spacing:0.5px;text-transform:uppercase;vertical-align:middle;}
 .omm-header-actions{display:flex;align-items:center;gap:8px;}
 .omm-icon-button{width:28px;min-width:28px;padding:0;}
 .omm-tabs{display:inline-flex;align-self:flex-start;gap:2px;padding:2px;margin-bottom:14px;border:1px solid var(--dsw-alias-border-l2);border-radius:6px;background:var(--dsw-alias-bg-layer-1);}

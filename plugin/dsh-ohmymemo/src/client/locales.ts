@@ -3,6 +3,7 @@
 export const en = {
   nav: 'Memory',
   title: 'Memory',
+  betaBadge: 'Beta',
   overviewTab: 'Overview',
   spaceTab: 'Memory space',
   refresh: 'Refresh',
@@ -86,6 +87,7 @@ export const en = {
 export const zh = {
   nav: '记忆',
   title: '记忆',
+  betaBadge: 'Beta',
   overviewTab: '概览',
   spaceTab: '记忆空间',
   refresh: '刷新',
