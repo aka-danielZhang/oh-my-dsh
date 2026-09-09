@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { AddressInfo } from 'node:net'
 import { after, before, describe, it } from 'node:test'
 
 import { extractBundleTar } from './extract.ts'
@@ -61,30 +59,50 @@ function packNpmChunk(payload: string, destTgz: string): void {
   }
 }
 
+/**
+ * Out-of-process registry: downloadUrlToFile uses spawnSync, which freezes
+ * this event loop. An in-process http.Server would accept SYN and never reply.
+ */
 function startRegistry(files: Map<string, string>): Promise<{ url: string; close: () => Promise<void> }> {
-  const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-    const file = files.get(url.pathname)
-    if (file === undefined || !fs.existsSync(file)) {
-      res.statusCode = 404
-      res.end('missing')
-      return
-    }
-    res.statusCode = 200
-    res.setHeader('content-type', 'application/octet-stream')
-    fs.createReadStream(file).pipe(res)
+  const map = Object.fromEntries(files)
+  const script = `
+const http = require('node:http');
+const fs = require('node:fs');
+const files = ${JSON.stringify(map)};
+const server = http.createServer((req, res) => {
+  const file = files[new URL(req.url || '/', 'http://127.0.0.1').pathname];
+  if (!file || !fs.existsSync(file)) { res.statusCode = 404; res.end('missing'); return; }
+  res.statusCode = 200;
+  res.setHeader('content-type', 'application/octet-stream');
+  fs.createReadStream(file).pipe(res);
+});
+server.listen(0, '127.0.0.1', () => {
+  process.stdout.write(String(server.address().port));
+});
+`
+  const child: ChildProcess = spawn(process.execPath, ['-e', script], {
+    stdio: ['ignore', 'pipe', 'inherit'],
   })
   return new Promise((resolve, reject) => {
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address() as AddressInfo
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL')
+      reject(new Error('registry child did not bind'))
+    }, 5000)
+    child.once('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    child.stdout?.once('data', (chunk: Buffer) => {
+      clearTimeout(timer)
+      const port = String(chunk).trim()
       resolve({
-        url: `http://127.0.0.1:${String(port)}`,
-        close: () => new Promise((done, fail) => {
-          server.close((error) => { error ? fail(error) : done() })
+        url: `http://127.0.0.1:${port}`,
+        close: () => new Promise((done) => {
+          child.once('exit', () => done())
+          if (!child.kill('SIGTERM')) done()
         }),
       })
     })
-    server.on('error', reject)
   })
 }
 

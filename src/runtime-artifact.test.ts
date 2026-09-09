@@ -359,6 +359,7 @@ describe('curlDownloadArgs', () => {
     const args = curlDownloadArgs('http://127.0.0.1:9/a.tgz', '/tmp/a.part', 'http://127.0.0.1:7890')
     assert.equal(args.includes('-x'), false)
     assert.ok(args.includes('http://127.0.0.1:9/a.tgz'))
+    assert.ok(args.includes('--max-time'))
   })
 
   it('can skip --retry-all-errors so a trailing npm 404 ends the chunk loop', () => {

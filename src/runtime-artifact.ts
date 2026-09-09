@@ -361,6 +361,8 @@ export function curlDownloadArgs(
   args.push('--connect-timeout', '30', '-C', '-', '-o', tmp)
   const useProxy = proxy !== undefined && proxy !== '' && !isLoopbackDownloadUrl(url)
   if (useProxy) args.push('-x', proxy)
+  // spawnSync freezes this process; a wedged loopback server must not hang forever.
+  if (isLoopbackDownloadUrl(url)) args.push('--max-time', '60')
   args.push(url)
   return args
 }
