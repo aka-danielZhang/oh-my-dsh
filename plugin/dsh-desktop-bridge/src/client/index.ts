@@ -27,7 +27,7 @@ import { DesktopBadge, type BadgeInjected } from './badge.tsx'
 import { UpdateIndicator, type UpdateIndicatorInjected } from './update-indicator.tsx'
 import { createUpdateCoordinator } from './update-coordinator.ts'
 import { en, zh, type DesktopBridgeKey } from './locales.ts'
-import { installRailCss, installRailHider } from './rail.ts'
+import { installRailClearance, installRailCss, installRailHider } from './rail.ts'
 import { DesktopRailControls, type RailControlsInjected } from './rail-controls.tsx'
 import { installTitlebarCss, shouldFuseTitlebar, TITLEBAR_ZONE_PX } from './titlebar.ts'
 import { DesktopDragStrip, type DragStripInjected } from './titlebar.tsx'
@@ -80,6 +80,9 @@ export function apply(ctx: ClientContext): void {
     ctx.effect(() => installTitlebarCss(document, TITLEBAR_ZONE_PX), 'desktop-bridge: titlebar band')
     ctx.effect(() => installRailCss(document), 'desktop-bridge: collapsed-rail css')
     ctx.effect(() => installRailHider(document), 'desktop-bridge: collapsed-rail hider')
+    // Publishes the rail controls' measured right edge for the collapsed
+    // header's clearance rule (titlebar.ts consumes the variable).
+    ctx.effect(() => installRailClearance(document), 'desktop-bridge: rail clearance')
   }
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'desktop-bridge: dictionaries')

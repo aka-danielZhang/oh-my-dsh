@@ -37,8 +37,13 @@ describe('titlebarCss', () => {
     assert.ok(css.includes('[data-sidebar-right-panel="fullscreen"] [data-dockkit-strip]{-webkit-app-region:drag;}'), 'the strip background is the drag surface while the z-40 panel covers the overlay layer')
     assert.ok(css.includes('[data-sidebar-right-panel="fullscreen"] [data-dockkit-strip] :is(button, a[href], [role="button"], [role="tab"], input, textarea, [contenteditable="true"]){-webkit-app-region:no-drag;}'), 'strip interactive children (tabs are role=tab, close is a button) keep their clicks')
   })
-  it('carves the traffic-light row out of the collapsed session header', () => {
-    assert.ok(titlebarCss(28).includes('div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:80px;}'), 'collapsed center column starts at x=0 and must clear the lights (rail-controls left:86px baseline)')
+  it('clears the measured rail controls, not just the traffic lights (collapsed header)', () => {
+    const css = titlebarCss(28)
+    assert.ok(
+      css.includes('div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:max(80px, var(--desktop-band-controls-right, 80px));}'),
+      'the collapsed header must clear the rail controls\' live right edge; max() floors it at the 80px light row and the var() fallback degrades to it until installRailClearance measures',
+    )
+    assert.ok(!css.includes('[data-slot="conversation.session.header"]{padding-left:80px;}'), 'a fixed 80px lets titles run under the rail controls (toggle/updater/bell/new-session)')
   })
   it('embeds the configured band height', () => {
     assert.ok(titlebarCss(TITLEBAR_ZONE_PX).includes(`padding-top:${String(TITLEBAR_ZONE_PX)}px`))

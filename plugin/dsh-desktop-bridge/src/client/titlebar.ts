@@ -16,6 +16,8 @@
 /** Reserved top band height in px (the standard macOS titlebar height). */
 export const TITLEBAR_ZONE_PX = 28
 
+import { RAIL_CLEARANCE_VAR } from './rail.ts'
+
 /**
  * Whether the overlay-titlebar fusion applies to this shell platform. The
  * shell injects `std::env::consts::OS` as the gate's platform, and only the
@@ -55,9 +57,16 @@ export function shouldFuseTitlebar(platform: string): boolean {
  *   buttons.
  * - when the sidebar is collapsed the first grid track is 0px wide, so the
  *   center column starts at x=0 and its session header would slide under
- *   the traffic lights: the collapsed frame carves the light row out of the
- *   header's padding (80px — the same baseline the rail controls' left:86px
- *   sits on; the expanded header already clears the lights at x≥280).
+ *   BOTH the traffic lights and the band's rail controls (0.2.0-rc.14): the
+ *   lights span x≈16–70 but the controls — the persistent toggle plus the
+ *   conditional updater, notify bell, and collapsed-only New Session
+ *   bubble — run from left:86px to a DYNAMIC right edge, so no fixed
+ *   padding can clear them (the rc.13 80px let titles run under the icons).
+ *   The clearance is therefore the larger of the light row and the
+ *   measured controls edge published as a CSS variable by
+ *   installRailClearance (rail.ts); the var() fallback degrades to the
+ *   80px light row before the first measurement or if the controls never
+ *   appear. The expanded header already clears everything at x≥280.
  *
  * The same sheet locks the document itself non-scrollable: the app is a
  * fixed-viewport shell (html/body/#root height 100%), and any scrollable
@@ -89,7 +98,10 @@ export function titlebarCss(zonePx: number): string {
     // drag surface and every interactive child opts out.
     '[data-sidebar-right-panel="fullscreen"] [data-dockkit-strip]{-webkit-app-region:drag;}',
     '[data-sidebar-right-panel="fullscreen"] [data-dockkit-strip] :is(button, a[href], [role="button"], [role="tab"], input, textarea, [contenteditable="true"]){-webkit-app-region:no-drag;}',
-    `div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:80px;}`,
+    // rc.14: the collapsed header clears the measured rail controls, not
+    // just the lights — max() keeps the 80px light row as the floor and the
+    // var() fallback degrades to it until installRailClearance measures.
+    `div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:max(80px, var(${RAIL_CLEARANCE_VAR}, 80px));}`,
     '[data-desktop-drag-strip]{pointer-events:none;}',
     '[data-desktop-drag-seg]{position:absolute;top:0;bottom:0;-webkit-app-region:drag;pointer-events:auto;}',
   ].join('')

@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { collapseRailTemplate, installRailCss, railCss, restoreRailTemplate } from '../src/client/rail.ts'
+import {
+  RAIL_CLEARANCE_GAP_PX,
+  RAIL_CLEARANCE_VAR,
+  collapseRailTemplate,
+  installRailClearance,
+  installRailCss,
+  railClearanceValue,
+  railCss,
+  restoreRailTemplate,
+} from '../src/client/rail.ts'
 
 describe('collapseRailTemplate', () => {
   it('zeroes the first track of the AppFrame template (details closed)', () => {
@@ -77,6 +86,131 @@ describe('railCss', () => {
     assert.ok(css.includes('var(--dsw-alias-label-primary)'))
     assert.ok(css.includes('var(--dsw-alias-interactive-bg-hover)'))
     assert.ok(!css.includes('#'), 'no literal colors')
+  })
+})
+
+describe('railClearanceValue', () => {
+  it('publishes the right edge plus the breathing gap, rounded up', () => {
+    assert.equal(railClearanceValue(350), '358px')
+    assert.equal(railClearanceValue(349.3), '358px', 'fractional widths must not shave the gap')
+    assert.equal(railClearanceValue(86), `${String(86 + RAIL_CLEARANCE_GAP_PX)}px`)
+  })
+  it('keeps the variable name the titlebar rule consumes', () => {
+    assert.equal(RAIL_CLEARANCE_VAR, '--desktop-band-controls-right')
+  })
+})
+
+describe('installRailClearance', () => {
+  class StubResizeObserver {
+    static instances: StubResizeObserver[] = []
+    readonly callback: () => void
+    observed: unknown[] = []
+    disconnected = false
+    constructor(callback: () => void) {
+      this.callback = callback
+      StubResizeObserver.instances.push(this)
+    }
+    observe(target: unknown): void { this.observed.push(target) }
+    disconnect(): void { this.disconnected = true }
+  }
+  class StubMutationObserver {
+    static instances: StubMutationObserver[] = []
+    readonly callback: () => void
+    observing = false
+    disconnected = false
+    constructor(callback: () => void) {
+      this.callback = callback
+      StubMutationObserver.instances.push(this)
+    }
+    observe(): void { this.observing = true }
+    disconnect(): void { this.disconnected = true }
+  }
+  function stubDoc(railControls: unknown) {
+    const props = new Map<string, string>()
+    return {
+      props,
+      doc: {
+        defaultView: { ResizeObserver: StubResizeObserver, MutationObserver: StubMutationObserver },
+        documentElement: {
+          style: {
+            setProperty: (k: string, v: string): void => { props.set(k, v) },
+            removeProperty: (k: string): void => { props.delete(k) },
+          },
+        },
+        querySelector: (selector: string): unknown => (selector === '[data-desktop-rail-controls]' ? railControls : null),
+      },
+    }
+  }
+  function stubControls(right: number): { el: unknown; setRight: (v: number) => void } {
+    let edge = right
+    return {
+      el: { getBoundingClientRect: (): { right: number } => ({ right: edge }) },
+      setRight: (v: number): void => { edge = v },
+    }
+  }
+
+  it('publishes the measured edge and observes the container', () => {
+    StubResizeObserver.instances = []
+    const { el } = stubControls(350.4)
+    const { doc, props } = stubDoc(el)
+    installRailClearance(doc as unknown as Document)
+    assert.equal(props.get(RAIL_CLEARANCE_VAR), '359px')
+    assert.equal(StubResizeObserver.instances.length, 1)
+    assert.deepEqual(StubResizeObserver.instances[0].observed, [el])
+  })
+  it('republishes when the controls resize (updater/bell mount or unmount)', () => {
+    StubResizeObserver.instances = []
+    const { el, setRight } = stubControls(200)
+    const { doc, props } = stubDoc(el)
+    installRailClearance(doc as unknown as Document)
+    assert.equal(props.get(RAIL_CLEARANCE_VAR), '208px')
+    setRight(350)
+    StubResizeObserver.instances[0].callback()
+    assert.equal(props.get(RAIL_CLEARANCE_VAR), '358px')
+  })
+  it('removes the variable and disconnects on dispose', () => {
+    StubResizeObserver.instances = []
+    const { el } = stubControls(350)
+    const { doc, props } = stubDoc(el)
+    const dispose = installRailClearance(doc as unknown as Document)
+    assert.ok(props.has(RAIL_CLEARANCE_VAR))
+    dispose()
+    assert.ok(!props.has(RAIL_CLEARANCE_VAR), 'the effect must not leak its variable into the next mount')
+    assert.equal(StubResizeObserver.instances[0].disconnected, true)
+  })
+  it('waits for the slot-rendered container when absent at apply time', () => {
+    StubResizeObserver.instances = []
+    StubMutationObserver.instances = []
+    let railControls: unknown = null
+    const { el } = stubControls(300)
+    const base = stubDoc(null)
+    const doc = { ...base.doc, querySelector: (selector: string): unknown => (selector === '[data-desktop-rail-controls]' ? railControls : null) }
+    const dispose = installRailClearance(doc as unknown as Document)
+    assert.ok(!base.props.has(RAIL_CLEARANCE_VAR), 'nothing published before the container exists')
+    assert.ok(StubMutationObserver.instances[0].observing, 'a boot observer watches for the slot render')
+    railControls = el
+    StubMutationObserver.instances[0].callback()
+    assert.equal(base.props.get(RAIL_CLEARANCE_VAR), '308px')
+    assert.equal(StubMutationObserver.instances[0].disconnected, true, 'the boot observer detaches once attached')
+    dispose()
+    assert.ok(!base.props.has(RAIL_CLEARANCE_VAR))
+  })
+  it('is a no-op without observer support (rule degrades to its 80px fallback)', () => {
+    const props = new Map<string, string>()
+    const doc = {
+      defaultView: {},
+      documentElement: {
+        style: {
+          setProperty: (k: string, v: string): void => { props.set(k, v) },
+          removeProperty: (k: string): void => { props.delete(k) },
+        },
+      },
+      querySelector: (): unknown => null,
+    }
+    const dispose = installRailClearance(doc as unknown as Document)
+    assert.ok(!props.has(RAIL_CLEARANCE_VAR))
+    dispose()
+    assert.ok(!props.has(RAIL_CLEARANCE_VAR))
   })
 })
 

@@ -17,6 +17,13 @@
  * both directions, so collapse/expand stays a smooth slide. React never
  * reads DOM style back for diffing, so the external write is stable until
  * the next real change.
+ *
+ * The band controls this module seats (rail-controls.tsx) also shadow the
+ * collapsed center column's session header, so the same module publishes
+ * their measured right edge as a document CSS variable
+ * (installRailClearance) for titlebar.ts's collapsed-header clearance rule
+ * to consume — the avoidance must cover the controls' live width, not just
+ * the traffic-light row.
  */
 
 /**
@@ -108,6 +115,94 @@ export function installRailCss(doc: Document): () => void {
   style.textContent = railCss()
   doc.head.append(style)
   return () => { style.remove() }
+}
+
+/** Document CSS variable publishing the rail controls' measured right edge (installRailClearance). */
+export const RAIL_CLEARANCE_VAR = '--desktop-band-controls-right'
+
+/** Breathing room kept between the rail controls' right edge and the header content (px). */
+export const RAIL_CLEARANCE_GAP_PX = 8
+
+/** The rail-controls container rendered by the shell.overlay entry (rail-controls.tsx). */
+const RAIL_CONTROLS_SELECTOR = '[data-desktop-rail-controls]'
+
+/**
+ * The clearance value for the collapsed session header: the rail controls'
+ * right edge plus the breathing gap. `Math.ceil` so fractional layout widths
+ * never shave the gap.
+ * @param right - the rail-controls container's viewport right edge in px.
+ * @param gap - breathing room past the right edge (px).
+ * @returns the CSS length to publish as RAIL_CLEARANCE_VAR.
+ */
+export function railClearanceValue(right: number, gap = RAIL_CLEARANCE_GAP_PX): string {
+  return `${String(Math.ceil(right + gap))}px`
+}
+
+/** Observer constructors read off the injected window so tests can stub them. */
+type ObserverWindow = Window & {
+  ResizeObserver?: typeof ResizeObserver
+  MutationObserver?: typeof MutationObserver
+}
+
+/**
+ * Publish the rail controls' right edge as a document CSS variable.
+ *
+ * The collapsed-header clearance rule (titlebar.ts) consumes it via
+ * `max(80px, var(--desktop-band-controls-right, 80px))`: rc.13's fixed 80px
+ * only cleared the traffic lights (x≈16–70), while the rail controls
+ * themselves occupy the same band from x=86 rightward — the persistent
+ * toggle, the conditional updater button, the notify bell, and the
+ * collapsed-only New Session bubble stretch to roughly x≈350, and their
+ * width is dynamic (the updater and the bell mount/unmount with state). A
+ * ResizeObserver on the container keeps the published edge in step with
+ * every such change; the container never unmounts while the titlebar is
+ * fused, but the slot renders asynchronously, so a boot observer waits for
+ * it exactly like installRailHider does for the frame.
+ *
+ * Measurement lives in this apply-world installer on purpose: components
+ * stay subscription-free (the repo convention); the frame sits at the
+ * viewport origin, so `getBoundingClientRect().right` is directly usable
+ * as the header's padding-left. The New Session bubble animates via
+ * `visibility` (its box never collapses), so collapse/expand needs no
+ * special handling — the observer covers every real width change.
+ *
+ * Fail-soft: when the container never appears (or observers are missing)
+ * the variable stays unset and the consuming rule degrades to 80px.
+ * @param doc - the document hosting the rail controls.
+ * @returns the disposer disconnecting observers and removing the variable.
+ */
+export function installRailClearance(doc: Document): () => void {
+  const win = doc.defaultView as ObserverWindow | null
+  if (win === null || win.ResizeObserver === undefined || win.MutationObserver === undefined) return () => {}
+  const publish = (el: Element): void => {
+    doc.documentElement.style.setProperty(RAIL_CLEARANCE_VAR, railClearanceValue(el.getBoundingClientRect().right))
+  }
+  let observer: ResizeObserver | undefined
+  const attach = (el: Element): void => {
+    publish(el)
+    observer = new win.ResizeObserver!(() => { publish(el) })
+    observer.observe(el)
+  }
+  const teardown = (): void => {
+    observer?.disconnect()
+    doc.documentElement.style.removeProperty(RAIL_CLEARANCE_VAR)
+  }
+  const existing = doc.querySelector(RAIL_CONTROLS_SELECTOR)
+  if (existing !== null) {
+    attach(existing)
+    return () => { teardown() }
+  }
+  const boot = new win.MutationObserver!(() => {
+    const el = doc.querySelector(RAIL_CONTROLS_SELECTOR)
+    if (el === null) return
+    boot.disconnect()
+    attach(el)
+  })
+  boot.observe(doc.documentElement, { childList: true, subtree: true })
+  return () => {
+    boot.disconnect()
+    teardown()
+  }
 }
 
 /** The AppFrame element: the div whose direct child is the shell overlay layer. */

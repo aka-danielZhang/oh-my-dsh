@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop-bridge",
-  "version": "0.2.0-rc.13",
+  "version": "0.2.0-rc.14",
   "description": "Desktop bridge for DeepSeek Harness: shell-gated OS integration, native titlebar controls and updates, plus a host JSONL log sink",
   "type": "module",
   "main": "lib/index.js",
