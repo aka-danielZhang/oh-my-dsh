@@ -2,12 +2,14 @@ import { Context, Service } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-presets'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage, ReasoningEffortId } from '@deepseek-ai/dsh-llm'
+import type {} from '@deepseek-ai/dsh-api-session-controller/types'
 import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-title'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-workspace'
 import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
+import type {} from '@deepseek-ai/dsh-session-projection'
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
 import { threadDomainSpec } from './domain.ts'
@@ -16,6 +18,7 @@ import { advanceCreation, deriveThreadIdentity, resolveThreadId } from './identi
 import {
   DEFAULT_THREAD_SETTINGS,
   THREAD_SETTINGS_NAMESPACE,
+  type ThreadModelSelection,
   type ThreadSettings,
 } from './thread-types.ts'
 import type {
@@ -68,7 +71,7 @@ function errorCode(error: unknown): string {
 
 /** Shared Host authority for direct-confirmation Thread activation. */
 export class ThreadGateway extends TypertRemoteService {
-  static inject = ['storageDomain', 'agents', 'sessions', 'agentPresets', 'workspaceRegistry']
+  static inject = ['storageDomain', 'agents', 'sessions', 'agentPresets', 'workspaceRegistry', 'sessionProjections', 'llm']
 
   private draftTable?: KvTable<string, ThreadDraftRecord>
   private table?: KvTable<string, ThreadLink>
@@ -200,6 +203,34 @@ export class ThreadGateway extends TypertRemoteService {
       }
       const targetWorkspaceId = sourceWorkspace === undefined ? null : String(sourceWorkspace.id)
       const targetCwd = sourceWorkspace === undefined ? sourceSession?.header.cwd ?? null : null
+      // The continuation inherits the source Session's effective model
+      // selection (a pending user pick, else the route actually used last).
+      // The route is validated here so the confirmation panel never promises a
+      // model that can no longer be served; failures are loud, not a silent
+      // downgrade to the deployment default.
+      const projection = sourceSession === undefined
+        ? undefined
+        : this.ctx.sessionProjections.stateOf(sourceSession, 'modelSelection')
+      const selected = projection === undefined ? null : projection.pending ?? projection.lastUsed
+      let model: ThreadModelSelection | null = null
+      if (selected !== null) {
+        try {
+          const resolved = await this.ctx.llm.resolveCallConfig({
+            provider: selected.provider,
+            model: selected.model,
+            ...(selected.reasoningEffort === undefined
+              ? {}
+              : { reasoningEffort: ReasoningEffortId(selected.reasoningEffort) }),
+          })
+          model = {
+            provider: resolved.provider,
+            model: resolved.model,
+            ...(resolved.reasoningEffort === undefined ? {} : { reasoningEffort: String(resolved.reasoningEffort) }),
+          }
+        } catch {
+          return { ok: false, error: `source-model-unavailable: ${selected.provider}/${selected.model}` }
+        }
+      }
       const table = this.requireTable()
       const identity = deriveThreadIdentity(request.draftId)
       const existing = table.get(identity.linkId)
@@ -224,6 +255,7 @@ export class ThreadGateway extends TypertRemoteService {
         targetWorkspaceId,
         targetCwd,
         agentPreset: targetPreset,
+        model,
         title: request.title ?? null,
         handoff: structuredClone(request.handoff),
         instruction: request.instruction,
@@ -233,7 +265,7 @@ export class ThreadGateway extends TypertRemoteService {
         relationCommit: null,
         failure: null,
         trace: [],
-        fold: { splices: [], entries: [], turns: [], titles: [] },
+        fold: { splices: [], entries: [], turns: [], titles: [], models: [] },
         createdAt: now,
         updatedAt: now,
       }
@@ -293,6 +325,23 @@ export class ThreadGateway extends TypertRemoteService {
       const finalCheck = this.checkTarget(submitting)
       if (!finalCheck.ok) return await this.fail(submitting, finalCheck.error, finalCheck.detail)
       const agent = finalCheck.agent
+      // Carry the source Session's model onto the target before the first
+      // inbox mutation: a `model/selection` event folds into the durable
+      // projection, so prompt assembly resolves it. Deliberately NOT
+      // `sessionRemote.selectModel` — that path also rewrites the global
+      // default model and effort memory, which inheritance must not do. The
+      // append is synchronous (no await between the final pristine check and
+      // the first inbox mutation) and idempotent for an identical selection.
+      if (submitting.model !== null) {
+        const selection = submitting.model
+        const already = agent.session.events.some(event => (
+          event.type === 'model/selection'
+          && event.data.provider === selection.provider
+          && event.data.model === selection.model
+          && event.data.reasoningEffort === selection.reasoningEffort
+        ))
+        if (!already) agent.session.append('model/selection', structuredClone(selection))
+      }
       const handoff = createUserMessage({
         content: [{ type: 'text', text: this.renderHandoff(submitting) }],
         source: {
@@ -325,6 +374,13 @@ export class ThreadGateway extends TypertRemoteService {
         attempt: { phase: 'submitting', handoffId: String(handoff.id), instructionId: String(instruction.id) },
         trace: [
           ...submitting.trace,
+          ...(submitting.model === null
+            ? []
+            : [{
+                step: 'model-selection',
+                ok: true,
+                detail: { provider: submitting.model.provider, model: submitting.model.model },
+              }]),
           { step: 'inject', ok: true, detail: { messageId: String(handoff.id) } },
           { step: 'followup', ok: true, detail: { messageId: String(instruction.id) } },
         ],
@@ -457,6 +513,13 @@ export class ThreadGateway extends TypertRemoteService {
       fold.turns.push({ seq: event.seq, type: event.type })
     } else if (event.type === 'session/title') {
       fold.titles.push({ seq: event.seq, title: event.data.title })
+    } else if (event.type === 'model/selection') {
+      fold.models.push({
+        seq: event.seq,
+        provider: event.data.provider,
+        model: event.data.model,
+        ...(event.data.reasoningEffort === undefined ? {} : { reasoningEffort: event.data.reasoningEffort }),
+      })
     } else {
       return
     }

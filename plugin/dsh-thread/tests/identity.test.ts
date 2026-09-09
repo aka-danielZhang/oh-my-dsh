@@ -16,6 +16,7 @@ function authorizedLink(): ThreadLink {
     targetWorkspaceId: 'workspace-1',
     targetCwd: null,
     agentPreset: 'standard-thread',
+    model: null,
     title: null,
     handoff: { objective: 'continue', confirmedConclusions: [], constraints: [], openQuestions: [], artifacts: [] },
     instruction: 'continue',
@@ -25,7 +26,7 @@ function authorizedLink(): ThreadLink {
     relationCommit: null,
     failure: null,
     trace: [],
-    fold: { splices: [], entries: [], turns: [], titles: [] },
+    fold: { splices: [], entries: [], turns: [], titles: [], models: [] },
     createdAt: 1,
     updatedAt: 1,
   }

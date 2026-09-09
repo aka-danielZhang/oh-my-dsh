@@ -20,6 +20,7 @@ function link(overrides: Partial<ThreadLink> = {}): ThreadLink {
     targetWorkspaceId: 'workspace-1',
     targetCwd: null,
     agentPreset: 'standard-thread',
+    model: null,
     title: null,
     handoff: { objective: 'continue', confirmedConclusions: [], constraints: [], openQuestions: [], artifacts: [] },
     instruction: 'continue',
@@ -29,7 +30,7 @@ function link(overrides: Partial<ThreadLink> = {}): ThreadLink {
     relationCommit: null,
     failure: null,
     trace: [],
-    fold: { splices: [], entries: [], turns: [], titles: [] },
+    fold: { splices: [], entries: [], turns: [], titles: [], models: [] },
     createdAt: 1,
     updatedAt: 1,
     ...overrides,
@@ -68,6 +69,18 @@ test('loads legacy Links without Thread or workspace placement metadata', () => 
   assert.equal(parsed.targetWorkspaceId, null)
   assert.equal(parsed.targetCwd, null)
   assert.deepEqual(parsed.handoff.artifacts, [])
+})
+
+test('loads legacy Links without model inheritance and folds it to null', () => {
+  const { model: _model, ...legacy } = link()
+  const { models: _models, ...legacyFold } = legacy.fold
+  const parsed = threadLinkSchema.parse({ ...legacy, fold: legacyFold })
+  assert.equal(parsed.model, null)
+  assert.deepEqual(parsed.fold.models, [])
+  // A stamped selection survives the round trip untouched.
+  const inherited = link({ model: { provider: 'pi-ai', model: 'glm-5.3-flash', reasoningEffort: 'high' } })
+  const stamped = threadLinkSchema.parse(inherited)
+  assert.deepEqual(stamped.model, { provider: 'pi-ai', model: 'glm-5.3-flash', reasoningEffort: 'high' })
 })
 
 test('requires activation-flushed commit exactly for active flushed links', () => {
@@ -132,6 +145,7 @@ test('fold records remain owned lossless JSON', () => {
       entries: [{ seq: 2, id: 'message-1' }],
       turns: [{ seq: 3, type: 'turn/start' }],
       titles: [{ seq: 4, title: '深圳周末旅行' }],
+      models: [{ seq: 5, provider: 'pi-ai', model: 'glm-5.3-flash' }],
     },
   })
   assert.equal(threadLinkSchema.safeParse(value).success, true)

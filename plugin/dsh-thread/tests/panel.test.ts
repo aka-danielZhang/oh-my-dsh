@@ -30,6 +30,7 @@ function link(
     targetWorkspaceId: 'workspace-1',
     targetCwd: null,
     agentPreset: 'standard-thread',
+    model: null,
     title: null,
     handoff: {
       objective: 'continue',
@@ -45,7 +46,7 @@ function link(
     relationCommit: { at: createdAt + 1, reason: 'activation-flushed' },
     failure: null,
     trace: [],
-    fold: { splices: [], entries: [], turns: [], titles: [] },
+    fold: { splices: [], entries: [], turns: [], titles: [], models: [] },
     createdAt,
     updatedAt: createdAt + 1,
   }

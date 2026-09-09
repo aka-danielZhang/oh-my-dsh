@@ -53,6 +53,14 @@ export const threadTraceSchema = z.object({
   detail: z.record(z.string(), z.unknown()).optional(),
 })
 
+/** Model selection inherited from the source Session (provider-validated). */
+export const threadModelSelectionSchema = z.object({
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  reasoningEffort: z.string().min(1).optional(),
+})
+export type ThreadModelSelection = z.infer<typeof threadModelSelectionSchema>
+
 export const threadFoldSchema = z.object({
   splices: z.array(z.object({
     seq: z.number(),
@@ -65,6 +73,12 @@ export const threadFoldSchema = z.object({
   entries: z.array(z.object({ seq: z.number(), id: z.string() })),
   turns: z.array(z.object({ seq: z.number(), type: z.string() })),
   titles: z.array(z.object({ seq: z.number(), title: z.string() })),
+  models: z.array(z.object({
+    seq: z.number(),
+    provider: z.string(),
+    model: z.string(),
+    reasoningEffort: z.string().optional(),
+  })).default([]),
 })
 export type ThreadFold = z.infer<typeof threadFoldSchema>
 
@@ -80,6 +94,7 @@ export const threadLinkSchema = z.object({
   targetWorkspaceId: z.string().nullable().default(null),
   targetCwd: z.string().nullable().default(null),
   agentPreset: z.string(),
+  model: threadModelSelectionSchema.nullable().default(null),
   title: z.string().nullable(),
   handoff: handoffSnapshotSchema,
   instruction: z.string().max(4000),
