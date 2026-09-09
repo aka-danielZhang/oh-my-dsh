@@ -82,6 +82,96 @@ export const threadFoldSchema = z.object({
 })
 export type ThreadFold = z.infer<typeof threadFoldSchema>
 
+/**
+ * Target Session lifecycle, orthogonal to titles, delivery, and the relation.
+ *
+ * - `reserved`: authorization pinned the deterministic target id; nothing exists.
+ * - `creating`: a creation attempt left the durable checkpoint, outcome unknown
+ *   until reconciliation (idempotent create by deterministic id).
+ * - `published`: the target Session provably exists (reconciled fingerprint).
+ * - `diverged`: the target exists but is not usable by this Link anymore
+ *   (foreign model-visible input, identity conflict). NEVER inject into it.
+ * - `abandoned`: the authorization was cancelled before creation.
+ */
+export const targetPhaseSchema = z.enum(['reserved', 'creating', 'published', 'diverged', 'abandoned'])
+export type TargetPhase = z.infer<typeof targetPhaseSchema>
+
+/**
+ * Facts that identify the published target Session beyond its id. Pinned by
+ * the first reconciliation and exact-matched afterwards.
+ */
+export const targetFingerprintSchema = z.object({
+  createdAt: z.number(),
+  agentPreset: z.string().nullable(),
+  workspaceId: z.string().nullable(),
+  cwd: z.string().nullable(),
+})
+export type TargetFingerprint = z.infer<typeof targetFingerprintSchema>
+
+/**
+ * Title saga state. `requested` is user intent (audit/display only); `accepted`
+ * and `eventSeq` come exclusively from the successful `session.rename` response
+ * or from adopting the target log's authoritative title — never from copying
+ * the deployment's normalization rules.
+ */
+export const titlePhaseSchema = z.enum(['not-requested', 'pending', 'accepted', 'failed', 'unknown'])
+export type TitlePhase = z.infer<typeof titlePhaseSchema>
+
+export const threadTitleSchema = z.object({
+  phase: titlePhaseSchema,
+  requested: z.string().nullable(),
+  accepted: z.string().nullable(),
+  eventSeq: z.number().nullable(),
+  failure: z.string().nullable(),
+})
+export type ThreadTitleState = z.infer<typeof threadTitleSchema>
+
+/**
+ * Message-delivery saga state. `attempt` counts deliveries (crash retries and
+ * user-confirmed redeliveries each bump it); the message ids belong to exactly
+ * one attempt and are persisted BEFORE the first inbox mutation so every crash
+ * window is decidable by id presence in the target log.
+ */
+export const deliveryPhaseSchema = z.enum(['prepared', 'submitting', 'flushed', 'uncertain'])
+export type DeliveryPhase = z.infer<typeof deliveryPhaseSchema>
+
+export const threadDeliverySchema = z.object({
+  phase: deliveryPhaseSchema,
+  attempt: z.number().int().nonnegative().default(0),
+  handoffId: z.string().nullable(),
+  instructionId: z.string().nullable(),
+})
+export type ThreadDeliveryState = z.infer<typeof threadDeliverySchema>
+
+export const threadRelationSchema = z.enum(['pending', 'active', 'abandoned'])
+export type ThreadRelation = z.infer<typeof threadRelationSchema>
+
+/**
+ * Structured, recovery-oriented failure record. `phase` names the saga leg that
+ * failed; `recovery` names the concrete user action that can make progress —
+ * the UI never invents a generic "retry" again.
+ */
+export const threadFailureSchema = z.object({
+  phase: z.enum(['authorize', 'create', 'title', 'activate', 'flush']),
+  code: z.string().max(300),
+  recovery: z.enum(['resume', 'reconcile', 'clone', 'open-target', 'none']),
+  detail: z.record(z.string(), z.unknown()).nullable().default(null),
+})
+export type ThreadFailure = z.infer<typeof threadFailureSchema>
+
+/**
+ * Verbatim capture of the pre-0.3 overloaded state fields, kept only so the
+ * durable migration can rewrite legacy records and then clear this marker.
+ * Always `null` on records written by this version.
+ */
+export const threadLegacyCaptureSchema = z.object({
+  state: z.string(),
+  titleState: z.string(),
+  attemptPhase: z.string().nullable(),
+  failure: z.string().nullable(),
+}).nullable().default(null)
+export type ThreadLegacyCapture = z.infer<typeof threadLegacyCaptureSchema>
+
 export const threadLinkSchema = z.object({
   linkId: z.string(),
   threadId: z.string().nullable().default(null),
@@ -95,33 +185,42 @@ export const threadLinkSchema = z.object({
   targetCwd: z.string().nullable().default(null),
   agentPreset: z.string(),
   model: threadModelSelectionSchema.nullable().default(null),
-  title: z.string().nullable(),
   handoff: handoffSnapshotSchema,
   instruction: z.string().max(4000),
-  state: z.enum(['authorized', 'creating', 'activating', 'active', 'failed', 'uncertain']),
-  titleState: z.enum(['not-requested', 'pending', 'applied', 'failed']),
-  attempt: z.object({
-    phase: z.enum(['prepared', 'submitting', 'flushed', 'uncertain']),
-    handoffId: z.string().nullable(),
-    instructionId: z.string().nullable(),
+  target: z.object({
+    phase: targetPhaseSchema,
+    fingerprint: targetFingerprintSchema.nullable().default(null),
   }),
+  title: threadTitleSchema,
+  delivery: threadDeliverySchema,
+  relation: threadRelationSchema,
   relationCommit: z.object({
     reason: z.literal('activation-flushed'),
     at: z.number(),
   }).nullable(),
-  failure: z.string().nullable(),
+  failure: threadFailureSchema.nullable().default(null),
+  legacy: threadLegacyCaptureSchema,
   trace: z.array(threadTraceSchema),
   fold: threadFoldSchema,
   createdAt: z.number(),
   updatedAt: z.number(),
 }).superRefine((link, context) => {
+  // relation 'active' commits exactly when both messages are flushed durable.
+  const active = link.relation === 'active'
+  const flushed = link.delivery.phase === 'flushed'
   const committed = link.relationCommit !== null
-  const flushed = link.attempt.phase === 'flushed'
-  if (committed !== (link.state === 'active' && flushed)) {
+  if (active !== flushed || active !== committed) {
     context.addIssue({
       code: 'custom',
-      path: ['relationCommit'],
-      message: 'activation-flushed commit requires and is required by active+flushed',
+      path: ['relation'],
+      message: 'active relation requires and is required by flushed delivery and a relation commit',
+    })
+  }
+  if (active && link.target.phase !== 'published') {
+    context.addIssue({
+      code: 'custom',
+      path: ['target'],
+      message: 'active relation requires a published target',
     })
   }
 })
@@ -148,11 +247,50 @@ export const beginCreationRequestSchema = z.object({
 })
 export type BeginCreationRequest = z.infer<typeof beginCreationRequestSchema>
 
+/**
+ * `recordTitle` outcome: the discriminated result of one `session.rename`
+ * attempt, bound to the creation attempt that issued it. `accepted` carries the
+ * authoritative normalized title plus the durable event sequence from the
+ * rename response — Thread never derives either itself.
+ */
+export const titleOutcomeSchema = z.discriminatedUnion('kind', [
+  z.object({
+    kind: z.literal('accepted'),
+    title: z.string().min(1).max(500),
+    eventSeq: z.number().int().nonnegative(),
+  }),
+  z.object({
+    kind: z.literal('failed'),
+    error: z.string().max(500),
+  }),
+  z.object({
+    kind: z.literal('unknown'),
+    error: z.string().max(500),
+  }),
+])
+export type TitleOutcome = z.infer<typeof titleOutcomeSchema>
+
 export const recordTitleRequestSchema = z.object({
   linkId: z.string().min(1).max(300),
-  ok: z.boolean(),
+  /** The creation attempt whose saga issued the rename; stale outcomes are rejected. */
+  attempt: z.string().min(1).max(300),
+  outcome: titleOutcomeSchema,
 })
 export type RecordTitleRequest = z.infer<typeof recordTitleRequestSchema>
+
+export const reconcileRequestSchema = z.object({
+  linkId: z.string().min(1).max(300),
+  /** Structured create-side error code to persist when the probe finds no target. */
+  createError: z.string().max(500).optional(),
+})
+export type ReconcileRequest = z.infer<typeof reconcileRequestSchema>
+
+export const activateRequestSchema = z.object({
+  linkId: z.string().min(1).max(300),
+  /** User-confirmed redelivery of an `uncertain` delivery with fresh message ids. */
+  redeliver: z.boolean().optional(),
+})
+export type ActivateRequest = z.infer<typeof activateRequestSchema>
 
 const failureSchema = z.object({
   ok: z.literal(false),
@@ -193,11 +331,30 @@ export const mutationResultSchema = z.union([
 ])
 export type MutationResult = z.infer<typeof mutationResultSchema>
 
+/** Reconciliation outcome plus the single next step the client should drive. */
+export const reconcileResultSchema = z.union([
+  z.object({
+    ok: z.literal(true),
+    link: threadLinkSchema,
+    /** `create`: the target is not provably live — re-issue the idempotent create. */
+    next: z.enum(['create', 'none']),
+  }),
+  failureSchema,
+])
+export type ReconcileResult = z.infer<typeof reconcileResultSchema>
+
 export const activateResultSchema = z.union([
   z.object({ ok: z.literal(true), link: threadLinkSchema }),
   z.object({ ok: z.literal(false), error: z.string(), link: threadLinkSchema.optional() }),
 ])
 export type ActivateResult = z.infer<typeof activateResultSchema>
+
+/** Clone outcome: a fresh sealed Draft (new identity) ready for a new Link. */
+export const cloneResultSchema = z.union([
+  z.object({ ok: z.literal(true), draft: threadDraftRecordSchema }),
+  failureSchema,
+])
+export type CloneResult = z.infer<typeof cloneResultSchema>
 
 export const stateResultSchema = z.object({
   drafts: z.array(threadDraftRecordSchema),

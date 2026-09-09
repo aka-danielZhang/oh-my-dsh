@@ -25,7 +25,7 @@ function purityGate(): import('tsdown').UserConfig['plugins'][number] {
 export default defineConfig([
   {
     name: PACKAGE_ID,
-    entry: ['src/index.ts', 'src/gateway.ts', 'src/tool.ts', 'src/draft.ts', 'src/identity.ts'],
+    entry: ['src/index.ts', 'src/gateway.ts', 'src/tool.ts', 'src/draft.ts', 'src/identity.ts', 'src/migrate.ts', 'src/purity.ts', 'src/recovery.ts'],
     outDir: 'lib',
     format: ['esm'],
     platform: 'node',

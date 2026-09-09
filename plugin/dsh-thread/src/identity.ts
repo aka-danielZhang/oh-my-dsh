@@ -58,19 +58,46 @@ export function resolveThreadId(sourceSessionId: string, links: readonly ThreadL
 
 export type BeginCreationDecision =
   | { ok: true; link: ThreadLink; changed: boolean }
-  | { ok: false; error: string; state: ThreadLink['state'] }
+  | { ok: false; error: string; phase: ThreadLink['target']['phase'] }
 
-/** Apply the direct-click single-flight checkpoint without side effects. */
+/**
+ * Apply the creation checkpoint without side effects.
+ *
+ * - relation already active, or target already published/diverged: no-op (ok).
+ * - reserved → creating, stamping the single-flight action id.
+ * - creating + same action id: transport replay, no-op.
+ * - creating + new action id: allowed only after a recorded create failure
+ *   whose recovery is `resume` (the stale in-flight fence must never deadlock
+ *   recovery — the deterministic id makes re-issuing create safe); otherwise
+ *   another window owns the attempt (`creation-in-flight`).
+ */
 export function advanceCreation(link: ThreadLink, actionId: string, now: number): BeginCreationDecision {
-  if (link.state === 'active') return { ok: true, link, changed: false }
-  if (link.state === 'creating') {
-    if (link.creationActionId === actionId) return { ok: true, link, changed: false }
-    return { ok: false, error: 'creation-in-flight', state: link.state }
+  if (link.relation === 'active') return { ok: true, link, changed: false }
+  if (link.target.phase === 'published' || link.target.phase === 'diverged') {
+    return { ok: true, link, changed: false }
   }
-  if (link.state !== 'authorized') return { ok: false, error: 'cas-failed', state: link.state }
+  if (link.target.phase === 'abandoned') {
+    return { ok: false, error: 'link-abandoned', phase: link.target.phase }
+  }
+  if (link.target.phase === 'creating') {
+    if (link.creationActionId === actionId) return { ok: true, link, changed: false }
+    if (link.failure === null || link.failure.recovery !== 'resume') {
+      return { ok: false, error: 'creation-in-flight', phase: link.target.phase }
+    }
+    return {
+      ok: true,
+      changed: true,
+      link: {
+        ...link,
+        creationActionId: actionId,
+        failure: null,
+        updatedAt: now,
+      },
+    }
+  }
   return {
     ok: true,
     changed: true,
-    link: { ...link, state: 'creating', creationActionId: actionId, updatedAt: now },
+    link: { ...link, target: { ...link.target, phase: 'creating' }, creationActionId: actionId, updatedAt: now },
   }
 }

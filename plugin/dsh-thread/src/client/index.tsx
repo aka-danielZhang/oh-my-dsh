@@ -12,11 +12,13 @@ import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import { Button, IconBranchOutline16, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import React from 'react'
 import { isThreadHandoffDraft, type ThreadHandoffDraft } from '../draft.ts'
+import { deriveRecoveryView, type RecoveryAction } from '../recovery.ts'
+import type { AuthorizeRequest, StateResult, ThreadDraftRecord, ThreadLink, TitleOutcome } from '../thread-types.ts'
 import TYPERT_REMOTE from '../typert.remote-client.ts'
 import { THREAD_SETTINGS_NAMESPACE, type ThreadSettings } from '../thread-types.ts'
-import type { AuthorizeRequest, StateResult, ThreadLink } from '../thread-types.ts'
 import { bindThreadEnabled, type ThreadEnabledStore } from './enabled.ts'
 import { en, zh, type ThreadLocaleKey } from './locales.ts'
 import { ThreadPanel, type ThreadPanelFace } from './panel.tsx'
@@ -42,7 +44,14 @@ type HeaderUtilityProps = PropsRuntime<'conversation.session.header.utilities'> 
 type ThreadOverlayProps = PropsRuntime<'shell.overlay'> & { threadFace: ThreadFace }
 
 interface ThreadFace extends ThreadPanelFace {
-  continue(request: AuthorizeRequest): Promise<ThreadLink>
+  /** Drive the whole saga from the current durable checkpoint to `relation: active`. */
+  drive(request: AuthorizeRequest): Promise<ThreadLink>
+  /** User-confirmed redelivery of an uncertain delivery. */
+  redeliver(linkId: string): Promise<ThreadLink>
+  /** Clone a stuck link into a fresh Draft and build its continuation request. */
+  clone(linkId: string): Promise<ContinuationRequest>
+  /** Cancel a not-yet-delivered authorization. */
+  abandon(linkId: string): Promise<void>
   /** The Thread master switch mirrored from the Host settings namespace. */
   enabled: ThreadEnabledStore
   togglePanel(): void
@@ -54,8 +63,28 @@ function remoteError(result: { ok: false; error: { code: string; message: string
   return new Error(`${result.error.code}: ${result.error.message}`)
 }
 
+/**
+ * Staleness the client resolves itself by re-reading the durable link: these
+ * codes mean "your view is old", never a user-facing failure.
+ */
+function isStaleError(message: string): boolean {
+  return message.includes('cas-failed')
+    || message.includes('creation-in-flight')
+    || message.includes('link-not-found')
+    || message.includes('target-not-published')
+}
+
 function createActionId(): string {
   return `thread-action-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
+/** Host activation codes translated for the card; unknown codes pass through. */
+const FRIENDLY_ACTIVATE_ERRORS: Record<string, string> = {
+  'delivery-uncertain': '上一次投递结果未知，确认后可重新投递',
+  'target-not-idle': '目标会话正在运行，请稍后再试',
+  'target-not-live': '目标会话未就绪，请重新检查',
+  'target-diverged': '目标会话已产生本交接之外的输入，不会再注入 Handoff',
+  'link-abandoned': '该交接授权已取消',
 }
 
 const styles = {
@@ -79,102 +108,217 @@ const styles = {
   feedback: { flexBasis: '100%' },
   error: { color: 'var(--dsw-alias-state-error-primary)', whiteSpace: 'pre-wrap' },
   success: { color: 'var(--dsw-alias-state-success-primary)' },
+  notice: { color: 'var(--dsw-alias-label-secondary)' },
+  warning: { color: 'var(--dsw-alias-state-warn-primary)' },
   headerButton: { width: 28, minWidth: 28, padding: 0 },
 } as const
+
+const ACTION_LABELS: Record<RecoveryAction, string> = {
+  'continue-creation': '继续创建',
+  recheck: '重新检查',
+  'start-handoff': '启动交接',
+  'open-target': '打开已创建会话',
+  clone: '克隆到新会话',
+  redeliver: '重新投递',
+  'open-thread': '打开 Thread 会话',
+  cancel: '取消授权',
+}
+
+function requestFromDraft(draft: ThreadDraftRecord): ContinuationRequest {
+  return {
+    sourceSessionId: draft.sourceSessionId,
+    draftId: draft.draftId,
+    draftVersion: draft.version,
+    ...(draft.targetTitle === null || draft.targetTitle === undefined ? {} : { title: draft.targetTitle }),
+    handoff: {
+      objective: draft.handoff.objective,
+      confirmedConclusions: [...draft.handoff.confirmedConclusions],
+      constraints: [...draft.handoff.constraints],
+      openQuestions: [...draft.handoff.openQuestions],
+      artifacts: [...draft.handoff.artifacts],
+    },
+    instruction: draft.instruction,
+  }
+}
 
 function ContinueButton(props: {
   face: ThreadFace
   request: ContinuationRequest
   useSessions: UseSessions
 }): React.ReactElement {
-  const [phase, setPhase] = React.useState<'idle' | 'running' | 'syncing' | 'complete' | 'failed'>('idle')
+  const [request, setRequest] = React.useState<ContinuationRequest>(props.request)
+  const [link, setLink] = React.useState<ThreadLink | null>(null)
+  const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const [target, setTarget] = React.useState<SessionId | null>(null)
+  const [notice, setNotice] = React.useState<string | null>(null)
+  const [armedRedeliver, setArmedRedeliver] = React.useState(false)
+  const [openedTarget, setOpenedTarget] = React.useState<string | null>(null)
+  const target = link === null ? null : link.targetSessionId as SessionId
   const visible = props.useSessions((state) => target !== null && state.byId[target] !== undefined)
 
-  // Rehydrate from the durable link: a draft already consumed by an earlier
-  // confirmation (possibly before a reload) renders its outcome, never a
-  // second CTA that would spawn a duplicate Session with a fresh actionId.
+  // Rehydrate from the durable link: the card always renders the persisted
+  // checkpoint's real recovery actions, never a generic retry that the Host
+  // would reject anyway.
+  const refresh = React.useCallback(async (): Promise<ThreadLink | null> => {
+    const state = await props.face.loadState()
+    const found = state.links.find(item => item.draftId === request.draftId) ?? null
+    setLink(found)
+    return found
+  }, [props.face, request.draftId])
+
   React.useEffect(() => {
     let live = true
-    void props.face.loadState().then((state) => {
-      if (!live) return
-      const link = state.links.find(l => l.draftId === props.request.draftId)
-      if (link === undefined) return
-      if (link.state === 'active') {
-        setTarget(link.targetSessionId as SessionId)
-        setPhase('complete')
-      } else if (link.state === 'failed' || link.state === 'uncertain') {
-        setError(link.failure ?? 'unknown failure')
-        setPhase('failed')
-      } else {
-        // authorized/creating/activating: creation is in flight elsewhere.
-        setPhase('running')
-      }
+    void refresh().then(found => {
+      if (live && found !== null && found.relation === 'active') setOpenedTarget(found.targetSessionId)
     }).catch(() => {})
     return () => { live = false }
-  }, [props.face, props.request.draftId])
+  }, [refresh])
 
   React.useEffect(() => {
-    if (phase !== 'syncing' || target === null || !visible) return
+    if (link === null || link.relation !== 'active' || target === null || !visible) return
+    if (openedTarget === link.targetSessionId) return
+    setOpenedTarget(link.targetSessionId)
     props.face.openSession(target)
-    // First button-driven arrival at the new Session: the Thread panel opens
-    // with it so the carried context is immediately visible.
+    // First arrival at the new Session: the Thread panel opens with it so the
+    // carried context is immediately visible.
     props.face.openPanel()
-    setPhase('complete')
-  }, [phase, target, visible, props.face])
+  }, [link, target, visible, openedTarget, props.face])
 
-  const run = async () => {
-    setPhase('running')
+  const runDrive = async (): Promise<void> => {
+    setBusy(true)
     setError(null)
+    setNotice(null)
+    setArmedRedeliver(false)
     try {
-      const link = await props.face.continue({
-        ...props.request,
-        actionId: createActionId(),
-      })
-      setTarget(link.targetSessionId as SessionId)
-      setPhase('syncing')
+      const active = await props.face.drive({ ...request, actionId: createActionId() })
+      setLink(active)
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason))
-      setPhase('failed')
+      const message = reason instanceof Error ? reason.message : String(reason)
+      await refresh().catch(() => {})
+      if (isStaleError(message)) setNotice('状态已更新，请按最新状态操作')
+      else setError(message)
+    } finally {
+      setBusy(false)
     }
   }
 
-  const open = (): void => {
+  const openTarget = (): void => {
     if (target === null) return
     props.face.openSession(target)
     props.face.openPanel()
   }
 
-  const busy = phase === 'running' || phase === 'syncing'
+  const runAction = async (action: RecoveryAction): Promise<void> => {
+    if (link === null) return
+    if (action === 'open-target' || action === 'open-thread') {
+      openTarget()
+      return
+    }
+    if (action === 'redeliver') {
+      if (!armedRedeliver) {
+        setArmedRedeliver(true)
+        return
+      }
+      setBusy(true)
+      setError(null)
+      setNotice(null)
+      setArmedRedeliver(false)
+      try {
+        const active = await props.face.redeliver(link.linkId)
+        setLink(active)
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : String(reason)
+        await refresh().catch(() => {})
+        if (isStaleError(message)) setNotice('状态已更新，请按最新状态操作')
+        else setError(message)
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+    if (action === 'clone') {
+      setBusy(true)
+      setError(null)
+      setNotice(null)
+      setArmedRedeliver(false)
+      try {
+        const cloned = await props.face.clone(link.linkId)
+        setRequest(cloned)
+        const active = await props.face.drive({ ...cloned, actionId: createActionId() })
+        setLink(active)
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : String(reason)
+        await refresh().catch(() => {})
+        if (isStaleError(message)) setNotice('状态已更新，请按最新状态操作')
+        else setError(message)
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+    if (action === 'cancel') {
+      setBusy(true)
+      try {
+        await props.face.abandon(link.linkId)
+        await refresh().catch(() => {})
+        setNotice('已取消该交接授权')
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : String(reason))
+        await refresh().catch(() => {})
+      } finally {
+        setBusy(false)
+      }
+      return
+    }
+    await runDrive()
+  }
+
+  const view = link === null ? null : deriveRecoveryView(link)
+  const primary: RecoveryAction | null = link === null ? 'continue-creation' : view?.primary ?? null
+  const secondary = link === null ? [] : view?.secondary ?? []
+  const completed = link !== null && link.relation === 'active'
+  const primaryLabel = primary === 'redeliver' && armedRedeliver ? '确认重新投递' : primary === null ? null : ACTION_LABELS[primary]
+
   return (
     <div style={styles.action}>
-      {phase === 'complete' && target !== null ? (
-        <Button
-          variant="primary"
-          size="sm"
-          icon={<IconBranchOutline16 />}
-          style={styles.actionButton}
-          onClick={open}
-        >
-          打开 Thread 会话
-        </Button>
-      ) : (
+      {primary !== null && primaryLabel !== null && (
         <Button
           variant="primary"
           size="sm"
           icon={<IconBranchOutline16 />}
           style={styles.actionButton}
           disabled={busy}
-          onClick={() => void run()}
+          onClick={() => void runAction(primary)}
         >
-          {busy ? '正在创建...' : phase === 'failed' ? '重试' : '在 Thread 中继续'}
+          {busy ? '处理中...' : primaryLabel}
         </Button>
       )}
-      {(phase === 'complete' || error !== null) && (
+      {secondary.map(action => (
+        <Button
+          key={action}
+          variant="ghost"
+          size="sm"
+          style={styles.actionButton}
+          disabled={busy}
+          onClick={() => void runAction(action)}
+        >
+          {ACTION_LABELS[action]}
+        </Button>
+      ))}
+      {(completed || error !== null || notice !== null || view?.summary !== null || view?.titleWarning !== null) && (
         <div style={styles.feedback} aria-live="polite">
-          {phase === 'complete' && <span style={styles.success}>已携带上下文创建新会话</span>}
+          {completed && <span style={styles.success}>已携带上下文创建新会话</span>}
+          {notice !== null && <span style={styles.notice}>{notice}</span>}
           {error !== null && <span style={styles.error}>{error}</span>}
+          {view?.summary !== null && view !== null && view.summary !== null && (
+            <span style={styles.notice}>{view.summary}</span>
+          )}
+          {view?.titleWarning !== null && view !== null && view.titleWarning !== null && (
+            <span style={styles.warning}>{view.titleWarning}</span>
+          )}
+          {armedRedeliver && view !== null && view.deliveryWarning !== null && (
+            <span style={styles.warning}>{view.deliveryWarning}</span>
+          )}
         </div>
       )}
     </div>
@@ -359,54 +503,165 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
   const settingsScope = ctx.settingsScope.bind<ThreadSettings>({ namespace: THREAD_SETTINGS_NAMESPACE })
   const threadEnabled = bindThreadEnabled(settingsScope)
 
-  const face: ThreadFace = {
-    enabled: threadEnabled,
-    async continue(request) {
-      const authorized = await gateway.authorize(request)
-      if (!authorized.ok) throw remoteError(authorized)
-      if (!authorized.value.ok) throw new Error(authorized.value.error)
-      const plan = authorized.value
+  async function readLink(linkId: string): Promise<ThreadLink> {
+    const state = await loadState()
+    const link = state.links.find(item => item.linkId === linkId)
+    if (link === undefined) throw new Error('thread: link vanished')
+    return link
+  }
 
-      const begun = await gateway.beginCreation({ linkId: plan.linkId, actionId: request.actionId })
-      if (!begun.ok) throw remoteError(begun)
-      if (!begun.value.ok) throw new Error(begun.value.error)
-      if (begun.value.link.state === 'active') return begun.value.link
+  async function loadState(): Promise<StateResult> {
+    const result = await gateway.state()
+    if (!result.ok) throw remoteError(result)
+    return result.value
+  }
 
+  /** Issue the deterministic idempotent create, recording a structured failure when it errors. */
+  async function ensureCreated(link: ThreadLink): Promise<void> {
+    let failure: string | null = null
+    try {
       const created = await sessionRemote.create({
-        sessionId: plan.createPlan.sessionId as SessionId,
-        agentPreset: plan.createPlan.agentPreset,
-        ...(plan.createPlan.workspaceId === undefined
-          ? {}
-          : { workspaceId: plan.createPlan.workspaceId }),
-        ...(plan.createPlan.cwd === undefined ? {} : { cwd: plan.createPlan.cwd }),
+        sessionId: link.targetSessionId as SessionId,
+        agentPreset: link.agentPreset,
+        ...(link.targetWorkspaceId === null ? {} : { workspaceId: link.targetWorkspaceId as WorkspaceId }),
+        ...(link.targetCwd === null ? {} : { cwd: link.targetCwd }),
       })
-      if (!created.ok) throw new Error(`${created.error.code}: ${created.error.message}`)
+      if (!created.ok) failure = `${created.error.code}: ${created.error.message}`
+    } catch (reason) {
+      // No coded remote result: the outcome itself is unknown. The Host
+      // classifies by code prefix, so this lands as a resume-able create
+      // failure; the idempotent create settles it on the next try.
+      failure = (reason instanceof Error ? reason.message : String(reason)).slice(0, 500)
+    }
+    if (failure !== null) {
+      await gateway.reconcileTarget({ linkId: link.linkId, createError: failure }).catch(() => {})
+      throw new Error(failure)
+    }
+  }
 
-      if (plan.titlePlan !== undefined) {
-        let renamed = false
+  /** One rename attempt with authoritative-outcome recording. Never blocks activation. */
+  async function deliverTitle(link: ThreadLink): Promise<void> {
+    if (link.title.phase !== 'pending' || link.title.requested === null) return
+    const attempt = link.creationActionId
+    if (attempt === null) return
+    let outcome: TitleOutcome
+    try {
+      const rename = await sessionRemote.rename({
+        sessionId: link.targetSessionId as SessionId,
+        title: link.title.requested,
+      })
+      // The accepted title and eventSeq come from the response — the upstream
+      // Session Title service owns normalization (whitespace, control
+      // characters, byte caps); Thread never copies those rules.
+      outcome = rename.ok
+        ? { kind: 'accepted', title: rename.value.title, eventSeq: rename.value.seq }
+        : { kind: 'failed', error: `${rename.error.code}: ${rename.error.message}`.slice(0, 500) }
+    } catch (reason) {
+      // Thrown without a coded result: response unknown. Do NOT auto-retry —
+      // a repeated rename could append a second title event. Reconciliation
+      // adopts the target's current title instead.
+      outcome = {
+        kind: 'unknown',
+        error: (reason instanceof Error ? reason.message : String(reason)).slice(0, 500),
+      }
+    }
+    // Recording is advisory by design: activation never waits on the title,
+    // and when the outcome cannot be durably recorded, reconciliation adopts
+    // the authoritative title from the target log instead.
+    try {
+      await gateway.recordTitle({ linkId: link.linkId, attempt, outcome })
+    } catch {
+      // transport or cas rejection — the drive loop re-reads the durable link
+    }
+  }
+
+  async function drive(request: AuthorizeRequest): Promise<ThreadLink> {
+    const authorized = await gateway.authorize(request)
+    if (!authorized.ok) throw remoteError(authorized)
+    if (!authorized.value.ok) throw new Error(authorized.value.error)
+    const plan = authorized.value
+
+    for (let pass = 0; pass < 6; pass++) {
+      const link = await readLink(plan.linkId)
+      if (link.relation === 'active') return link
+      const view = deriveRecoveryView(link)
+      const action = view.primary
+
+      if (action === 'open-thread' || action === null) return link
+
+      if (action === 'continue-creation' || action === 'recheck') {
+        // Creation checkpoint; `creation-in-flight` from another window is
+        // stale information — the reconcile probe decides what really exists.
         try {
-          const rename = await sessionRemote.rename({
-            sessionId: plan.titlePlan.sessionId as SessionId,
-            title: plan.titlePlan.title,
-          })
-          renamed = rename.ok
-        } finally {
-          const recorded = await gateway.recordTitle({ linkId: plan.linkId, ok: renamed })
-          if (!recorded.ok) throw remoteError(recorded)
-          if (!recorded.value.ok) throw new Error(recorded.value.error)
+          const begun = await gateway.beginCreation({ linkId: plan.linkId, actionId: createActionId() })
+          if (!begun.ok) throw remoteError(begun)
+          if (!begun.value.ok && !isStaleError(begun.value.error)) throw new Error(begun.value.error)
+        } catch (reason) {
+          const message = reason instanceof Error ? reason.message : String(reason)
+          if (!isStaleError(message)) throw reason
         }
+        const probed = await gateway.reconcileTarget({ linkId: plan.linkId })
+        if (!probed.ok) throw remoteError(probed)
+        if (!probed.value.ok) {
+          if (isStaleError(probed.value.error)) continue
+          throw new Error(probed.value.error)
+        }
+        if (probed.value.next === 'create') {
+          await ensureCreated(probed.value.link)
+          const settled = await gateway.reconcileTarget({ linkId: plan.linkId })
+          if (!settled.ok) throw remoteError(settled)
+          if (!settled.value.ok) {
+            if (isStaleError(settled.value.error)) continue
+            throw new Error(settled.value.error)
+          }
+        }
+        continue
       }
 
-      const activated = await gateway.activate({ linkId: plan.linkId })
+      if (action === 'start-handoff') {
+        await deliverTitle(link)
+        const activated = await gateway.activate({ linkId: plan.linkId })
+        if (!activated.ok) throw remoteError(activated)
+        if (!activated.value.ok) {
+          if (isStaleError(activated.value.error)) continue
+          const refreshed = await readLink(plan.linkId).catch(() => null)
+          if (refreshed !== null && refreshed.relation === 'active') return refreshed
+          // Transient states and the uncertain delivery surface through the
+          // refreshed checkpoint's real actions, with human wording.
+          throw new Error(FRIENDLY_ACTIVATE_ERRORS[activated.value.error] ?? activated.value.error)
+        }
+        continue
+      }
+
+      // redeliver / open-target / clone need an explicit user click.
+      throw new Error(view.summary ?? 'thread: 该状态需要用户选择具体操作')
+    }
+    throw new Error('thread: 交接流程未能收敛，请刷新状态后重试')
+  }
+
+  const face: ThreadFace = {
+    enabled: threadEnabled,
+    drive,
+    async redeliver(linkId) {
+      const activated = await gateway.activate({ linkId, redeliver: true })
       if (!activated.ok) throw remoteError(activated)
       if (!activated.value.ok) throw new Error(activated.value.error)
       return activated.value.link
     },
+    async clone(linkId) {
+      const cloned = await gateway.cloneDraft({ linkId })
+      if (!cloned.ok) throw remoteError(cloned)
+      if (!cloned.value.ok) throw new Error(cloned.value.error)
+      return requestFromDraft(cloned.value.draft)
+    },
+    async abandon(linkId) {
+      const abandoned = await gateway.abandon({ linkId })
+      if (!abandoned.ok) throw remoteError(abandoned)
+      if (!abandoned.value.ok) throw new Error(abandoned.value.error)
+    },
     isPanelOpen: panelVisibility.getSnapshot,
     async loadState(): Promise<StateResult> {
-      const result = await gateway.state()
-      if (!result.ok) throw remoteError(result)
-      return result.value
+      return await loadState()
     },
     openSession(sessionId) {
       clientSessions.open(sessionId)

@@ -12,27 +12,34 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
+import { randomBytes } from 'node:crypto'
 import { threadDomainSpec } from './domain.ts'
 import { isFinalThreadDraftReason, sealThreadDraftBoundary, type ThreadHandoffDraft } from './draft.ts'
 import { advanceCreation, deriveThreadIdentity, resolveThreadId } from './identity.ts'
+import { clearLegacyCapture, needsLegacyRewrite } from './migrate.ts'
+import { checkDeliveryPresence, checkSemanticPurity, type PurityEvent } from './purity.ts'
 import {
   DEFAULT_THREAD_SETTINGS,
   THREAD_SETTINGS_NAMESPACE,
   type ThreadModelSelection,
   type ThreadSettings,
+  type ThreadLink,
+  type TargetFingerprint,
 } from './thread-types.ts'
 import type {
+  ActivateRequest,
   ActivateResult,
   AuthorizeRequest,
   AuthorizeResult,
   BeginCreationRequest,
-  LinkRequest,
+  CloneResult,
   MutationResult,
   PresetListResult,
   RecordTitleRequest,
+  ReconcileRequest,
+  ReconcileResult,
   StateResult,
   ThreadDraftRecord,
-  ThreadLink,
 } from './thread-types.ts'
 
 declare module '@deepseek-ai/cordis' {
@@ -41,16 +48,22 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
-const FORBIDDEN_PRISTINE_EVENTS = new Set([
-  'turn/start',
-  'user/message',
-  'assistant/message',
-  'assistant/attempt',
-  'tool/call',
-  'tool/result',
-  'agent/inbox/spliced',
-  'command/run',
-])
+/**
+ * Create-side error codes that no retry can fix: the deterministic target id
+ * already exists with a different cwd/preset/workspace identity. Everything
+ * else (network, internal, workspace hiccup) may simply be re-issued — the
+ * idempotent create makes that safe. The recorded error carries the upstream
+ * `code: message` shape, so matching is by code prefix.
+ */
+const TERMINAL_CREATE_CODES = [
+  'session/conflict',
+  'agent-preset/conflict',
+  'session/workspace-attach-failed',
+]
+
+function isTerminalCreateError(recorded: string): boolean {
+  return TERMINAL_CREATE_CODES.some(code => recorded === code || recorded.startsWith(`${code}:`))
+}
 
 /** Durable Thread settings schema; also the wire envelope the browser scope validates against. */
 const ThreadSettingsSchema: z<ThreadSettings> = z.object({
@@ -67,6 +80,17 @@ function copyDraft(draft: ThreadDraftRecord): ThreadDraftRecord {
 
 function errorCode(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+function fingerprintMatches(expected: TargetFingerprint, actual: TargetFingerprint): boolean {
+  return expected.createdAt === actual.createdAt
+    && expected.agentPreset === actual.agentPreset
+    && expected.workspaceId === actual.workspaceId
+    && expected.cwd === actual.cwd
+}
+
+function asPurityEvents(events: readonly SessionEvent[]): readonly PurityEvent[] {
+  return events as unknown as readonly PurityEvent[]
 }
 
 /** Shared Host authority for direct-confirmation Thread activation. */
@@ -114,6 +138,13 @@ export class ThreadGateway extends TypertRemoteService {
     const domain = await this.ctx.storageDomain.open(threadDomainSpec)
     this.draftTable = domain.table('drafts')
     this.table = domain.table('links')
+    // One durable rewrite of legacy overloaded-state records. The table schema
+    // already migrates them in memory on read; this clears the capture marker
+    // so the work is exactly-once per record and the persisted form is clean.
+    const now = Date.now()
+    for (const [linkId, link] of this.requireTable().entries()) {
+      if (needsLegacyRewrite(link)) await this.requireTable().put(linkId, clearLegacyCapture(link, now))
+    }
     this.ctx.on('session/event', (session, event) => {
       void this.enqueue(async () => {
         if (event.type === 'turn/end') await this.reconcileDrafts(session)
@@ -256,14 +287,21 @@ export class ThreadGateway extends TypertRemoteService {
         targetCwd,
         agentPreset: targetPreset,
         model,
-        title: request.title ?? null,
+        target: { phase: 'reserved', fingerprint: null },
+        title: {
+          phase: request.title === undefined ? 'not-requested' : 'pending',
+          requested: request.title ?? null,
+          accepted: null,
+          eventSeq: null,
+          failure: null,
+        },
         handoff: structuredClone(request.handoff),
         instruction: request.instruction,
-        state: 'authorized',
-        titleState: request.title === undefined ? 'not-requested' : 'pending',
-        attempt: { phase: 'prepared', handoffId: null, instructionId: null },
+        delivery: { phase: 'prepared', attempt: 0, handoffId: null, instructionId: null },
+        relation: 'pending',
         relationCommit: null,
         failure: null,
+        legacy: null,
         trace: [],
         fold: { splices: [], entries: [], turns: [], titles: [], models: [] },
         createdAt: now,
@@ -279,62 +317,296 @@ export class ThreadGateway extends TypertRemoteService {
       const link = this.requireTable().get(request.linkId)
       if (link === undefined) return { ok: false, error: 'link-not-found' }
       const decision = advanceCreation(link, request.actionId, Date.now())
-      if (!decision.ok) return { ok: false, error: decision.error, state: decision.state }
+      if (!decision.ok) return { ok: false, error: decision.error, state: decision.phase }
       if (decision.changed) await this.requireTable().put(decision.link.linkId, decision.link)
       return { ok: true, link: copyLink(decision.link) }
     })
   }
 
-  recordTitle(request: RecordTitleRequest): Promise<MutationResult> {
+  /**
+   * Establish the `published` checkpoint by probing the deterministic target
+   * id: a live agent yields header facts that are pinned as the target
+   * fingerprint (exact-matched afterwards); no live agent means the client
+   * should re-issue the idempotent create. An optional `createError` records
+   * the structured create-side failure while the probe finds nothing.
+   */
+  reconcileTarget(request: ReconcileRequest): Promise<ReconcileResult> {
     return this.enqueue(async () => {
-      const link = this.requireTable().get(request.linkId)
+      const table = this.requireTable()
+      let link = table.get(request.linkId)
       if (link === undefined) return { ok: false, error: 'link-not-found' }
-      if (link.state !== 'creating') return { ok: false, error: 'cas-failed', state: link.state }
-      const next = {
+      if (link.relation === 'active') return { ok: true, link: copyLink(link), next: 'none' }
+      if (link.target.phase === 'diverged' || link.target.phase === 'abandoned') {
+        return { ok: true, link: copyLink(link), next: 'none' }
+      }
+      const agent = this.ctx.agents.get(SessionId(link.targetSessionId))
+      if (agent === undefined) {
+        if (request.createError !== undefined && (link.target.phase === 'creating' || link.target.phase === 'reserved')) {
+          const terminal = isTerminalCreateError(request.createError)
+          const failed: ThreadLink = {
+            ...link,
+            failure: {
+              phase: 'create',
+              code: request.createError.slice(0, 300),
+              recovery: terminal ? 'clone' : 'resume',
+              detail: null,
+            },
+            updatedAt: Date.now(),
+          }
+          await table.put(failed.linkId, failed)
+          return { ok: true, link: copyLink(failed), next: terminal ? 'none' : 'create' }
+        }
+        return { ok: true, link: copyLink(link), next: 'create' }
+      }
+      if (agent.session.header.createdAt < link.createdAt) {
+        const diverged = await this.markIdentityConflict(link, 'target-created-before-authorization')
+        return { ok: false, error: 'target-created-before-authorization', link: copyLink(diverged) }
+      }
+      const actual = this.fingerprintOf(agent)
+      if (link.targetWorkspaceId !== null && actual.workspaceId === null) {
+        // Workspace attach may still be pending inside an in-flight create;
+        // the idempotent re-issue settles it. Never pin a transient null.
+        return { ok: true, link: copyLink(link), next: 'create' }
+      }
+      if (link.target.fingerprint === null) {
+        const published: ThreadLink = {
+          ...link,
+          target: { phase: 'published', fingerprint: actual },
+          failure: null,
+          trace: [...link.trace, { step: 'target-published', ok: true, detail: { ...actual } }],
+          updatedAt: Date.now(),
+        }
+        const adopted = this.adoptTitleFromLog(published, agent)
+        await table.put(adopted.linkId, adopted)
+        return { ok: true, link: copyLink(adopted), next: 'none' }
+      }
+      if (!fingerprintMatches(link.target.fingerprint, actual)) {
+        const diverged = await this.markIdentityConflict(link, 'target-identity-conflict')
+        return { ok: false, error: 'target-identity-conflict', link: copyLink(diverged) }
+      }
+      const settled: ThreadLink = {
         ...link,
-        titleState: request.ok ? 'applied' as const : 'failed' as const,
+        target: { ...link.target, phase: 'published' },
         updatedAt: Date.now(),
       }
-      await this.requireTable().put(next.linkId, next)
-      return { ok: true, link: copyLink(next) }
+      const adopted = this.adoptTitleFromLog(settled, agent)
+      if (adopted !== settled) await table.put(adopted.linkId, adopted)
+      return { ok: true, link: copyLink(adopted), next: 'none' }
     })
   }
 
-  activate(request: LinkRequest): Promise<ActivateResult> {
+  /**
+   * Record one rename outcome bound to the creation attempt that issued it.
+   * `accepted` carries the authoritative normalized title and event seq from
+   * the `session.rename` response; when the target is live the Host verifies
+   * the referenced seq really is that `session/title` event instead of
+   * trusting the client. Title failures never gate activation.
+   */
+  recordTitle(request: RecordTitleRequest): Promise<MutationResult> {
+    return this.enqueue(async () => {
+      const table = this.requireTable()
+      const link = table.get(request.linkId)
+      if (link === undefined) return { ok: false, error: 'link-not-found' }
+      if (link.creationActionId === null || request.attempt !== link.creationActionId) {
+        return { ok: false, error: 'cas-failed', state: link.target.phase }
+      }
+      if (link.title.phase === 'accepted') return { ok: true, link: copyLink(link) }
+      const outcome = request.outcome
+      const now = Date.now()
+      if (outcome.kind === 'accepted') {
+        const agent = this.ctx.agents.get(SessionId(link.targetSessionId))
+        if (agent !== undefined) {
+          const event = asPurityEvents(agent.session.events).find(item => item.seq === outcome.eventSeq)
+          if (event?.type !== 'session/title' || (event.data as { title?: unknown }).title !== outcome.title) {
+            const unknown: ThreadLink = {
+              ...link,
+              title: { ...link.title, phase: 'unknown', failure: 'title-verification-failed' },
+              trace: [...link.trace, { step: 'title-verify', ok: false, detail: { eventSeq: outcome.eventSeq } }],
+              updatedAt: now,
+            }
+            await table.put(unknown.linkId, unknown)
+            return { ok: true, link: copyLink(unknown) }
+          }
+        }
+        const accepted: ThreadLink = {
+          ...link,
+          title: {
+            phase: 'accepted',
+            requested: link.title.requested,
+            accepted: outcome.title,
+            eventSeq: outcome.eventSeq,
+            failure: null,
+          },
+          trace: [...link.trace, {
+            step: 'title-accepted',
+            ok: true,
+            detail: { eventSeq: outcome.eventSeq, verified: agent !== undefined },
+          }],
+          updatedAt: now,
+        }
+        await table.put(accepted.linkId, accepted)
+        return { ok: true, link: copyLink(accepted) }
+      }
+      const recorded: ThreadLink = {
+        ...link,
+        title: {
+          ...link.title,
+          phase: outcome.kind === 'failed' ? 'failed' : 'unknown',
+          failure: outcome.error.slice(0, 500),
+        },
+        trace: [...link.trace, { step: `title-${outcome.kind}`, ok: false, detail: { error: outcome.error } }],
+        updatedAt: now,
+      }
+      await table.put(recorded.linkId, recorded)
+      return { ok: true, link: copyLink(recorded) }
+    })
+  }
+
+  /**
+   * Deliver the Handoff into the published target under checkpointed
+   * crash-recovery semantics:
+   *
+   * 1. fingerprint identity (pin-or-exact-match) and semantic purity —
+   *    `session/title` events never count against purity;
+   * 2. persist the `submitting` checkpoint WITH the message ids BEFORE the
+   *    first inbox mutation, so every crash window is decidable by id
+   *    presence in the target log;
+   * 3. inject only the messages still missing, then flush;
+   * 4. commit `relation: active` only after both messages are durable.
+   *
+   * An `uncertain` delivery refuses to run without an explicit
+   * `redeliver` confirmation (the redelivery self-detects landed messages by
+   * id and only re-sends what is missing, so it can never duplicate).
+   */
+  activate(request: ActivateRequest): Promise<ActivateResult> {
     return this.enqueue(async () => {
       const table = this.requireTable()
       const stored = table.get(request.linkId)
       if (stored === undefined) return { ok: false, error: 'link-not-found' }
-      if (stored.state === 'active') return { ok: true, link: copyLink(stored) }
-      if (stored.state !== 'creating') return { ok: false, error: `cas-failed:${stored.state}`, link: copyLink(stored) }
+      if (stored.relation === 'active') return { ok: true, link: copyLink(stored) }
+      if (stored.target.phase === 'diverged') {
+        return { ok: false, error: 'target-diverged', link: copyLink(stored) }
+      }
+      if (stored.target.phase === 'abandoned') return { ok: false, error: 'link-abandoned', link: copyLink(stored) }
+      if (stored.target.phase !== 'published') {
+        return { ok: false, error: `target-not-published:${stored.target.phase}`, link: copyLink(stored) }
+      }
+      if (stored.delivery.phase === 'uncertain' && request.redeliver !== true) {
+        return { ok: false, error: 'delivery-uncertain', link: copyLink(stored) }
+      }
 
-      const firstCheck = this.checkTarget(stored)
-      if (!firstCheck.ok) return await this.fail(stored, firstCheck.error, firstCheck.detail)
+      const agent = this.ctx.agents.get(SessionId(stored.targetSessionId))
+      if (agent === undefined) return { ok: false, error: 'target-not-live', link: copyLink(stored) }
 
+      // Fingerprint: pin on first activation-side observation (create has
+      // provably succeeded by now), exact-match afterwards.
+      const actual = this.fingerprintOf(agent)
+      let link = stored
+      if (link.target.fingerprint === null) {
+        if (link.targetWorkspaceId !== null && actual.workspaceId === null) {
+          return { ok: false, error: 'target-workspace-mismatch', link: copyLink(link) }
+        }
+        link = {
+          ...link,
+          target: { phase: 'published', fingerprint: actual },
+          trace: [...link.trace, { step: 'target-fingerprint', ok: true, detail: { ...actual } }],
+          updatedAt: Date.now(),
+        }
+        await table.put(link.linkId, link)
+      } else if (!fingerprintMatches(link.target.fingerprint, actual)) {
+        const diverged = await this.markIdentityConflict(link, 'target-identity-conflict')
+        return { ok: false, error: 'target-identity-conflict', link: copyLink(diverged) }
+      }
+
+      const events = asPurityEvents(agent.session.events)
+      // Title adoption: a rename response may have been lost (pending/unknown);
+      // the target log's latest session/title is authoritative. Display-only,
+      // so this never gates anything.
+      const adopted = this.adoptTitleFromLog(link, agent)
+      if (adopted !== link) {
+        link = adopted
+        await table.put(link.linkId, link)
+      }
+
+      const presence = checkDeliveryPresence(events, link.delivery.handoffId, link.delivery.instructionId)
+      const midFlight = link.delivery.phase === 'submitting' || link.delivery.phase === 'uncertain'
+      if (midFlight && presence.delivered) {
+        // Our messages are in the log (flush landed before the crash, or the
+        // uncertain flush actually succeeded): commit without injecting.
+        return await this.commitDelivered(table, link, agent)
+      }
+
+      // Fresh (re)delivery: purity gates injection. Known ids exempt our own
+      // partially-landed messages from the check.
+      const known = new Set<string>()
+      if (presence.handoffPresent && link.delivery.handoffId !== null) known.add(link.delivery.handoffId)
+      if (presence.instructionPresent && link.delivery.instructionId !== null) known.add(link.delivery.instructionId)
+      const purity = checkSemanticPurity(events, known)
+      if (!purity.ok) {
+        return await this.markDiverged(table, link, purity.offending)
+      }
+      if (agent.status !== 'idle') {
+        return { ok: false, error: 'target-not-idle', link: copyLink(link) }
+      }
+
+      // Build both messages first (pure constructors mint the ids), then
+      // persist the ids BEFORE any mutation — the durable pre-injection
+      // checkpoint that makes every later crash window decidable.
+      const handoff = presence.handoffPresent ? null : createUserMessage({
+        content: [{ type: 'text', text: this.renderHandoff(link) }],
+        source: {
+          kind: 'plugin',
+          plugin: 'dsh-thread',
+          form: 'snapshot',
+          sections: [
+            { name: '目标', text: link.handoff.objective },
+            { name: '已确认结论', text: link.handoff.confirmedConclusions.join('\n') },
+            { name: '约束', text: link.handoff.constraints.join('\n') },
+            { name: '待确认', text: link.handoff.openQuestions.join('\n') },
+            ...(link.handoff.artifacts.length === 0 ? [] : [{
+              name: '产物',
+              text: link.handoff.artifacts.map(artifact => (
+                `- ${artifact.label}${artifact.uri === null ? '' : ` (${artifact.uri})`}${artifact.summary === null ? '' : `：${artifact.summary}`}`
+              )).join('\n'),
+            }]),
+          ],
+        },
+      })
+      const instruction = presence.instructionPresent ? null : createUserMessage({
+        content: [{ type: 'text', text: link.instruction }],
+        source: { kind: 'user' },
+      })
       const submitting: ThreadLink = {
-        ...stored,
-        state: 'activating',
-        attempt: { phase: 'submitting', handoffId: null, instructionId: null },
-        trace: [...stored.trace, ...firstCheck.trace],
+        ...link,
+        delivery: {
+          phase: 'submitting',
+          attempt: link.delivery.attempt + 1,
+          handoffId: handoff === null ? link.delivery.handoffId : String(handoff.id),
+          instructionId: instruction === null ? link.delivery.instructionId : String(instruction.id),
+        },
+        trace: [...link.trace, {
+          step: 'delivery-checkpoint',
+          ok: true,
+          detail: {
+            attempt: link.delivery.attempt + 1,
+            ...(handoff === null ? {} : { handoffId: String(handoff.id) }),
+            ...(instruction === null ? {} : { instructionId: String(instruction.id) }),
+          },
+        }],
         updatedAt: Date.now(),
       }
       await table.put(submitting.linkId, submitting)
 
-      // Re-resolve after the durable checkpoint. No await occurs between this
-      // final live/idle/pristine check and the first inbox mutation.
-      const finalCheck = this.checkTarget(submitting)
-      if (!finalCheck.ok) return await this.fail(submitting, finalCheck.error, finalCheck.detail)
-      const agent = finalCheck.agent
       // Carry the source Session's model onto the target before the first
       // inbox mutation: a `model/selection` event folds into the durable
       // projection, so prompt assembly resolves it. Deliberately NOT
       // `sessionRemote.selectModel` — that path also rewrites the global
       // default model and effort memory, which inheritance must not do. The
-      // append is synchronous (no await between the final pristine check and
-      // the first inbox mutation) and idempotent for an identical selection.
+      // append is synchronous (no await between the purity check and the
+      // first inbox mutation) and idempotent for an identical selection.
       if (submitting.model !== null) {
         const selection = submitting.model
-        const already = agent.session.snapshotEvents().some(event => (
+        const already = agent.session.events.some(event => (
           event.type === 'model/selection'
           && event.data.provider === selection.provider
           && event.data.model === selection.model
@@ -342,36 +614,22 @@ export class ThreadGateway extends TypertRemoteService {
         ))
         if (!already) agent.session.append('model/selection', structuredClone(selection))
       }
-      const handoff = createUserMessage({
-        content: [{ type: 'text', text: this.renderHandoff(submitting) }],
-        source: {
-          kind: 'plugin',
-          plugin: 'dsh-thread',
-          form: 'snapshot',
-          sections: [
-            { name: '目标', text: submitting.handoff.objective },
-            { name: '已确认结论', text: submitting.handoff.confirmedConclusions.join('\n') },
-            { name: '约束', text: submitting.handoff.constraints.join('\n') },
-            { name: '待确认', text: submitting.handoff.openQuestions.join('\n') },
-            ...(submitting.handoff.artifacts.length === 0 ? [] : [{
-              name: '产物',
-              text: submitting.handoff.artifacts.map(artifact => (
-                `- ${artifact.label}${artifact.uri === null ? '' : ` (${artifact.uri})`}${artifact.summary === null ? '' : `：${artifact.summary}`}`
-              )).join('\n'),
-            }]),
-          ],
-        },
-      })
-      const instruction = createUserMessage({
-        content: [{ type: 'text', text: submitting.instruction }],
-        source: { kind: 'user' },
-      })
-      agent.inject(handoff)
-      agent.followup(instruction)
+      if (handoff !== null) agent.inject(handoff)
+      if (instruction !== null) agent.followup(instruction)
 
-      const submitted: ThreadLink = {
+      try {
+        const flushed = await this.ctx.sessions.flush(agent.session)
+        if (!flushed) return await this.markUncertain(table, submitting, 'durability-unavailable')
+      } catch (error) {
+        return await this.markUncertain(table, submitting, `durability-unavailable:${errorCode(error)}`)
+      }
+
+      const now = Date.now()
+      const active: ThreadLink = {
         ...submitting,
-        attempt: { phase: 'submitting', handoffId: String(handoff.id), instructionId: String(instruction.id) },
+        delivery: { ...submitting.delivery, phase: 'flushed' },
+        relation: 'active',
+        relationCommit: { reason: 'activation-flushed', at: now },
         trace: [
           ...submitting.trace,
           ...(submitting.model === null
@@ -381,29 +639,64 @@ export class ThreadGateway extends TypertRemoteService {
                 ok: true,
                 detail: { provider: submitting.model.provider, model: submitting.model.model },
               }]),
-          { step: 'inject', ok: true, detail: { messageId: String(handoff.id) } },
-          { step: 'followup', ok: true, detail: { messageId: String(instruction.id) } },
+          { step: 'inject', ok: true, detail: { messageId: submitting.delivery.handoffId } },
+          { step: 'followup', ok: true, detail: { messageId: submitting.delivery.instructionId } },
+          { step: 'flush', ok: true },
         ],
-        updatedAt: Date.now(),
-      }
-      try {
-        const flushed = await this.ctx.sessions.flush(agent.session)
-        if (!flushed) return await this.uncertain(submitted, 'durability-unavailable')
-      } catch (error) {
-        return await this.uncertain(submitted, `durability-unavailable:${errorCode(error)}`)
-      }
-
-      const now = Date.now()
-      const active: ThreadLink = {
-        ...submitted,
-        state: 'active',
-        attempt: { ...submitted.attempt, phase: 'flushed' },
-        relationCommit: { reason: 'activation-flushed', at: now },
-        trace: [...submitted.trace, { step: 'flush', ok: true }],
         updatedAt: now,
       }
       await table.put(active.linkId, active)
       return { ok: true, link: copyLink(active) }
+    })
+  }
+
+  /** Clone one link's sealed content into a fresh Draft identity (new Draft id, hence new Link and target). */
+  cloneDraft(request: { linkId: string }): Promise<CloneResult> {
+    return this.enqueue(async () => {
+      const table = this.requireTable()
+      const link = table.get(request.linkId)
+      if (link === undefined) return { ok: false, error: 'link-not-found' }
+      const draftTable = this.requireDraftTable()
+      const source = draftTable.get(link.draftId)
+      const now = Date.now()
+      const draftId = `${link.draftId}-clone-${now.toString(36)}-${randomBytes(4).toString('hex')}`
+      const draft: ThreadDraftRecord = {
+        draftId,
+        version: 1,
+        sourceSessionId: link.sourceSessionId,
+        sourceAnchor: source?.sourceAnchor ?? { kind: 'latest-complete-turn' },
+        sourceBoundarySeq: source?.sourceBoundarySeq ?? null,
+        sourceTurn: source?.sourceTurn ?? null,
+        status: 'editable',
+        handoff: structuredClone(link.handoff),
+        instruction: link.instruction,
+        suggestedPreset: null,
+        targetTitle: link.title.requested,
+        createdAt: now,
+        updatedAt: now,
+      }
+      await draftTable.put(draftId, draft)
+      return { ok: true, draft: copyDraft(draft) }
+    })
+  }
+
+  /** Cancel a not-yet-delivered authorization; the target (if any) stays a normal Session. */
+  abandon(request: { linkId: string }): Promise<MutationResult> {
+    return this.enqueue(async () => {
+      const table = this.requireTable()
+      const link = table.get(request.linkId)
+      if (link === undefined) return { ok: false, error: 'link-not-found' }
+      if (link.relation === 'active') return { ok: false, error: 'cas-failed', state: link.relation }
+      if (link.delivery.phase !== 'prepared') return { ok: false, error: 'cas-failed', state: link.delivery.phase }
+      const abandoned: ThreadLink = {
+        ...link,
+        target: { ...link.target, phase: 'abandoned' },
+        relation: 'abandoned',
+        failure: null,
+        updatedAt: Date.now(),
+      }
+      await table.put(abandoned.linkId, abandoned)
+      return { ok: true, link: copyLink(abandoned) }
     })
   }
 
@@ -421,7 +714,7 @@ export class ThreadGateway extends TypertRemoteService {
       if (!request.draftId.startsWith(`header-${request.sourceSessionId}-`)) return 'draft-not-found'
       const agent = this.ctx.agents.get(SessionId(request.sourceSessionId))
       if (agent === undefined) return 'source-not-live'
-      const boundary = agent.session.snapshotEvents().findLast(event => (
+      const boundary = agent.session.events.findLast(event => (
         event.type === 'turn/end' && isFinalThreadDraftReason(event.data.reason.kind)
       ))
       if (boundary?.type !== 'turn/end') return 'source-has-no-complete-turn'
@@ -460,7 +753,7 @@ export class ThreadGateway extends TypertRemoteService {
     // the Link; re-confirmation is idempotent over the durable record.
     return link.sourceSessionId === request.sourceSessionId
       && link.draftVersion === request.draftVersion
-      && link.title === (request.title ?? null)
+      && link.title.requested === (request.title ?? null)
       && link.instruction === request.instruction
       && JSON.stringify(link.handoff) === JSON.stringify(request.handoff)
   }
@@ -476,10 +769,114 @@ export class ThreadGateway extends TypertRemoteService {
         ...(link.targetWorkspaceId === null ? {} : { workspaceId: link.targetWorkspaceId }),
         ...(link.targetCwd === null ? {} : { cwd: link.targetCwd }),
       },
-      ...(link.title === null
+      ...(link.title.requested === null
         ? {}
-        : { titlePlan: { sessionId: link.targetSessionId, title: link.title } }),
+        : { titlePlan: { sessionId: link.targetSessionId, title: link.title.requested } }),
     }
+  }
+
+  private fingerprintOf(agent: Agent): TargetFingerprint {
+    const header = agent.session.header
+    const workspace = this.ctx.workspaceRegistry.list().find(item => item.sessionIds.includes(agent.session.id))
+    return {
+      createdAt: header.createdAt,
+      agentPreset: header.agentPreset ?? null,
+      workspaceId: workspace === undefined ? null : String(workspace.id),
+      cwd: header.cwd ?? null,
+    }
+  }
+
+  /**
+   * Adopt the authoritative title for a pending/unknown title saga from the
+   * target log's latest `session/title` event. Never touches accepted/failed
+   * phases; returns the same link when there is nothing to adopt.
+   */
+  private adoptTitleFromLog(link: ThreadLink, agent: Agent): ThreadLink {
+    if (link.title.phase !== 'pending' && link.title.phase !== 'unknown') return link
+    const titles = asPurityEvents(agent.session.events)
+      .filter(event => event.type === 'session/title') as Array<PurityEvent & { data: { title: string } }>
+    const last = titles[titles.length - 1]
+    if (last === undefined) return link
+    return {
+      ...link,
+      title: {
+        phase: 'accepted',
+        requested: link.title.requested,
+        accepted: last.data.title,
+        eventSeq: last.seq,
+        failure: null,
+      },
+      trace: [...link.trace, { step: 'title-adopted', ok: true, detail: { eventSeq: last.seq } }],
+      updatedAt: Date.now(),
+    }
+  }
+
+  private async markIdentityConflict(link: ThreadLink, code: string): Promise<ThreadLink> {
+    const diverged: ThreadLink = {
+      ...link,
+      target: { ...link.target, phase: 'diverged' },
+      failure: { phase: 'create', code, recovery: 'clone', detail: null },
+      trace: [...link.trace, { step: code, ok: false, detail: { fingerprint: link.target.fingerprint } }],
+      updatedAt: Date.now(),
+    }
+    await this.requireTable().put(diverged.linkId, diverged)
+    return diverged
+  }
+
+  private async markDiverged(
+    table: KvTable<string, ThreadLink>,
+    link: ThreadLink,
+    offending: string,
+  ): Promise<ActivateResult> {
+    const diverged: ThreadLink = {
+      ...link,
+      target: { ...link.target, phase: 'diverged' },
+      failure: { phase: 'activate', code: 'target-diverged', recovery: 'open-target', detail: { offending } },
+      trace: [...link.trace, { step: 'target-diverged', ok: false, detail: { offending } }],
+      updatedAt: Date.now(),
+    }
+    await table.put(diverged.linkId, diverged)
+    return { ok: false, error: 'target-diverged', link: copyLink(diverged) }
+  }
+
+  private async markUncertain(
+    table: KvTable<string, ThreadLink>,
+    link: ThreadLink,
+    code: string,
+  ): Promise<ActivateResult> {
+    const uncertain: ThreadLink = {
+      ...link,
+      delivery: { ...link.delivery, phase: 'uncertain' },
+      failure: { phase: 'flush', code: code.slice(0, 300), recovery: 'resume', detail: null },
+      trace: [...link.trace, { step: 'flush', ok: false, detail: { failure: code } }],
+      updatedAt: Date.now(),
+    }
+    await table.put(uncertain.linkId, uncertain)
+    return { ok: false, error: code, link: copyLink(uncertain) }
+  }
+
+  private async commitDelivered(
+    table: KvTable<string, ThreadLink>,
+    link: ThreadLink,
+    agent: Agent,
+  ): Promise<ActivateResult> {
+    try {
+      const flushed = await this.ctx.sessions.flush(agent.session)
+      if (!flushed) return await this.markUncertain(table, link, 'durability-unavailable')
+    } catch (error) {
+      return await this.markUncertain(table, link, `durability-unavailable:${errorCode(error)}`)
+    }
+    const now = Date.now()
+    const active: ThreadLink = {
+      ...link,
+      delivery: { ...link.delivery, phase: 'flushed' },
+      relation: 'active',
+      relationCommit: { reason: 'activation-flushed', at: now },
+      trace: [...link.trace, { step: 'delivery-reconciled', ok: true }, { step: 'flush', ok: true }],
+      updatedAt: now,
+    }
+    await table.put(active.linkId, active)
+    return { ok: true, link: copyLink(active) }
   }
 
   private async reconcileDrafts(session: Session): Promise<void> {
@@ -487,7 +884,7 @@ export class ThreadGateway extends TypertRemoteService {
     const sourceSessionId = String(session.id)
     for (const [draftId, draft] of table.entries()) {
       if (draft.sourceSessionId !== sourceSessionId || draft.status !== 'waiting-boundary') continue
-      const next = sealThreadDraftBoundary(draft, session.snapshotEvents(), Date.now())
+      const next = sealThreadDraftBoundary(draft, session.events, Date.now())
       if (next !== draft) await table.put(draftId, next)
     }
   }
@@ -524,92 +921,6 @@ export class ThreadGateway extends TypertRemoteService {
       return
     }
     await table.put(linkId, { ...link, fold, updatedAt: Date.now() })
-  }
-
-  private checkTarget(link: ThreadLink):
-    | { ok: true; agent: Agent; trace: ThreadLink['trace'] }
-    | { ok: false; error: string; detail: Record<string, unknown> } {
-    const agent = this.ctx.agents.get(SessionId(link.targetSessionId))
-    if (agent === undefined) return { ok: false, error: 'target-not-live', detail: {} }
-    if (agent.status !== 'idle') {
-      return { ok: false, error: 'target-not-idle', detail: { status: agent.status } }
-    }
-    if (link.targetWorkspaceId !== null) {
-      const workspace = this.ctx.workspaceRegistry.list().find(item => String(item.id) === link.targetWorkspaceId)
-      if (workspace === undefined || !workspace.sessionIds.includes(agent.session.id)) {
-        return {
-          ok: false,
-          error: 'target-workspace-mismatch',
-          detail: { expectedWorkspaceId: link.targetWorkspaceId },
-        }
-      }
-    } else if (link.targetCwd !== null && agent.session.header.cwd !== link.targetCwd) {
-      return {
-        ok: false,
-        error: 'target-workspace-mismatch',
-        detail: { expectedCwd: link.targetCwd, actualCwd: agent.session.header.cwd ?? null },
-      }
-    }
-    const events = agent.session.snapshotEvents()
-    const counts: Record<string, number> = {}
-    for (const event of events) counts[event.type] = (counts[event.type] ?? 0) + 1
-    for (const type of FORBIDDEN_PRISTINE_EVENTS) {
-      if ((counts[type] ?? 0) > 0) return { ok: false, error: 'target-not-pristine', detail: { offending: type } }
-    }
-    const titles = events.filter(event => event.type === 'session/title')
-    if (link.titleState === 'applied') {
-      const title = titles[0]
-      if (titles.length !== 1 || title?.type !== 'session/title' || title.data.title !== link.title) {
-        return { ok: false, error: 'target-not-pristine', detail: { offending: 'session/title' } }
-      }
-    } else if (titles.length !== 0) {
-      return { ok: false, error: 'target-not-pristine', detail: { offending: 'session/title-unexpected' } }
-    }
-    return {
-      ok: true,
-      agent,
-      trace: [
-        { step: 'agent-live', ok: true },
-        { step: 'agent-idle', ok: true },
-        {
-          step: 'target-workspace',
-          ok: true,
-          detail: link.targetWorkspaceId === null
-            ? { cwd: link.targetCwd }
-            : { workspaceId: link.targetWorkspaceId },
-        },
-        { step: 'target-pristine', ok: true, detail: { counts } },
-      ],
-    }
-  }
-
-  private async fail(
-    link: ThreadLink,
-    failure: string,
-    detail: Record<string, unknown>,
-  ): Promise<ActivateResult> {
-    const failed: ThreadLink = {
-      ...link,
-      state: 'failed',
-      failure,
-      trace: [...link.trace, { step: failure, ok: false, detail }],
-      updatedAt: Date.now(),
-    }
-    await this.requireTable().put(failed.linkId, failed)
-    return { ok: false, error: failure, link: copyLink(failed) }
-  }
-
-  private async uncertain(link: ThreadLink, failure: string): Promise<ActivateResult> {
-    const uncertain: ThreadLink = {
-      ...link,
-      state: 'uncertain',
-      failure,
-      attempt: { ...link.attempt, phase: 'uncertain' },
-      trace: [...link.trace, { step: 'flush', ok: false, detail: { failure } }],
-      updatedAt: Date.now(),
-    }
-    await this.requireTable().put(uncertain.linkId, uncertain)
-    return { ok: false, error: failure, link: copyLink(uncertain) }
   }
 
   private renderHandoff(link: ThreadLink): string {

@@ -31,7 +31,8 @@ function link(
     targetCwd: null,
     agentPreset: 'standard',
     model: null,
-    title: null,
+    target: { phase: 'published', fingerprint: null },
+    title: { phase: 'not-requested', requested: null, accepted: null, eventSeq: null, failure: null },
     handoff: {
       objective: 'continue',
       confirmedConclusions: [],
@@ -40,11 +41,11 @@ function link(
       artifacts,
     },
     instruction: 'continue',
-    state: 'active',
-    titleState: 'not-requested',
-    attempt: { phase: 'flushed', handoffId: 'handoff-1', instructionId: 'instruction-1' },
+    delivery: { phase: 'flushed', attempt: 1, handoffId: 'handoff-1', instructionId: 'instruction-1' },
+    relation: 'active',
     relationCommit: { at: createdAt + 1, reason: 'activation-flushed' },
     failure: null,
+    legacy: null,
     trace: [],
     fold: { splices: [], entries: [], turns: [], titles: [], models: [] },
     createdAt,
@@ -67,10 +68,13 @@ test('groups connected links into stage-ordered Thread components', () => {
 })
 
 test('excludes uncommitted links and empty components never appear', () => {
-  const pending = link('ab', 'a', 'b')
-  pending.state = 'authorized'
-  pending.attempt = { phase: 'prepared', handoffId: null, instructionId: null }
-  pending.relationCommit = null
+  const pending: ThreadLink = {
+    ...link('ab', 'a', 'b'),
+    target: { phase: 'reserved', fingerprint: null },
+    delivery: { phase: 'prepared', attempt: 0, handoffId: null, instructionId: null },
+    relation: 'pending',
+    relationCommit: null,
+  }
   assert.deepEqual(deriveThreadGroups([pending]), [])
   assert.deepEqual(deriveThreadGroups([]), [])
 })

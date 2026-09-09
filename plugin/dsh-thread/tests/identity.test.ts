@@ -3,7 +3,7 @@ import test from 'node:test'
 import { advanceCreation, deriveThreadId, deriveThreadIdentity, resolveThreadId } from '../src/identity.ts'
 import type { ThreadLink } from '../src/thread-types.ts'
 
-function authorizedLink(): ThreadLink {
+function reservedLink(): ThreadLink {
   return {
     linkId: 'link-1',
     threadId: 'thread-root-1',
@@ -15,16 +15,17 @@ function authorizedLink(): ThreadLink {
     creationActionId: null,
     targetWorkspaceId: 'workspace-1',
     targetCwd: null,
-    agentPreset: 'standard-thread',
+    agentPreset: 'cordis',
     model: null,
-    title: null,
+    target: { phase: 'reserved', fingerprint: null },
+    title: { phase: 'not-requested', requested: null, accepted: null, eventSeq: null, failure: null },
     handoff: { objective: 'continue', confirmedConclusions: [], constraints: [], openQuestions: [], artifacts: [] },
     instruction: 'continue',
-    state: 'authorized',
-    titleState: 'not-requested',
-    attempt: { phase: 'prepared', handoffId: null, instructionId: null },
+    delivery: { phase: 'prepared', attempt: 0, handoffId: null, instructionId: null },
+    relation: 'pending',
     relationCommit: null,
     failure: null,
+    legacy: null,
     trace: [],
     fold: { splices: [], entries: [], turns: [], titles: [], models: [] },
     createdAt: 1,
@@ -47,7 +48,7 @@ test('derives and inherits one Thread id across connected Sessions', () => {
   const root = resolveThreadId('source-1', [])
   assert.deepEqual(root, { ok: true, threadId: deriveThreadId('source-1') })
 
-  const first = authorizedLink()
+  const first = reservedLink()
   assert.deepEqual(resolveThreadId('target-1', [first]), { ok: true, threadId: first.threadId })
   assert.deepEqual(resolveThreadId('source-1', [first]), { ok: true, threadId: first.threadId })
 
@@ -59,9 +60,9 @@ test('derives and inherits one Thread id across connected Sessions', () => {
 })
 
 test('rejects conflicting Thread ids in one connected component', () => {
-  const first = authorizedLink()
+  const first = reservedLink()
   const second: ThreadLink = {
-    ...authorizedLink(),
+    ...reservedLink(),
     linkId: 'link-2',
     threadId: 'thread-root-2',
     sourceSessionId: 'target-1',
@@ -76,11 +77,11 @@ test('rejects conflicting Thread ids in one connected component', () => {
 })
 
 test('single-flights creation by direct-click actionId', () => {
-  const first = advanceCreation(authorizedLink(), 'action-1', 2)
+  const first = advanceCreation(reservedLink(), 'action-1', 2)
   assert.equal(first.ok, true)
   if (!first.ok) return
   assert.equal(first.changed, true)
-  assert.equal(first.link.state, 'creating')
+  assert.equal(first.link.target.phase, 'creating')
   assert.equal(first.link.creationActionId, 'action-1')
 
   const transportRetry = advanceCreation(first.link, 'action-1', 3)
@@ -89,5 +90,52 @@ test('single-flights creation by direct-click actionId', () => {
   assert.equal(transportRetry.changed, false)
 
   const secondClick = advanceCreation(first.link, 'action-2', 4)
-  assert.deepEqual(secondClick, { ok: false, error: 'creation-in-flight', state: 'creating' })
+  assert.deepEqual(secondClick, { ok: false, error: 'creation-in-flight', phase: 'creating' })
+})
+
+test('a recorded create failure re-arms the creation fence (no fake retry dead-end)', () => {
+  const inFlight = advanceCreation(reservedLink(), 'action-1', 2)
+  assert.equal(inFlight.ok, true)
+  if (!inFlight.ok) return
+  const failed: ThreadLink = {
+    ...inFlight.link,
+    failure: { phase: 'create', code: 'gateway/internal: boom', recovery: 'resume', detail: null },
+  }
+  const retry = advanceCreation(failed, 'action-2', 5)
+  assert.equal(retry.ok, true)
+  if (!retry.ok) return
+  assert.equal(retry.changed, true)
+  assert.equal(retry.link.creationActionId, 'action-2')
+  assert.equal(retry.link.failure, null)
+})
+
+test('published, diverged, and active targets need no creation checkpoint', () => {
+  for (const phase of ['published', 'diverged'] as const) {
+    const decision = advanceCreation({ ...reservedLink(), target: { phase, fingerprint: null } }, 'action-9', 2)
+    assert.equal(decision.ok, true)
+    if (decision.ok) assert.equal(decision.changed, false)
+  }
+  const active: ThreadLink = {
+    ...reservedLink(),
+    target: { phase: 'published', fingerprint: { createdAt: 1, agentPreset: 'cordis', workspaceId: 'w', cwd: null } },
+    delivery: { phase: 'flushed', attempt: 1, handoffId: 'h', instructionId: 'i' },
+    relation: 'active',
+    relationCommit: { reason: 'activation-flushed', at: 2 },
+  }
+  const decision = advanceCreation(active, 'action-9', 3)
+  assert.equal(decision.ok, true)
+  if (decision.ok) assert.equal(decision.changed, false)
+})
+
+test('abandoned authorizations reject creation outright', () => {
+  const abandoned: ThreadLink = {
+    ...reservedLink(),
+    target: { phase: 'abandoned', fingerprint: null },
+    relation: 'abandoned',
+  }
+  assert.deepEqual(advanceCreation(abandoned, 'action-1', 2), {
+    ok: false,
+    error: 'link-abandoned',
+    phase: 'abandoned',
+  })
 })
