@@ -74,6 +74,8 @@ export function resolveRuntimeRegistries(
   add(env.npm_config_registry)
   add(env.NPM_CONFIG_REGISTRY)
   if (npmrcText !== undefined) add(readNpmrcRegistry(npmrcText))
+  // Tests and air-gapped hosts pin one registry; do not leak to public npm.
+  if (env.DSH_RUNTIME_REGISTRY_ONLY === '1') return out
   add(NPMMIRROR_REGISTRY)
   add(NPMJS_REGISTRY)
   return out
@@ -182,4 +184,24 @@ export function planAtomicUpdateReady(input: {
   if (!input.zipReady) return 'wait-zip'
   if (!input.runtimeReady) return 'wait-runtime'
   return 'ready'
+}
+
+/** Slim-zip platforms must have both payloads; NSIS already bundles the tar. */
+export function planDownloadUpdateReady(input: {
+  platform: string
+  zipPath: string | undefined
+  runtimeReady: boolean
+}): 'ready' | 'wait-zip' | 'wait-runtime' {
+  return planAtomicUpdateReady({
+    zipReady: input.platform !== 'darwin' || Boolean(input.zipPath),
+    runtimeReady: input.platform !== 'darwin' || input.runtimeReady,
+  })
+}
+
+export function planInstallUpdate(input: {
+  platform: string
+  runtimeReady: boolean
+}): 'install' | 'refuse-runtime' {
+  if (input.platform === 'darwin' && !input.runtimeReady) return 'refuse-runtime'
+  return 'install'
 }

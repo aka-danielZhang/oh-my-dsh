@@ -20,6 +20,8 @@ import {
   runtimeRevisionAssetName,
   isRuntimePayloadReady,
   planAtomicUpdateReady,
+  planDownloadUpdateReady,
+  planInstallUpdate,
   splitFileIntoChunks,
 } from './runtime-registry.ts'
 
@@ -78,6 +80,14 @@ describe('resolveRuntimeRegistries', () => {
     assert.equal(readNpmrcRegistry('# hi\n; no\nregistry = "https://r.example/"\n'), 'https://r.example')
     assert.equal(readNpmrcRegistry('legacy-peer-deps=true\n'), undefined)
   })
+
+  it('DSH_RUNTIME_REGISTRY_ONLY skips public npm mirrors', () => {
+    const urls = resolveRuntimeRegistries({
+      DSH_RUNTIME_REGISTRY: 'http://127.0.0.1:9',
+      DSH_RUNTIME_REGISTRY_ONLY: '1',
+    })
+    assert.deepEqual(urls, ['http://127.0.0.1:9'])
+  })
 })
 
 describe('runtime revision parsing', () => {
@@ -109,6 +119,28 @@ describe('atomic update ready', () => {
     assert.equal(isRuntimePayloadReady({ okMatches: false, shaDirReady: false }), false)
     assert.equal(isRuntimePayloadReady({ okMatches: false, shaDirReady: true }), true)
     assert.equal(isRuntimePayloadReady({ okMatches: true, shaDirReady: false }), true)
+  })
+
+  it('mac download/install wait for both payloads; Windows does not prestage', () => {
+    assert.equal(
+      planDownloadUpdateReady({ platform: 'darwin', zipPath: undefined, runtimeReady: true }),
+      'wait-zip',
+    )
+    assert.equal(
+      planDownloadUpdateReady({ platform: 'darwin', zipPath: '/tmp/update.zip', runtimeReady: false }),
+      'wait-runtime',
+    )
+    assert.equal(
+      planDownloadUpdateReady({ platform: 'darwin', zipPath: '/tmp/update.zip', runtimeReady: true }),
+      'ready',
+    )
+    assert.equal(
+      planDownloadUpdateReady({ platform: 'win32', zipPath: undefined, runtimeReady: false }),
+      'ready',
+    )
+    assert.equal(planInstallUpdate({ platform: 'darwin', runtimeReady: false }), 'refuse-runtime')
+    assert.equal(planInstallUpdate({ platform: 'darwin', runtimeReady: true }), 'install')
+    assert.equal(planInstallUpdate({ platform: 'win32', runtimeReady: false }), 'install')
   })
 })
 

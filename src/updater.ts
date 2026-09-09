@@ -18,7 +18,8 @@ import {
 import {
   fetchRuntimeRevisionFromUrls,
   isRuntimePayloadReady,
-  planAtomicUpdateReady,
+  planDownloadUpdateReady,
+  planInstallUpdate,
 } from './runtime-registry.ts'
 import {
   electronProxyRules,
@@ -235,9 +236,10 @@ export async function downloadUpdate(): Promise<void> {
       setUpdateStatus({ phase: 'available', version: info.version, notes: lastUpdateNotes })
       return
     }
-    const cutover = planAtomicUpdateReady({
-      zipReady: process.platform !== 'darwin' || downloadedFile !== undefined,
-      runtimeReady: process.platform !== 'darwin' || stagedRuntimeReady(),
+    const cutover = planDownloadUpdateReady({
+      platform: process.platform,
+      zipPath: downloadedFile,
+      runtimeReady: stagedRuntimeReady(),
     })
     if (cutover !== 'ready') {
       throw new Error(`update payloads incomplete (${cutover})`)
@@ -379,7 +381,7 @@ export function cancelUpdate(): void {
 }
 
 export function installUpdate(): never {
-  if (process.platform === 'darwin' && !stagedRuntimeReady()) {
+  if (planInstallUpdate({ platform: process.platform, runtimeReady: stagedRuntimeReady() }) !== 'install') {
     throw new Error('refusing to install: matching runtime is not staged')
   }
   const expected = claimUpdateInstall()

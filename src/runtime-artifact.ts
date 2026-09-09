@@ -204,7 +204,7 @@ export function downloadRuntimeFromNpm(input: {
         const payload = path.join(work, `chunk-${String(index)}.bin`)
         try {
           console.log(`dsh-desktop: downloading runtime ${triple} chunk ${String(index)} from ${registry}`)
-          downloadUrlToFile(url, tgz, env)
+          downloadUrlToFile(url, tgz, env, { retryAllErrors: false })
           extractNpmPayload(tgz, payload)
           parts.push(payload)
         } catch {
@@ -250,7 +250,7 @@ export async function downloadRuntimeFromNpmAsync(input: {
         const payload = path.join(work, `chunk-${String(index)}.bin`)
         try {
           console.log(`dsh-desktop: pre-staging runtime ${triple} chunk ${String(index)} from ${registry}`)
-          await downloadUrlToFileAsync(url, tgz, input.onBytes, input.signal, env)
+          await downloadUrlToFileAsync(url, tgz, input.onBytes, input.signal, env, { retryAllErrors: false })
           extractNpmPayload(tgz, payload)
           parts.push(payload)
         } catch (error) {
@@ -329,9 +329,38 @@ export function probeDarwinSystemProxy(): string | undefined {
   return parseScutilProxy(result.stdout)
 }
 
-export function curlDownloadArgs(url: string, tmp: string, proxy?: string): string[] {
-  const args = ['-fL', '--retry', '5', '--retry-all-errors', '--connect-timeout', '30', '-C', '-', '-o', tmp]
-  if (proxy !== undefined && proxy !== '') args.push('-x', proxy)
+const PROXY_ENV_KEYS = ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy'] as const
+
+export function isLoopbackDownloadUrl(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.replace(/^\[|\]$/g, '')
+    return host === '127.0.0.1' || host === 'localhost' || host === '::1'
+  } catch {
+    return false
+  }
+}
+
+/** Loopback must not inherit HTTP(S)_PROXY / ALL_PROXY or curl hangs on 127.0.0.1. */
+export function curlSpawnEnv(env: NodeJS.ProcessEnv, url: string): NodeJS.ProcessEnv {
+  if (!isLoopbackDownloadUrl(url)) return env
+  const next: NodeJS.ProcessEnv = { ...env }
+  for (const key of PROXY_ENV_KEYS) delete next[key]
+  next.NO_PROXY = '127.0.0.1,localhost,::1'
+  next.no_proxy = '127.0.0.1,localhost,::1'
+  return next
+}
+
+export function curlDownloadArgs(
+  url: string,
+  tmp: string,
+  proxy?: string,
+  options?: { retryAllErrors?: boolean },
+): string[] {
+  const args = ['-fL', '--retry', '5']
+  if (options?.retryAllErrors !== false) args.push('--retry-all-errors')
+  args.push('--connect-timeout', '30', '-C', '-', '-o', tmp)
+  const useProxy = proxy !== undefined && proxy !== '' && !isLoopbackDownloadUrl(url)
+  if (useProxy) args.push('-x', proxy)
   args.push(url)
   return args
 }
@@ -345,13 +374,19 @@ function readProxyUrlFromProbe(env: NodeJS.ProcessEnv): string | undefined {
   return probeDarwinSystemProxy()
 }
 
-export function downloadUrlToFile(url: string, dest: string, env: NodeJS.ProcessEnv = process.env): void {
+export function downloadUrlToFile(
+  url: string,
+  dest: string,
+  env: NodeJS.ProcessEnv = process.env,
+  options?: { retryAllErrors?: boolean },
+): void {
   fs.mkdirSync(path.dirname(dest), { recursive: true })
   const tmp = `${dest}.part`
-  const proxy = downloadProxy(env)
-  const result = spawnSync('curl', curlDownloadArgs(url, tmp, proxy), {
+  const proxy = isLoopbackDownloadUrl(url) ? undefined : downloadProxy(env)
+  const result = spawnSync('curl', curlDownloadArgs(url, tmp, proxy, options), {
     stdio: 'inherit',
     windowsHide: true,
+    env: curlSpawnEnv(env, url),
   })
   if (result.status !== 0) {
     throw new Error(`download failed (${String(result.status)}): ${url}`)
@@ -429,14 +464,16 @@ export function downloadUrlToFileAsync(
   onBytes?: (bytes: number) => void,
   signal?: AbortSignal,
   env: NodeJS.ProcessEnv = process.env,
+  options?: { retryAllErrors?: boolean },
 ): Promise<void> {
   fs.mkdirSync(path.dirname(dest), { recursive: true })
   const tmp = `${dest}.part`
-  const proxy = downloadProxy(env)
+  const proxy = isLoopbackDownloadUrl(url) ? undefined : downloadProxy(env)
   return new Promise((resolve, reject) => {
-    const child = spawn('curl', curlDownloadArgs(url, tmp, proxy), {
+    const child = spawn('curl', curlDownloadArgs(url, tmp, proxy, options), {
       stdio: 'ignore',
       windowsHide: true,
+      env: curlSpawnEnv(env, url),
     })
     const reporter = onBytes === undefined
       ? undefined

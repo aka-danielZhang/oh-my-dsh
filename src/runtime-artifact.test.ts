@@ -8,7 +8,9 @@ import { spawnSync } from 'node:child_process'
 import { releaseRuntimeDir, setStartBackgroundRuntimeFetchForTests } from './runtime.ts'
 import {
   curlDownloadArgs,
+  curlSpawnEnv,
   decideRuntimeSource,
+  isLoopbackDownloadUrl,
   findUsableRuntimeDir,
   latestMacYml,
   patchUpdaterYml,
@@ -351,6 +353,40 @@ describe('curlDownloadArgs', () => {
     const args = curlDownloadArgs('https://example.com/a.tar.gz', '/tmp/a.part')
     assert.equal(args.includes('-x'), false)
     assert.ok(args.includes('-C'))
+  })
+
+  it('never proxies loopback even when -x would otherwise be set', () => {
+    const args = curlDownloadArgs('http://127.0.0.1:9/a.tgz', '/tmp/a.part', 'http://127.0.0.1:7890')
+    assert.equal(args.includes('-x'), false)
+    assert.ok(args.includes('http://127.0.0.1:9/a.tgz'))
+  })
+
+  it('can skip --retry-all-errors so a trailing npm 404 ends the chunk loop', () => {
+    const args = curlDownloadArgs('http://127.0.0.1:9/a.tgz', '/tmp/a.part', undefined, { retryAllErrors: false })
+    assert.equal(args.includes('--retry-all-errors'), false)
+    assert.ok(args.includes('--retry'))
+  })
+})
+
+describe('loopback curl env', () => {
+  it('recognizes loopback hosts', () => {
+    assert.equal(isLoopbackDownloadUrl('http://127.0.0.1:8123/x'), true)
+    assert.equal(isLoopbackDownloadUrl('http://localhost/x'), true)
+    assert.equal(isLoopbackDownloadUrl('http://[::1]/x'), true)
+    assert.equal(isLoopbackDownloadUrl('https://registry.npmmirror.com/x'), false)
+  })
+
+  it('strips proxy vars for loopback and leaves remote env alone', () => {
+    const env = {
+      PATH: '/bin',
+      HTTP_PROXY: 'http://127.0.0.1:9',
+      ALL_PROXY: 'http://127.0.0.1:9',
+    }
+    const loopback = curlSpawnEnv(env, 'http://127.0.0.1:1/a.tgz')
+    assert.equal(loopback.HTTP_PROXY, undefined)
+    assert.equal(loopback.ALL_PROXY, undefined)
+    assert.equal(loopback.NO_PROXY, '127.0.0.1,localhost,::1')
+    assert.equal(curlSpawnEnv(env, 'https://example.com/a.tgz'), env)
   })
 })
 
