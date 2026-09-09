@@ -125,10 +125,12 @@ describe('installRailClearance', () => {
     observe(): void { this.observing = true }
     disconnect(): void { this.disconnected = true }
   }
-  function stubDoc(railControls: unknown) {
+  function stubDoc() {
     const props = new Map<string, string>()
+    let controls: unknown = null
     return {
       props,
+      setControls(el: unknown): void { controls = el },
       doc: {
         defaultView: { ResizeObserver: StubResizeObserver, MutationObserver: StubMutationObserver },
         documentElement: {
@@ -137,7 +139,7 @@ describe('installRailClearance', () => {
             removeProperty: (k: string): void => { props.delete(k) },
           },
         },
-        querySelector: (selector: string): unknown => (selector === '[data-desktop-rail-controls]' ? railControls : null),
+        querySelector: (selector: string): unknown => (selector === '[data-desktop-rail-controls]' ? controls : null),
       },
     }
   }
@@ -151,8 +153,10 @@ describe('installRailClearance', () => {
 
   it('publishes the measured edge and observes the container', () => {
     StubResizeObserver.instances = []
+    StubMutationObserver.instances = []
     const { el } = stubControls(350.4)
-    const { doc, props } = stubDoc(el)
+    const { doc, props, setControls } = stubDoc()
+    setControls(el)
     installRailClearance(doc as unknown as Document)
     assert.equal(props.get(RAIL_CLEARANCE_VAR), '359px')
     assert.equal(StubResizeObserver.instances.length, 1)
@@ -160,40 +164,77 @@ describe('installRailClearance', () => {
   })
   it('republishes when the controls resize (updater/bell mount or unmount)', () => {
     StubResizeObserver.instances = []
+    StubMutationObserver.instances = []
     const { el, setRight } = stubControls(200)
-    const { doc, props } = stubDoc(el)
+    const { doc, props, setControls } = stubDoc()
+    setControls(el)
     installRailClearance(doc as unknown as Document)
     assert.equal(props.get(RAIL_CLEARANCE_VAR), '208px')
     setRight(350)
     StubResizeObserver.instances[0].callback()
     assert.equal(props.get(RAIL_CLEARANCE_VAR), '358px')
   })
-  it('removes the variable and disconnects on dispose', () => {
+  it('removes the variable and disconnects both observers on dispose', () => {
     StubResizeObserver.instances = []
+    StubMutationObserver.instances = []
     const { el } = stubControls(350)
-    const { doc, props } = stubDoc(el)
+    const { doc, props, setControls } = stubDoc()
+    setControls(el)
     const dispose = installRailClearance(doc as unknown as Document)
     assert.ok(props.has(RAIL_CLEARANCE_VAR))
     dispose()
     assert.ok(!props.has(RAIL_CLEARANCE_VAR), 'the effect must not leak its variable into the next mount')
     assert.equal(StubResizeObserver.instances[0].disconnected, true)
+    assert.equal(StubMutationObserver.instances[0].disconnected, true)
   })
   it('waits for the slot-rendered container when absent at apply time', () => {
     StubResizeObserver.instances = []
     StubMutationObserver.instances = []
-    let railControls: unknown = null
     const { el } = stubControls(300)
-    const base = stubDoc(null)
-    const doc = { ...base.doc, querySelector: (selector: string): unknown => (selector === '[data-desktop-rail-controls]' ? railControls : null) }
+    const { doc, props, setControls } = stubDoc()
     const dispose = installRailClearance(doc as unknown as Document)
-    assert.ok(!base.props.has(RAIL_CLEARANCE_VAR), 'nothing published before the container exists')
-    assert.ok(StubMutationObserver.instances[0].observing, 'a boot observer watches for the slot render')
-    railControls = el
+    assert.ok(!props.has(RAIL_CLEARANCE_VAR), 'nothing published before the container exists')
+    assert.ok(StubMutationObserver.instances[0].observing, 'a watch observer waits for the slot render')
+    setControls(el)
     StubMutationObserver.instances[0].callback()
-    assert.equal(base.props.get(RAIL_CLEARANCE_VAR), '308px')
-    assert.equal(StubMutationObserver.instances[0].disconnected, true, 'the boot observer detaches once attached')
+    assert.equal(props.get(RAIL_CLEARANCE_VAR), '308px')
+    assert.ok(!StubMutationObserver.instances[0].disconnected, 'the watch observer stays alive — the slot may redeclare and replace the node later')
     dispose()
-    assert.ok(!base.props.has(RAIL_CLEARANCE_VAR))
+    assert.ok(!props.has(RAIL_CLEARANCE_VAR))
+  })
+  it('rebinds when the slot redeclares and replaces the node, then follows the new node', () => {
+    StubResizeObserver.instances = []
+    StubMutationObserver.instances = []
+    const first = stubControls(300)
+    const second = stubControls(250)
+    const { doc, props, setControls } = stubDoc()
+    setControls(first.el)
+    installRailClearance(doc as unknown as Document)
+    assert.equal(props.get(RAIL_CLEARANCE_VAR), '308px')
+    // ui-layout remount: old node unmounted, fresh node mounted.
+    setControls(second.el)
+    StubMutationObserver.instances[0].callback()
+    assert.equal(props.get(RAIL_CLEARANCE_VAR), '258px', 'the replacement republishes immediately')
+    assert.equal(StubResizeObserver.instances.length, 2)
+    assert.equal(StubResizeObserver.instances[0].disconnected, true, 'the observer bound to the detached node is dropped')
+    assert.deepEqual(StubResizeObserver.instances[1].observed, [second.el], 'the current node is observed')
+    // Width changes on the NEW node (e.g. the updater button appears) must republish.
+    second.setRight(350)
+    StubResizeObserver.instances[1].callback()
+    assert.equal(props.get(RAIL_CLEARANCE_VAR), '358px')
+  })
+  it('drops the variable while the node is absent between remounts', () => {
+    StubResizeObserver.instances = []
+    StubMutationObserver.instances = []
+    const { el } = stubControls(300)
+    const { doc, props, setControls } = stubDoc()
+    setControls(el)
+    installRailClearance(doc as unknown as Document)
+    assert.equal(props.get(RAIL_CLEARANCE_VAR), '308px')
+    setControls(null)
+    StubMutationObserver.instances[0].callback()
+    assert.ok(!props.has(RAIL_CLEARANCE_VAR), 'absence must fall the rule back to its 80px floor, not a stale edge')
+    assert.equal(StubResizeObserver.instances[0].disconnected, true)
   })
   it('is a no-op without observer support (rule degrades to its 80px fallback)', () => {
     const props = new Map<string, string>()

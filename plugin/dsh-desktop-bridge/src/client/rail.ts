@@ -155,9 +155,21 @@ type ObserverWindow = Window & {
  * collapsed-only New Session bubble stretch to roughly x≈350, and their
  * width is dynamic (the updater and the bell mount/unmount with state). A
  * ResizeObserver on the container keeps the published edge in step with
- * every such change; the container never unmounts while the titlebar is
- * fused, but the slot renders asynchronously, so a boot observer waits for
- * it exactly like installRailHider does for the frame.
+ * every such change.
+ *
+ * The container is SLOT-rendered (rail-controls.tsx via shell.overlay), so
+ * its DOM lifetime outlives any single node: `slots.inject` reruns on every
+ * slot-owner redeclaration, and a ui-layout remount unmounts the old node
+ * and mounts a fresh one while THIS effect keeps running. A child-list
+ * MutationObserver therefore stays alive for the whole effect and every
+ * reconcile compares the selector's current node with the observed one: a
+ * replacement rebinds the ResizeObserver onto the new node and republishes
+ * immediately, and a temporary absence (between unmount and remount)
+ * removes the variable so the consuming rule falls back to its 80px floor.
+ * An observer left bound to a detached node is exactly the failure this
+ * guards against — its rect reads 0 (publishing a useless 8px that max()
+ * clamps away) or it simply never fires again, and the header re-overlaps
+ * the controls until a full reload.
  *
  * Measurement lives in this apply-world installer on purpose: components
  * stay subscription-free (the repo convention); the frame sits at the
@@ -166,42 +178,48 @@ type ObserverWindow = Window & {
  * `visibility` (its box never collapses), so collapse/expand needs no
  * special handling — the observer covers every real width change.
  *
- * Fail-soft: when the container never appears (or observers are missing)
- * the variable stays unset and the consuming rule degrades to 80px.
+ * Fail-soft: when observers are missing the installer no-ops and the
+ * consuming rule degrades to its own 80px fallback.
  * @param doc - the document hosting the rail controls.
  * @returns the disposer disconnecting observers and removing the variable.
  */
 export function installRailClearance(doc: Document): () => void {
   const win = doc.defaultView as ObserverWindow | null
   if (win === null || win.ResizeObserver === undefined || win.MutationObserver === undefined) return () => {}
+  let observed: Element | undefined
+  let observer: ResizeObserver | undefined
   const publish = (el: Element): void => {
     doc.documentElement.style.setProperty(RAIL_CLEARANCE_VAR, railClearanceValue(el.getBoundingClientRect().right))
   }
-  let observer: ResizeObserver | undefined
-  const attach = (el: Element): void => {
-    publish(el)
-    observer = new win.ResizeObserver!(() => { publish(el) })
-    observer.observe(el)
-  }
-  const teardown = (): void => {
+  const detach = (): void => {
     observer?.disconnect()
+    observer = undefined
+    observed = undefined
     doc.documentElement.style.removeProperty(RAIL_CLEARANCE_VAR)
   }
-  const existing = doc.querySelector(RAIL_CONTROLS_SELECTOR)
-  if (existing !== null) {
-    attach(existing)
-    return () => { teardown() }
-  }
-  const boot = new win.MutationObserver!(() => {
+  const reconcile = (): void => {
     const el = doc.querySelector(RAIL_CONTROLS_SELECTOR)
-    if (el === null) return
-    boot.disconnect()
-    attach(el)
-  })
-  boot.observe(doc.documentElement, { childList: true, subtree: true })
+    // Absent (between unmount and remount): drop the variable so the rule
+    // falls back to its 80px floor instead of trusting a stale edge.
+    if (el === null) {
+      if (observed !== undefined) detach()
+      return
+    }
+    if (el === observed) return
+    // First attach, or the slot redeclared and replaced the node: bind the
+    // observer to the CURRENT node and publish its edge right away.
+    observer?.disconnect()
+    observed = el
+    publish(el)
+    observer = new win.ResizeObserver!(() => { if (observed !== undefined) publish(observed) })
+    observer.observe(el)
+  }
+  reconcile()
+  const watch = new win.MutationObserver!(reconcile)
+  watch.observe(doc.documentElement, { childList: true, subtree: true })
   return () => {
-    boot.disconnect()
-    teardown()
+    watch.disconnect()
+    detach()
   }
 }
 

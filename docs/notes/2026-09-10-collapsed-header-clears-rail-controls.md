@@ -1,6 +1,6 @@
 # 收起态会话标题避让 rail 控件实测宽度（bridge 0.2.0-rc.14）
 
-2026-09-10 · 修复 rc.12「内容顶到窗口上沿」设计缺口 · 状态：**已实施（bridge 0.2.0-rc.14），随桌面 0.3.0-rc.45 发布**
+2026-09-10 · 修复 rc.12「内容顶到窗口上沿」设计缺口 · 状态：**已实施（bridge 0.2.0-rc.14，含文末评审修订），随桌面 0.3.0-rc.45 与当日其他改动合并发版**
 
 ## 根因（实机踩中的已知设计缺口）
 
@@ -87,3 +87,15 @@ sequenceDiagram
 
 - bridge `0.2.0-rc.13` → `0.2.0-rc.14`（desktop-owned 随包清单）。
 - 桌面 `0.3.0-rc.44` → `0.3.0-rc.45`：bump 仓根 `package.json`、CHANGELOG 补 `[0.3.0-rc.45]` 小节、推 `v0.3.0-rc.45` tag。
+
+## 修订（评审 P2）：observer 必须跟随 slot 重声明替换节点
+
+**起因**：首版 `installRailClearance` 首次找到容器后即断开 boot observer，RO 回调闭包永久捕获首个 `el`。但 `shell.overlay` 的 slot owner redeclare/remount（ui-layout HMR、服务生命周期重建）会卸载旧 `DesktopRailControls`、挂载新节点，而 clearance effect 仍在——观察者钉死在已脱离文档的旧节点上：要么旧节点 rect 归零写出自欺的 `8px`（被 `max()` 压回 80px），要么不再触发、变量停留在旧宽度，新节点的宽度变化无人观察。两种情况收起态标题都会重新压图标，直到 bridge 重载或整页刷新。
+
+**修法**（`rail.ts` 同函数内重写）：
+
+- child-list `MutationObserver` 保持**整个 effect 生命周期**，不再一次性 boot；
+- 每次 reconcile 比较 selector 当前节点与已观察节点：替换即 disconnect 旧 RO、绑定当前节点并立即重发布；
+- 节点暂时缺席（unmount → remount 之间）移除变量，消费规则回落 80px 下限，绝不信任陈旧右缘；
+- dispose 统一断开 MO + RO 并清变量；
+- 测试补「已 attach 节点被新节点替换、随后新节点 resize 仍被跟随」与「节点缺席期间变量被移除」两条用例，并把「boot observer attach 后断开」的旧断言翻转为「watch observer 持续存活」。
