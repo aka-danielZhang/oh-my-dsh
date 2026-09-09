@@ -30,7 +30,8 @@ import { en, zh, type DesktopBridgeKey } from './locales.ts'
 import { installRailCss, installRailHider } from './rail.ts'
 import { DesktopRailControls, type RailControlsInjected } from './rail-controls.tsx'
 import { installTitlebarCss, shouldFuseTitlebar, TITLEBAR_ZONE_PX } from './titlebar.ts'
-import { DesktopDragStrip } from './titlebar.tsx'
+import { DesktopDragStrip, type DragStripInjected } from './titlebar.tsx'
+import { installDragSegments } from './drag-strip.ts'
 import { installNotifications } from './notifications.ts'
 import { createNotifyInbox } from './notify-inbox.ts'
 import { NotifyIndicator, type NotifyCenterInjected } from './notify-center.tsx'
@@ -69,7 +70,9 @@ export function apply(ctx: ClientContext): void {
   const { invoke } = probe
 
   // macOS overlay-titlebar fusion: reserve the top band under the floating
-  // traffic lights; the strip entry registered below is the drag region.
+  // traffic lights; the strip entry registered below hosts the segmented
+  // drag surface (drag-strip.ts — gap segments, never a full-width strip, so
+  // absolute panel controls living in the band keep their events).
   // Same gate hides the collapsed sidebar rail outright (rail.ts): the 56px
   // strip ui-layout keeps would sit dead under the traffic lights.
   const fuseTitlebar = shouldFuseTitlebar(probe.gate.platform)
@@ -115,7 +118,10 @@ export function apply(ctx: ClientContext): void {
       const disposeNotify = ctx.slots.register({ name: 'shell.overlay', id: 'desktop-notify-center', order: 7, locale: NS, inject: notifyInjected }, NotifyIndicator)
       return () => { disposeNotify(); disposeUpdate(); disposeBadge() }
     }
-    const disposeStrip = ctx.slots.register({ name: 'shell.overlay', id: 'desktop-drag-strip', order: 0 }, DesktopDragStrip)
+    const dragInjected = (): DragStripInjected => ({
+      mount: (host) => installDragSegments(host, TITLEBAR_ZONE_PX),
+    })
+    const disposeStrip = ctx.slots.register({ name: 'shell.overlay', id: 'desktop-drag-strip', order: 0, inject: dragInjected }, DesktopDragStrip)
     // Resolve ctx.layout lazily per click, never at registration time:
     // slots.inject fires the moment ui-layout's declaration lands — inside
     // that fiber's startup, before it turns ACTIVE — and strict ctx.get only

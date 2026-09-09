@@ -22,8 +22,14 @@ describe('titlebarCss', () => {
   it('locks the document scrollable root pair', () => {
     assert.ok(titlebarCss(28).includes('html,body{overflow:hidden;}'), 'the fixed-viewport shell must not be scrollable')
   })
-  it('marks the drag strip for Electron window dragging', () => {
-    assert.ok(titlebarCss(28).includes('[data-desktop-drag-strip]{-webkit-app-region:drag;}'))
+  it('marks only the gap segments for Electron window dragging, never the host', () => {
+    const css = titlebarCss(28)
+    assert.ok(css.includes('[data-desktop-drag-seg]{position:absolute;top:0;bottom:0;-webkit-app-region:drag;pointer-events:auto;}'))
+    assert.ok(css.includes('[data-desktop-drag-strip]{pointer-events:none;}'), 'the host stays click-through so band controls keep their events')
+    assert.ok(!css.includes('[data-desktop-drag-strip]{-webkit-app-region:drag;}'), 'a full-width drag strip covers band controls')
+  })
+  it('pushes the absolute right-sidebar panel below the band', () => {
+    assert.ok(titlebarCss(28).includes('[data-sidebar-right-panel]{top:28px!important;}'))
   })
   it('embeds the configured band height', () => {
     assert.ok(titlebarCss(TITLEBAR_ZONE_PX).includes(`padding-top:${String(TITLEBAR_ZONE_PX)}px`))
