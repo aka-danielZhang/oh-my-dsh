@@ -8,10 +8,10 @@
  *
  * Not an installable library — payload.bin only. Clients concat + verify.
  */
-import { closeSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { mkdtempSync, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { execNpm } from './cli-bins.mjs'
 
 const CHUNK_BYTES = 80 * 1024 * 1024

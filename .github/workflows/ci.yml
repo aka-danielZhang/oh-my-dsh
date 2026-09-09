@@ -76,6 +76,8 @@ jobs:
         run: node --test scripts/shipped-plugins.test.mjs
       - name: Test release-notes extractor
         run: node --test scripts/release-notes.test.mjs
+      - name: Test runtime npm publish script
+        run: node --test scripts/publish-runtime-npm.test.mjs
 
   packaged-smoke:
     name: Packaged profile smoke (extract + import + dump-config)
