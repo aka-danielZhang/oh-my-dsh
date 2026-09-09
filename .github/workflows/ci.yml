@@ -78,6 +78,8 @@ jobs:
         run: node --test scripts/release-notes.test.mjs
       - name: Test runtime npm publish script
         run: node --test scripts/publish-runtime-npm.test.mjs
+      - name: Release notes cover the root version
+        run: node scripts/release-notes.mjs "$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version")" > /dev/null
 
   packaged-smoke:
     name: Packaged profile smoke (extract + import + dump-config)
