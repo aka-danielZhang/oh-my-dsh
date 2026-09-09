@@ -43,13 +43,9 @@ export interface InputFacts {
  * `primaryStops` false, and a continuable child's independent Stop only
  * exists for subagent sessions, which are excluded here). When the draft
  * empties, the stock primary flips back to Stop and this button stands
- * down, so the two never duplicate.
- *
- * Known edge (accepted): while the composer is blocked (`routable ===
- * false`) the stock primary is also a Stop regardless of the draft, and
- * this seat cannot see the block — a running + blocked + non-empty-draft
- * session would briefly show two Stops. A running turn implies the route
- * was servable, so the overlap is transient at worst.
+ * down. A blocked composer can also make the stock primary Stop while a
+ * draft remains; the stylesheet observes that direct stop glyph and hides
+ * this slot entry, so the two never appear together.
  * @param session - structural session facts.
  * @param input - structural input facts.
  * @returns true when the button should render.

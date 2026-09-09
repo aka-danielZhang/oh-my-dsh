@@ -12,17 +12,14 @@
 
 import { defineConfig } from 'tsdown'
 
-/** Module-table entries the browser shell answers natively (mirror of the
- * harness rc.8+ implicit baseline: PLATFORM_MODULES — shell-seeded React,
- * Cordis, and static UI libraries — plus the parser-preloaded runtime
- * exemption). Should the baseline move, re-check against PLATFORM_MODULES. */
+/** Module-table entries the 0.1.5 browser shell answers natively (exact
+ * mirror of PLATFORM_MODULES). Re-check this list on every baseline bump. */
 const CLIENT_EXTERNALS = [
   'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
+  '@deepseek-ai/dsh-client-store',
   '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-ui-primitives',
-  // Documented runtime exemption (preloaded by the parser before the shell
-  // starts) — the table answers it natively.
-  '@deepseek-ai/dsh-client-runtime/client',
+  '@deepseek-ai/dsh-client-ui-dockkit',
 ] as const
 
 /**

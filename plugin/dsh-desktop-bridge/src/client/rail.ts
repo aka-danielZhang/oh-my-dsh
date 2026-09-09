@@ -35,6 +35,18 @@ export function collapseRailTemplate(template: string): string {
 }
 
 /**
+ * Restore a template only while the frame still carries this installer's exact
+ * last write. A later React/plugin write owns the value and must win.
+ * @param current - template present when cleanup runs.
+ * @param owned - exact template last written by this installer.
+ * @param original - template captured immediately before that write.
+ * @returns the safe cleanup value.
+ */
+export function restoreRailTemplate(current: string, owned: string, original: string): string {
+  return current === owned ? original : current
+}
+
+/**
  * The collapsed-rail stylesheet, macOS desktop form factor:
  * - no border seam on the zero-width sidebar column (its 1px border-right
  *   would paint a line at x=0);
@@ -112,23 +124,44 @@ const FRAME_SELECTOR = 'div:has(> [data-shell-overlay])'
  */
 export function installRailHider(doc: Document): () => void {
   let frameObserver: MutationObserver | undefined
+  let attachedFrame: HTMLElement | undefined
+  let originalTemplate: string | undefined
+  let ownedTemplate: string | undefined
+  const restoreOwnedTemplate = (): void => {
+    if (attachedFrame === undefined || originalTemplate === undefined || ownedTemplate === undefined) return
+    const current = attachedFrame.style.gridTemplateColumns
+    const restored = restoreRailTemplate(current, ownedTemplate, originalTemplate)
+    if (restored !== current) attachedFrame.style.gridTemplateColumns = restored
+    originalTemplate = undefined
+    ownedTemplate = undefined
+  }
   const reconcile = (frame: HTMLElement): void => {
     if (!frame.hasAttribute('data-sidebar-collapsed')) return
     const current = frame.style.gridTemplateColumns
     const next = collapseRailTemplate(current)
     // Writing only on change keeps the observer from re-entering on our own write.
-    if (next !== current) frame.style.gridTemplateColumns = next
+    if (next !== current) {
+      originalTemplate = current
+      ownedTemplate = next
+      frame.style.gridTemplateColumns = next
+    }
   }
   const attach = (frame: Element): void => {
     const el = frame as HTMLElement
+    attachedFrame = el
     reconcile(el)
     frameObserver = new MutationObserver(() => { reconcile(el) })
     frameObserver.observe(el, { attributes: true, attributeFilter: ['style', 'data-sidebar-collapsed'] })
   }
+  const dispose = (bootObserver?: MutationObserver): void => {
+    bootObserver?.disconnect()
+    frameObserver?.disconnect()
+    restoreOwnedTemplate()
+  }
   const existing = doc.querySelector(FRAME_SELECTOR)
   if (existing !== null) {
     attach(existing)
-    return () => { frameObserver?.disconnect() }
+    return () => { dispose() }
   }
   const bootObserver = new MutationObserver(() => {
     const frame = doc.querySelector(FRAME_SELECTOR)
@@ -137,8 +170,5 @@ export function installRailHider(doc: Document): () => void {
     attach(frame)
   })
   bootObserver.observe(doc.documentElement, { childList: true, subtree: true })
-  return () => {
-    bootObserver.disconnect()
-    frameObserver?.disconnect()
-  }
+  return () => { dispose(bootObserver) }
 }

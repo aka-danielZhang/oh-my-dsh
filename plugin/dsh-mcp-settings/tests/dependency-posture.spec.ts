@@ -7,20 +7,21 @@ const packageJson = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
 ) as { devDependencies?: Record<string, string> }
 
-test('source installs use the status-capable fork MCP client', () => {
-  expect(packageJson.devDependencies?.['@deepseek-ai/dsh-mcp-client']).toBe(
-    'npm:@crazx/dsh-mcp-client@0.1.2-rc.1.zw.1',
-  )
+const SOURCE_SPEC = 'link:../deepseek-harness/packages/mcp/mcp-client'
+const REGISTRY_SPEC = 'npm:@crazx/dsh-mcp-client@0.1.5-alpha.1.zw.1'
+
+test('managed installs use the status-capable MCP client', () => {
+  const spec = packageJson.devDependencies?.['@deepseek-ai/dsh-mcp-client']
+  expect([SOURCE_SPEC, REGISTRY_SPEC]).toContain(spec)
 
   const clientPackage = require('@deepseek-ai/dsh-mcp-client/package.json') as {
     name: string
     version: string
   }
-  expect(clientPackage).toMatchObject({
-    name: '@crazx/dsh-mcp-client',
-    version: '0.1.2-rc.1.zw.1',
-  })
+  expect(clientPackage).toMatchObject(spec === SOURCE_SPEC
+    ? { name: '@deepseek-ai/dsh-mcp-client', version: '0.1.5-alpha.1' }
+    : { name: '@crazx/dsh-mcp-client', version: '0.1.5-alpha.1.zw.1' })
   expect(readFileSync(require.resolve('@deepseek-ai/dsh-mcp-client'), 'utf8')).toContain(
-    'ctx.emit("mcp-client/status"',
+    'mcp-client/status',
   )
 })

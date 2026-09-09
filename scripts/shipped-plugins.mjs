@@ -209,6 +209,39 @@ export function runtimeLinkPlan(pluginDir) {
   return { required, optional }
 }
 
+const sourcePackageMaps = new Map()
+
+/** Discover package owners when runtimeCwd is a Harness source checkout. */
+function sourcePackageMap(runtimeCwd) {
+  const cached = sourcePackageMaps.get(runtimeCwd)
+  if (cached !== undefined) return cached
+
+  const packages = new Map()
+  const visit = (dir) => {
+    if (!existsSync(dir)) return
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name === 'lib') continue
+      const path = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        visit(path)
+        continue
+      }
+      if (entry.name !== 'package.json') continue
+      const manifest = JSON.parse(readFileSync(path, 'utf8'))
+      if (typeof manifest.name !== 'string') continue
+      const previous = packages.get(manifest.name)
+      if (previous !== undefined && previous !== dir) {
+        throw new Error(`dsh-desktop: duplicate runtime package ${manifest.name}: ${previous}, ${dir}`)
+      }
+      packages.set(manifest.name, dir)
+    }
+  }
+  visit(join(runtimeCwd, 'packages'))
+  visit(join(runtimeCwd, 'vendor'))
+  sourcePackageMaps.set(runtimeCwd, packages)
+  return packages
+}
+
 /**
  * @param {string} runtimeCwd
  * @param {string} packageName
@@ -220,13 +253,15 @@ export function resolveRuntimePackage(runtimeCwd, packageName) {
   const encoded = packageName.replaceAll('/', '+')
   const prefix = `${encoded}@`
   const pnpmDir = join(runtimeCwd, 'node_modules/.pnpm')
-  if (!existsSync(pnpmDir)) return undefined
-  const matches = readdirSync(pnpmDir)
-    .filter((name) => name.startsWith(prefix))
-    .map((name) => join(pnpmDir, name, 'node_modules', packageName))
-    .filter((candidate) => existsSync(candidate) && statSync(candidate).isDirectory())
-    .sort()
-  return matches[0]
+  if (existsSync(pnpmDir)) {
+    const matches = readdirSync(pnpmDir)
+      .filter((name) => name.startsWith(prefix))
+      .map((name) => join(pnpmDir, name, 'node_modules', packageName))
+      .filter((candidate) => existsSync(candidate) && statSync(candidate).isDirectory())
+      .sort()
+    if (matches[0] !== undefined) return matches[0]
+  }
+  return sourcePackageMap(runtimeCwd).get(packageName)
 }
 
 /**

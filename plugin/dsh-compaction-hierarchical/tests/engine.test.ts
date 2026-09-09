@@ -103,6 +103,7 @@ function fixture(
   overflows = 0,
   replayTools = false,
   overflowWhen: OverflowWhen = () => false,
+  stockOwnsHierarchy = false,
 ) {
   const ctx = testContext()
   void new LlmRuntime(ctx)
@@ -119,7 +120,7 @@ function fixture(
     reduceMaxTokens: 256,
     maxDepth: 3,
     replayTools,
-  })
+  }, stockOwnsHierarchy)
   const session = Session.create(SessionId('hierarchical-engine-test'))
   const agent = {
     session,

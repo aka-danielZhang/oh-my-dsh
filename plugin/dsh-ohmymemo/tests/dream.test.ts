@@ -20,11 +20,14 @@ import {
 function snapshot(): SessionLogSnapshot {
   return {
     session: {
+      version: 3,
       id: 'session-user',
       createdAt: Date.parse('2026-09-03T00:00:00Z'),
       cwd: '/work/project',
-      seedLength: 2,
+      isSeeded: true,
+      delegationDepth: 0,
     },
+    inheritedEventCount: 2,
     events: [
       { seq: 0, time: Date.parse('2026-09-03T00:01:00Z'), type: 'user/message', surfaceOp: 'append', data: { id: 'seed', source: { kind: 'user' }, content: [{ type: 'text', text: 'inherited' }] } },
       { seq: 2, time: Date.parse('2026-09-03T08:00:00Z'), type: 'user/message', surfaceOp: 'append', data: { id: 'm2', source: { kind: 'plugin', plugin: 'test', form: 'notice' }, content: [{ type: 'text', text: 'plugin text' }] } },

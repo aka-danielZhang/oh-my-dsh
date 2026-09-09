@@ -12,6 +12,8 @@ import { startInjection } from './inject.ts'
 import { en, zh, type ModelImageLocaleKey } from './locales.ts'
 import { injectStyles } from './styles.ts'
 
+type SettingsSetValue = Extract<SettingsPathOpView, { op: 'set' }>['value']
+
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** Image-input injection copy. */
@@ -52,7 +54,10 @@ export function apply(ctx: Context): void {
     const op = modelOpFor(scope.getSnapshot().user, provider, modelId, choice)
     if (op === undefined) throw new Error(t('notEditable'))
     const revision = scope.getSnapshot().revision
-    const response = await settingsRemote.mutate(PI_AI_NS, [op] satisfies SettingsPathOpView[], revision)
+    // settingsScope snapshots have already crossed the Host JSON boundary;
+    // the draft keeps unknown catalog fields open only to preserve them.
+    const request = { ...op, value: op.value as SettingsSetValue } satisfies SettingsPathOpView
+    const response = await settingsRemote.mutate(PI_AI_NS, [request], revision)
     if (!response.ok) throw new Error(`${response.error.code}: ${response.error.message}`)
   }
 

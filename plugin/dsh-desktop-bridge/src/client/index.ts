@@ -7,7 +7,10 @@
  * controls, and macOS titlebar fusion —
  * all as reversible effects collected by the plugin fiber.
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: pulls the 'shell.overlay' SlotMap declaration (ui-layout's
 // frame declares it) so the registration below typechecks against the real
 // declaration — no runtime edge to ui-layout.
@@ -43,8 +46,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Dictionary namespace owned by this plugin. */
 const NS = 'desktop-bridge'
 
-/** Required services: the slot registry, the sessions list feed, the locale registry, and the workspace actions (New Session). */
-export const inject = ['slots', 'sessions', 'locale', 'workspaces']
+/** Required services: the slot registry, the sessions list feed, the locale registry, and Workspace UI navigation. */
+export const inject = ['slots', 'sessions', 'locale', 'uiWorkspace']
 
 /** Logger face used by the installers (the cordis logger satisfies this). */
 interface WarnLog {
@@ -129,7 +132,7 @@ export function apply(ctx: ClientContext): void {
         }
         layout.toggleSidebar()
       },
-      startSession: () => { ctx.workspaces.startSession() },
+      startSession: () => { ctx.uiWorkspace.startSession() },
     })
     const disposeControls = ctx.slots.register({ name: 'shell.overlay', id: 'desktop-rail-controls', order: 5, locale: NS, inject: railInjected }, DesktopRailControls)
     return () => { disposeControls(); disposeStrip(); disposeBadge() }

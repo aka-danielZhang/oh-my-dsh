@@ -45,7 +45,7 @@ const FORBIDDEN_PRISTINE_EVENTS = new Set([
   'turn/start',
   'user/message',
   'assistant/message',
-  'assistant/chunk',
+  'assistant/attempt',
   'tool/call',
   'tool/result',
   'agent/inbox/spliced',
@@ -334,7 +334,7 @@ export class ThreadGateway extends TypertRemoteService {
       // the first inbox mutation) and idempotent for an identical selection.
       if (submitting.model !== null) {
         const selection = submitting.model
-        const already = agent.session.events.some(event => (
+        const already = agent.session.snapshotEvents().some(event => (
           event.type === 'model/selection'
           && event.data.provider === selection.provider
           && event.data.model === selection.model

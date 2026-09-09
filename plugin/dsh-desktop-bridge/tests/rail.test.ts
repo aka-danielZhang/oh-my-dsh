@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { collapseRailTemplate, installRailCss, railCss } from '../src/client/rail.ts'
+import { collapseRailTemplate, installRailCss, railCss, restoreRailTemplate } from '../src/client/rail.ts'
 
 describe('collapseRailTemplate', () => {
   it('zeroes the first track of the AppFrame template (details closed)', () => {
@@ -20,6 +20,22 @@ describe('collapseRailTemplate', () => {
     assert.equal(collapseRailTemplate('none'), 'none')
     assert.equal(collapseRailTemplate('56px'), '56px')
     assert.equal(collapseRailTemplate('minmax(0, 1fr) 360px'), 'minmax(0, 1fr) 360px')
+  })
+})
+
+describe('restoreRailTemplate', () => {
+  it('restores the captured template while cleanup still owns the value', () => {
+    assert.equal(
+      restoreRailTemplate('0px minmax(0, 1fr) 320px', '0px minmax(0, 1fr) 320px', '56px minmax(0, 1fr) 320px'),
+      '56px minmax(0, 1fr) 320px',
+    )
+  })
+
+  it('preserves a later frame write', () => {
+    assert.equal(
+      restoreRailTemplate('280px minmax(0, 1fr) 0px', '0px minmax(0, 1fr) 320px', '56px minmax(0, 1fr) 320px'),
+      '280px minmax(0, 1fr) 0px',
+    )
   })
 })
 

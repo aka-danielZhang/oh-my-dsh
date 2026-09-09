@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { test } from 'node:test'
@@ -13,6 +13,7 @@ import {
   hashKeyForTarball,
   listShippedPluginSpecs,
   packEntriesFor,
+  resolveRuntimePackage,
   runtimeLinkPlan,
   shippedPluginsManifest,
 } from './shipped-plugins.mjs'
@@ -52,6 +53,7 @@ test('lists every ship:true plugin once, including thread', () => {
     'dsh-mcp-settings',
     'dsh-model-efforts-editor',
     'dsh-model-image-input',
+    'dsh-ohmymemo',
     'dsh-provider-balance',
     'dsh-reasoning-efforts',
     'dsh-send-while-running',
@@ -86,6 +88,19 @@ test('manifest slice is what a packaged shell can extract', () => {
   const manifest = shippedPluginsManifest(specs)
   assert.equal(manifest.length, specs.length)
   assert.deepEqual(Object.keys(manifest[0] ?? {}).sort(), ['destRel', 'env', 'hashKey', 'package', 'tarball'])
+})
+
+test('runtime package resolution falls back to Harness source owners', () => {
+  const root = mkdtempSync(join(tmpdir(), 'shipped-runtime-source-'))
+  try {
+    const owner = join(root, 'packages', 'client', 'ui-owner')
+    mkdirSync(owner, { recursive: true })
+    writeFileSync(join(owner, 'package.json'), '{"name":"@deepseek-ai/dsh-client-ui-owner"}\n')
+    assert.equal(resolveRuntimePackage(root, '@deepseek-ai/dsh-client-ui-owner'), owner)
+    assert.equal(resolveRuntimePackage(root, '@deepseek-ai/dsh-missing'), undefined)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })
 
 test('runtime link plan treats dependencies as required', () => {

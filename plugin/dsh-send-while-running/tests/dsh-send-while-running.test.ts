@@ -97,14 +97,20 @@ test('stock stop recolor stays red in every state, anchored on the stop glyph', 
 
 test('stock stop recolor rule is not gated on the extra button being mounted', () => {
   const css = stopWhileRunningCss()
-  // The always-red rule must NOT embed the plugin's own class in its
-  // selector (that would limit the red to states where the extra button is
-  // visible); only the glyph anchor and the slot seam scope it.
-  for (const line of css.split('\n')) {
-    if (line.includes('> svg > rect')) {
-      assert.equal(line.includes('.dsh-stop-while-running'), false, line)
-    }
-  }
+  // The base recolor selector contains only the stock glyph anchor and slot
+  // scope, so it remains active when the fallback entry is absent.
+  assert.match(
+    css,
+    /div:has\(> \[data-slot="conversation\.input\.right"\]\) > button:has\(> svg > rect\) \{/,
+  )
+})
+
+test('a direct stock Stop hides the nested fallback Stop', () => {
+  const css = stopWhileRunningCss()
+  assert.match(
+    css,
+    /div:has\(> \[data-slot="conversation\.input\.right"\]\):has\(> button:has\(> svg > rect\)\) \[data-slot="conversation\.input\.right"\] \.dsh-stop-while-running \{\s*\n\s*display: none;/,
+  )
 })
 
 test('order override is scoped to the extra button being mounted', () => {

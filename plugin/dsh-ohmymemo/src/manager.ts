@@ -9,7 +9,7 @@ import { homedir } from 'node:os'
 import { Service } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type {} from '@crazx/dsh-agent-default-model'
+import type {} from '@deepseek-ai/dsh-agent-default-model'
 import type {} from '@deepseek-ai/cordis-plugin-timer'
 import { foldConsumedWork, installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
@@ -925,7 +925,11 @@ export class OhMyMemoManager extends TypertRemoteService {
       try {
         const observation = await this.ctx.sessionQuery.observeSession(record.header.id, { signal, projectionMode: 'none' })
         try {
-          const source = extractDreamSource({ session: observation.header, events: observation.events }, this.state.cursors[String(record.header.id)], {
+          const source = extractDreamSource({
+            session: observation.header,
+            inheritedEventCount: observation.inheritedEventCount,
+            events: observation.events,
+          }, this.state.cursors[String(record.header.id)], {
             cutoffMs,
             maxMessages: this.config.maxMessagesPerSession,
             maxMessageChars: this.config.maxMessageChars,

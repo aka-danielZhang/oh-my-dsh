@@ -15,7 +15,10 @@
  * `dsh web`, plain browsers, and the desktop shell all get the same
  * composer. Effects are reversible and collected by this fiber.
  */
-import type { ClientContext, ISessions, SessionId } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 // Type-only: pulls ui-conversation's SlotMap declarations (the
 // 'conversation.input.right' list seat and the session standard kit) and its
 // session-scope Context merge (`conversation: IConversation`) so the

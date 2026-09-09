@@ -110,7 +110,9 @@ const skipped = []
 // generated catalog drift. `dsh-compaction-basic` joins in zw.2 on 2026-08-22:
 // the stock Provider now owns the bounded hierarchy fallback used by every
 // shipped preset. 0.1.2 deletes ApiProxy; `dsh-host-apiproxy` leaves and
-// `dsh-api-session-controller` joins (effort memory lives there).
+// `dsh-api-session-controller` joins (effort memory lives there). In 0.1.5,
+// the upstream lifetime write lease replaces the retired fork persistence
+// coordinator, so session-persistence returns to the official package set.
 const FORK_MODIFIED = new Set([
   '@deepseek-ai/dsh-agent-default-model',
   '@deepseek-ai/dsh-api-session-controller',
@@ -119,7 +121,6 @@ const FORK_MODIFIED = new Set([
   '@deepseek-ai/dsh-compaction-basic',
   '@deepseek-ai/dsh-host-frontend-static',
   '@deepseek-ai/dsh-mcp-client',
-  '@deepseek-ai/dsh-session-persistence',
   '@deepseek-ai/dsh-todo-completion-guard',
   '@deepseek-ai/dsh-tool-cordis',
   '@deepseek-ai/dsh',

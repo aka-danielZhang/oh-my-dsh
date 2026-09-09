@@ -5,7 +5,8 @@
  * through one code path. Effects are reversible and collected by the
  * plugin fiber.
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 // Type-only: pulls ui-sidebar's SlotMap declarations ('sidebar.brand.name')
 // for the wordmark registration below — no runtime edge to ui-sidebar.
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'

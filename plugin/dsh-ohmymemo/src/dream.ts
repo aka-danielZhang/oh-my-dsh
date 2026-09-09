@@ -120,12 +120,16 @@ export function dueCatchUpBoundary(
 
 /** Extract unseen direct-human text from one detached durable Session log. */
 export function extractDreamSource(
-  snapshot: { session: SessionLogSnapshot['session']; events: readonly SessionLogSnapshot['events'][number][] },
+  snapshot: {
+    session: SessionLogSnapshot['session']
+    inheritedEventCount: SessionLogSnapshot['inheritedEventCount']
+    events: readonly SessionLogSnapshot['events'][number][]
+  },
   cursor: number | undefined,
   options: { cutoffMs: number; maxMessages: number; maxMessageChars: number },
 ): DreamSourceSession {
   const sessionId = String(snapshot.session.id)
-  const minimumSeq = Math.max((cursor ?? -1) + 1, snapshot.session.seedLength ?? 0)
+  const minimumSeq = Math.max((cursor ?? -1) + 1, Number(snapshot.inheritedEventCount))
   const capturedThroughSeq = snapshot.events.at(-1)?.seq ?? null
   const lastEventAt = snapshot.events.at(-1)?.time ?? snapshot.session.createdAt
   const messages: DreamEvidence[] = []

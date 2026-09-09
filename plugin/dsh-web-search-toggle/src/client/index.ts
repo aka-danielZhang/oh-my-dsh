@@ -4,8 +4,9 @@
  *
  * @module dsh-web-search-toggle/client
  */
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import TYPERT_REMOTE from '../typert.remote-client.ts'
 import { WebSearchRow } from './WebSearchRow.tsx'

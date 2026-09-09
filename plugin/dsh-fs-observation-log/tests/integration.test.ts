@@ -108,7 +108,7 @@ test('restart + externally changed file: NOT healed, the stock rejection stands'
     new_string: 'BETA',
   }, { id: 's-changed' })
   assert.equal(edit.isError, true)
-  assert.match(resultText(edit as never), /edit requires reading/)
+  assert.match(resultText(edit as never), /file has not been read/)
 })
 
 test('fork lineage: the parent session\'s evidence heals the child', async () => {
@@ -134,7 +134,7 @@ test('a target never observed by anyone in the lineage still rejects', async () 
     new_string: 'BETA',
   }, { id: 's-stranger' })
   assert.equal(edit.isError, true)
-  assert.match(resultText(edit as never), /edit requires reading/)
+  assert.match(resultText(edit as never), /file has not been read/)
 })
 
 test('sidecars are per-session JSONL files under the plugin directory', async () => {

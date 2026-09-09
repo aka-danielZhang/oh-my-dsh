@@ -25,7 +25,7 @@ import type {
   ToolSchema,
 } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-token-meter'
-import { basicConfig, Config, resolveHierarchyConfig } from './config.ts'
+import { basicConfig, basicSupportsHierarchy, Config, resolveHierarchyConfig } from './config.ts'
 import type { HierarchicalCompactionConfig, ResolvedHierarchyConfig } from './config.ts'
 import {
   estimateMessages,
@@ -105,9 +105,20 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
   /** Validated hierarchy policy, separate from the inherited pressure policy. */
   readonly hierarchy: ResolvedHierarchyConfig
 
-  constructor(ctx: Context, config: HierarchicalCompactionConfig = {}) {
-    super(ctx, basicConfig(config))
+  /** Whether the installed stock engine owns the same bounded fallback. */
+  private readonly stockOwnsHierarchy: boolean
+
+  constructor(
+    ctx: Context,
+    config: HierarchicalCompactionConfig = {},
+    stockOwnsHierarchy = basicSupportsHierarchy(BasicCompactionEngine.Config),
+  ) {
+    super(ctx, basicConfig(
+      config,
+      stockOwnsHierarchy ? BasicCompactionEngine.Config : {},
+    ))
     this.hierarchy = resolveHierarchyConfig(config)
+    this.stockOwnsHierarchy = stockOwnsHierarchy
     ctx.logger.info(
       'dsh-compaction-hierarchical: active (chunkInputRatio=%d, maxDepth=%d)',
       this.hierarchy.chunkInputRatio,
@@ -125,6 +136,7 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
     signal?: AbortSignal,
   ): Promise<SummaryResult> {
     signal?.throwIfAborted()
+    if (this.stockOwnsHierarchy) return super.summarize(input, agent, signal)
     const target = this.resolveSummaryTarget(agent)
     const model = await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
     const contextWindow = model.context?.contextWindow

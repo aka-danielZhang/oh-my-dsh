@@ -66,6 +66,13 @@ export function stopWhileRunningCss(): string {
     '  background: var(--dsw-static-red-500);',
     '  filter: brightness(1.08);',
     '}',
+    // A blocked composer keeps the stock primary as a direct Stop even when
+    // the draft is non-empty. The right slot has no owner-level `blocked`
+    // prop, so arbitrate on the same stable glyph seam as the recolor below:
+    // whenever a direct stock Stop exists, hide this nested fallback Stop.
+    'div:has(> [data-slot="conversation.input.right"]):has(> button:has(> svg > rect)) [data-slot="conversation.input.right"] .dsh-stop-while-running {',
+    '  display: none;',
+    '}',
     // Push the stock primary (Send) to the right only while this button is
     // mounted; the anchor chain is the slot seam plus our own class.
     'div:has(> [data-slot="conversation.input.right"] .dsh-stop-while-running) > button:last-of-type {',

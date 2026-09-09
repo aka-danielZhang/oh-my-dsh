@@ -99,6 +99,19 @@ test('subagent callers: reads allowed, writes denied', async () => {
   assert.deepEqual(result.hits, [])
 })
 
+test('unknown caller authority fails closed', async () => {
+  const { harness: ctx } = await setup()
+  const remember = ctx.registered.find((tool) => tool.name === 'memory_remember')!
+  await assert.rejects(
+    () => remember.execute({ content: 'x', kind: 'semantic' }, exec(undefined)),
+    /Agent-backed session header/,
+  )
+  await assert.rejects(
+    () => remember.execute({ content: 'x', kind: 'semantic' }, exec({ id: 'session-missing-header', session: {} })),
+    /Agent-backed session header/,
+  )
+})
+
 test('search → get → update(CAS) → forget round-trip through the tools', async () => {
   const { harness: ctx } = await setup()
   const search = ctx.registered.find((tool) => tool.name === 'memory_search')!
