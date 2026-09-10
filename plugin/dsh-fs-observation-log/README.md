@@ -19,9 +19,11 @@ even though the file never changed. The model cannot see the process boundary, s
 
 ## How it heals
 
-1. **Mirror** — every `fs/observed` present-observation is appended to a per-session JSONL sidecar under `$DSH_HOME/fs-observation-log/` (first line is a header carrying the session's fork parent; fail-soft on write errors).
-2. **Restore** — on `tools/pre-execute` of an `edit`/`write` whose target the acting session has not observed in this process, the plugin walks the session's fork lineage (self → parent → …, bounded and cycle-safe), stats the live file through `ctx.fs`, and re-emits `present` **only if the provider's freshness token is byte-identical to the recorded one** — i.e. the file provably did not change since the remembered observation.
+1. **Mirror** — every `fs/observed` present-observation is appended to a per-session JSONL sidecar under `$DSH_HOME/fs-observation-log/` (first line is a header carrying the session id and its fork parent; fail-soft on write errors). The filename hashes the full opaque session id (SHA-256), so ids that differ only in separator spelling can never collide, and a sidecar whose header names another session is treated as absent.
+2. **Restore** — on `tools/pre-execute` of an `edit`/`write` whose target the acting session has not observed in this process, the plugin consults the session's own sidecar, stats the live file through `ctx.fs`, and re-emits `present` **only if the provider's freshness token is byte-identical to the recorded one** — i.e. the file provably did not change since the remembered observation.
 3. Everything else — changed file, deleted file, no evidence — restores nothing. The stock policy keeps demanding a read. `FS_STALE_VERSION`, unique-match, and the sandbox stack are untouched.
+
+**Ancestor healing is deliberately out of scope.** A sidecar records when a read happened, not where in the transcript it sits, so a parent's evidence recorded after the fork cut is indistinguishable from inherited reads — a child could heal an edit its transcript never observed. Until evidence records carry the fork-cut bound, a session heals only from its own sidecar; the header still persists the fork parent (reserved) so a future cut-bound scheme needs no format change.
 
 Net invariant: **the guard never forgets more than the transcript remembers; a file that actually changed still demands a fresh read.** The local backend's version token (`dev:ino:size:mtimeNs:ctimeNs`) is stable across processes for an unchanged file, which is what makes the comparison sound.
 
@@ -31,25 +33,18 @@ Net invariant: **the guard never forgets more than the transcript remembers; a f
 dsh plugin --profile web add <repo>/plugin/dsh-fs-observation-log
 ```
 
-The bundle patch is intentionally empty (install-only registration, like `dsh-compaction-hierarchical`): activation belongs to each agent preset — add the row from `preset-snippet.yml` to your user preset:
+The bundle patch installs one process-wide Host row: a single store and a single `tools/pre-execute` listener serve every session in the process (the sidecar store is cross-session by design, and untagged host listeners are admitted into Agent-scoped dispatch). `dsh plugin add` therefore activates the plugin immediately — no per-preset rows required. The plugin contributes no service, needs no realm, and is inert when the stock observation policy is absent.
 
-```yaml
-- id: fs-observation-log
-  name: dsh-fs-observation-log
-```
-
-The plugin contributes no service, needs no realm, and is inert when the stock observation policy is absent.
+`DSH_HOME` normalization: unset or blank falls back to `<home>/.dsh`; a leading `~` expands to the user home; a relative path resolves against the process cwd. Sidecars written by older versions (sanitized-id filenames) are ignored — evidence is advisory and re-accumulates as sessions run; the old files are read-only leftovers and can be deleted.
 
 ## Config
 
 | field | default | meaning |
 |---|---|---|
-| `maxEntriesPerSession` | 200 | Per-session sidecar cap; on overflow the file is rewritten keeping the newest half. |
-| `inheritFork` | `true` | Whether a forked session may inherit its lineage's evidence (its transcript inherits the reads). |
-| `maxLineageDepth` | 8 | Fork-lineage chain bound (cycle guard). |
+| `maxEntriesPerSession` | 200 | Per-session sidecar cap on physically stored records (re-observations included); on overflow the file is rewritten keeping the newest half. |
 | `maxWriteFailures` | 5 | Consecutive sidecar write failures before the store disables itself (in-memory mirror keeps serving). |
 
-Invalid values fail loud at mount.
+Invalid values fail loud at mount — including the retired `inheritFork`/`maxLineageDepth` fields, so a stale preset that still passes them fails instead of silently keeping unsafe cross-session healing.
 
 ## Design notes
 

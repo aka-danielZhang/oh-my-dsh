@@ -27,6 +27,37 @@ P0 Fork 基座已完成，提交序列（基于合并提交 `c7da3280b9`）：
 
 限制说明：本轮验证基于现有 alpha.1 锁定依赖（`plugins:check` 门），rc.1 冻结依赖矩阵验证仍按 §9 在依赖迁移阶段执行。
 
+## 0.2. 落地进展（P0 安全项 + P1 项 + opencode-go 方案，主工作区）
+
+- **dsh-fs-observation-log 安全重构**：删除跨会话 healing（evidence 未绑定 fork cut，父会话 fork 后的读取不再授权子会话编辑；fork 父指针保留在 sidecar header 备未来切点绑定）；文件名改为完整 opaque SessionId 的 SHA-256（分隔符孪生 id 不再碰撞），加载时校验 header.id 与请求 id 一致、不匹配按不存在处理且强制重写；压实触发改为物理 JSONL 行数（同目标反复观察不再无限增长）；`DSH_HOME` 归一化（空/`~`/相对路径）；`cordis.patch.yml` 落 Host 单例行使其真正激活，`preset-snippet.yml` 退役；`inheritFork`/`maxLineageDepth` 字段删除且遗留 preset 显式报错。29/29 测试通过。
+- **dsh-ohmymemo**：写权限不再把 `ToolExecution.parent`（PTC transport token）当 subagent 身份——仅以 Agent 会话 origin/delegation metadata 判定，根 PTC 子分发可写、真 subagent（含 PTC 内）拒绝；dream 路由覆盖时不再继承默认模型 effort（route-owned，显式配置经路由校验，否则省略）；Typert sourceLocation 刷新至当前 manager 行号。220/220 测试通过。
+- **P1**：两个模型编辑器 dispose 现在清理 DOM 标记与网格类（重挂载恢复控件）；efforts 编辑器 CSS 字符串中 JS `//` 注释改为合法 `/* */`；reasoning-efforts thinking-format 镜像补 `baseten`；hierarchical 聚合 `TokenUsage.totalTokens`（all-or-nothing）；desktop-bridge 的 await-input 通知改以 `ctx.uiSession.pendingInteractions` 为权威源（join sessions.list，订阅双方，dispose 双撤）。
+- **opencode-go 会话头（方案文档 §4 主路径）**：fork `llm-pi-ai` 新增路由级 `sessionAffinityHeaders`——adapter 在 profile headers/attribution 之后把每个声明头写为当前会话 ID，一条注入点覆盖 completions/responses/anthropic 三条线上路径；未声明路由零字节变化；attribution 保留名拒绝。schema/adapter/回归测试 70/70，包内全量 333/333；配置目录已再生（zh 镜像同步）；Agent Note 已附。`llm-pi-ai` 进入 fork 发布面（现 14 包）。
+- **依赖迁移加固**：`source-deps.mjs` 升级到 rc.1 基线 + 14 包 fork 别名 + 全量 `pnpm.overrides` 钉死（官方 rc.1 包的传递 caret 在 npm 出现 rc.2 后漂移混线，overrides 使插件安装对 registry 漂移免疫）；无别名 9 插件锁已按官方 rc.1 重建（rc2=0）。`prepare-runtime.mjs`：SCRIPT_REV 12、FORK_MODIFIED=14 包、精确 `.zw.N`（删除逐包降级回退）、peer 保留 `@deepseek-ai/*` 原名 + 精确 fork semver（与 publish-fork 对齐）、runtime/tools pnpm 11.7.0。
+
+验证：`plugins:check` 14 插件 typecheck+test+build EXIT:0（registry 姿态，transitional 节点态）；desktop:typecheck + desktop:test 141/141；harness root typecheck、client aggregate、`test:gui` 5337、`test:web` replay 353 均绿。
+
+## 0.3. 发布阻塞与用户侧 runbook（唯一剩余步骤）
+
+npm 无凭据（`npm whoami` → ENEEDAUTH），以下步骤必须由持有 `@crazx` 发布权的用户执行：
+
+```sh
+# 1. 发布 fork 层（deepseek-harness，分支 feat/rc1-toolbar-port，HEAD 2126a563bb）
+npm login            # 或配置 NPM_TOKEN
+node scripts/publish-fork.mjs 1            # 14 包 @crazx/*@0.1.5-rc.1.zw.1
+npm view @crazx/dsh@0.1.5-rc.1.zw.1 version # 逐包核验
+# 2. 全部包可解析后打 tag 并推送（tag 承诺所有包已发布）
+git tag v0.1.5-rc.1+zw.1 2126a563bb && git push origin feat/rc1-toolbar-port --tags
+# 3. 切 runtime pin（oh-my-dsh）
+#    runtime/revision.json: ref=v0.1.5-rc.1+zw.1, sha=2126a563bb...
+# 4. 组装与冒烟
+node scripts/prepare-runtime.mjs && pnpm run desktop:smoke && pnpm run check
+# 5. 插件锁重生成并提交（5 个带别名插件执行 pnpm install 后提交 lock）
+pnpm run unlink:source && for d in plugin/dsh-*/; do (cd $d && pnpm install --no-frozen-lockfile); done
+```
+
+过渡态说明：当前工作区 5 个带别名插件（thread/send/mcp-settings/ohmymemo/bridge）的 node_modules 仍为源链接树（可开发调试）；其 manifest 已提交为 registry 别名形态，发布完成后一次 `pnpm install` 即切换。
+
 ## 1. 目标与边界
 
 本轮把 Oh My DSH 的 Harness 基线从 `v0.1.5-alpha.1+zw.3` 升级到基于官方 `0.1.5-rc.1` 的新 fork 版本，并完成 Desktop runtime、14 个随附插件、原生模块、既有用户数据和打包链路的兼容验证。

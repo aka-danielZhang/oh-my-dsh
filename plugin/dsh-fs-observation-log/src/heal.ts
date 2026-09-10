@@ -11,9 +11,6 @@
  * @module dsh-fs-observation-log/heal
  */
 
-import type { ObservationLogConfig } from './config.ts'
-import type { EvidenceHit } from './store.ts'
-
 /**
  * Minimal structural view of a session header: all the identity this plugin
  * needs. The real `SessionHeader` (dsh-session) contains these fields; the
@@ -21,43 +18,31 @@ import type { EvidenceHit } from './store.ts'
  */
 export interface SessionHeaderView {
   readonly id?: unknown
+  /** The fork parent, persisted in sidecar headers; healing ignores it. */
   readonly parentSession?: unknown
 }
 
-/** A session lineage resolved from a header: self first, then ancestors. */
+/** The acting session ids considered for healing: the session itself. */
 export type Lineage = readonly string[]
 
 /**
- * Resolve the observation lineage of a session: itself, then the fork parent
- * chain, bounded by `maxLineageDepth` and guarded against cycles. Ancestor
- * parents come from the injected `parentOf` (the store's sidecar headers);
- * the chain ends where lineage is unknown or disabled.
+ * Resolve the evidence a session may heal from: its own sidecar only.
+ *
+ * Ancestor healing is deliberately gone. A sidecar records WHEN a read
+ * happened, not WHERE in the transcript it sits, so a parent's evidence
+ * recorded after the fork cut is indistinguishable from inherited reads —
+ * a child could heal an edit its transcript never observed. Until evidence
+ * records carry the fork-cut bound, cross-session healing is out of scope;
+ * the sidecar header still persists the fork parent (reserved) so a future
+ * cut-bound scheme can resolve lineages without a format change.
  * @param header - the acting session's header view.
- * @param config - resolved plugin config (`inheritFork`, `maxLineageDepth`).
- * @param parentOf - sidecar-backed ancestor-parent lookup.
- * @returns distinct session ids nearest-first; empty when the header carries
- *   no usable id (a non-agent caller).
+ * @returns the session's own id, or empty when the header carries no usable
+ *   id (a non-agent caller).
  */
-export function sessionLineage(
-  header: SessionHeaderView,
-  config: ObservationLogConfig,
-  parentOf: (sessionId: string) => string | undefined,
-): Lineage {
+export function sessionLineage(header: SessionHeaderView): Lineage {
   const self = header.id
   if (typeof self !== 'string' || self.length === 0) return []
-  const lineage: string[] = [self]
-  if (!config.inheritFork) return lineage
-  const seen = new Set<string>(lineage)
-  let cursor: string | undefined = typeof header.parentSession === 'string' && header.parentSession.length > 0
-    ? header.parentSession
-    : parentOf(self)
-  while (cursor !== undefined && lineage.length < config.maxLineageDepth + 1) {
-    if (seen.has(cursor)) break
-    seen.add(cursor)
-    lineage.push(cursor)
-    cursor = parentOf(cursor)
-  }
-  return lineage
+  return [self]
 }
 
 /** What the live provider reported about the target right now. */
@@ -77,8 +62,8 @@ export type HealDecision =
  * Order of checks (each can veto):
  * 1. `liveRecord` — this process already observed the target for the acting
  *    session; the stock policy has it too and there is nothing to heal.
- * 2. `evidence` — no lineage record ever observed the target; nothing to
- *    restore, the stock policy's demand for a read stands.
+ * 2. `evidence` — no record ever observed the target; nothing to restore,
+ *    the stock policy's demand for a read stands.
  * 3. `stat.version` undefined — the target does not exist right now; let the
  *    stock policy answer `FS_NOT_FOUND` semantics for itself.
  * 4. `stat.version !== evidence.version` — the file changed since the
@@ -87,10 +72,10 @@ export type HealDecision =
  * 5. Otherwise restore: re-emit `present` at the live token.
  *
  * @param liveRecord - this process's mirror entry for the acting session.
- * @param evidence - the lineage lookup hit, when any.
+ * @param evidence - the session's stored hit, when any.
  * @param stat - the provider stat performed moments ago.
  */
-export function healDecision(liveRecord: unknown, evidence: EvidenceHit | undefined, stat: LiveStat): HealDecision {
+export function healDecision(liveRecord: unknown, evidence: { version: string; sessionId: string } | undefined, stat: LiveStat): HealDecision {
   if (liveRecord !== undefined) return { kind: 'skip', reason: 'live-observed' }
   if (evidence === undefined) return { kind: 'skip', reason: 'no-evidence' }
   if (stat.version === undefined) return { kind: 'skip', reason: 'target-absent' }

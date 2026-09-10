@@ -57,7 +57,7 @@ dsh plugin --profile <profile> add <this-repo>/plugin/dsh-reasoning-efforts
 约束（挂载时 fail-loud 校验，镜像 llm-pi-ai 自己的解析规则）：
 
 - efforts：档位键只能是 `off/minimal/low/medium/high/xhigh/max`；只有 `off` 可以留空（`off:` = 支持、不发参数）；其余档位必须给非空线上值；至少声明一个 `off` 之外的档位；`efforts: false` 表示非推理模型。
-- compat：字段只能是 `supportsReasoningEffort`（布尔）与 `thinkingFormat`（`openai/deepseek/openrouter/together/zai/qwen/chat-template/qwen-chat-template/string-thinking/ant-ling` 之一）；未知字段拒绝——llm-pi-ai 对不认识的开关 fail-loud，写进去会把整条路由打挂而不是被忽略。
+- compat：字段只能是 `supportsReasoningEffort`（布尔）与 `thinkingFormat`（`openai/deepseek/openrouter/together/baseten/zai/qwen/chat-template/qwen-chat-template/string-thinking/ant-ling` 之一）；未知字段拒绝——llm-pi-ai 对不认识的开关 fail-loud，写进去会把整条路由打挂而不是被忽略。
 
 ## 行为边界
 

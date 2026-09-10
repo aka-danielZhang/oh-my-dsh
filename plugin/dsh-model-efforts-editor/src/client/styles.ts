@@ -9,12 +9,12 @@ export const POP_WIDTH = 244
 
 /** The injected stylesheet text. */
 const CSS = `
-// The stock model row is a fixed 4-column grid; every injected button is an
-// extra child no hardcoded column count can foresee (this plugin and the
-// image-input plugin decorate the same row). Flex fits any button count:
-// inputs keep the stock 1.4:1 share of the leftover width and shrink first,
-// so the trailing buttons never overflow the card and the trash never wraps
-// onto an implicit second grid row.
+/* The stock model row is a fixed 4-column grid; every injected button is an
+   extra child no hardcoded column count can foresee (this plugin and the
+   image-input plugin decorate the same row). Flex fits any button count:
+   inputs keep the stock 1.4:1 share of the leftover width and shrink first,
+   so the trailing buttons never overflow the card and the trash never wraps
+   onto an implicit second grid row. */
 .mee-grid { display: flex !important; align-items: center; gap: 6px; }
 .mee-grid > input { flex: 1 1 0; min-width: 0; }
 .mee-grid > input:first-child { flex-grow: 1.4; }

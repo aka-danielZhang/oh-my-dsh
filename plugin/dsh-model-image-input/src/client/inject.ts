@@ -260,6 +260,12 @@ export function startInjection(deps: InjectionDeps): () => void {
       if (btn.isConnected) btn.remove()
       buttons.delete(btn)
     }
+    // Marks and row classes outlive the buttons on persistent settings rows:
+    // a stale mark makes a remount skip the row forever, so scrub them too.
+    for (const input of Array.from(document.querySelectorAll('input[data-mii-mark="1"]'))) {
+      input.removeAttribute('data-mii-mark')
+      input.parentElement?.classList.remove('mii-grid')
+    }
   }
 }
 

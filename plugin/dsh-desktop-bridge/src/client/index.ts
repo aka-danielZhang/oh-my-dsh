@@ -8,6 +8,9 @@
  * all as reversible effects collected by the plugin fiber.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+// Type-only: pulls ui-session's cordis Context merge (ctx.uiSession) and its
+// pendingInteractions authority face.
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -46,8 +49,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Dictionary namespace owned by this plugin. */
 const NS = 'desktop-bridge'
 
-/** Required services: the slot registry, the sessions list feed, the locale registry, and Workspace UI navigation. */
-export const inject = ['slots', 'sessions', 'locale', 'uiWorkspace']
+/** Required services: the slot registry, the sessions list feed, the ui-session pending-interaction authority, the locale registry, and Workspace UI navigation. */
+export const inject = ['slots', 'sessions', 'uiSession', 'locale', 'uiWorkspace']
 
 /** Logger face used by the installers (the cordis logger satisfies this). */
 interface WarnLog {
@@ -96,6 +99,7 @@ export function apply(ctx: ClientContext): void {
     const t = ctx.locale.bind(NS)
     return installNotifications({
       list: ctx.sessions.list,
+      pending: ctx.uiSession.pendingInteractions,
       invoke,
       logger,
       copy: () => ({ turnDone: t('notify.turnDone'), awaitInput: t('notify.awaitInput') }),

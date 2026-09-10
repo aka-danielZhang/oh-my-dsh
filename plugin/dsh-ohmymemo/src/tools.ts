@@ -50,9 +50,11 @@ function agentOf(exec: ToolExecution): Agent {
 function assertWritable(exec: ToolExecution): { sessionId: string; cwd: string | undefined } {
   const agent = agentOf(exec)
   const header = agent.session.header
-  const delegated = exec.parent !== undefined
-    || header.origin !== undefined
-    || (header.delegationDepth ?? 0) > 0
+  // Subagent identity comes from the Agent session's origin/delegation
+  // metadata only. ToolExecution.parent is the enclosing PTC/run_code
+  // transport token — a root Code Mode subdispatch carries it while being
+  // every bit the root agent, so it must not deny the write.
+  const delegated = header.origin !== undefined || (header.delegationDepth ?? 0) > 0
   if (delegated) {
     throw new Error('memory write tools are denied for subagent callers — propose findings to the lead agent instead')
   }

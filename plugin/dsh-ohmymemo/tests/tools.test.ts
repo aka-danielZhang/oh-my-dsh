@@ -89,12 +89,18 @@ test('remember writes through the service with agent-derived provenance', async 
   assert.equal(read?.record.confirmed, true)
 })
 
-test('subagent callers: reads allowed, writes denied', async () => {
+test('subagent callers: reads allowed, writes denied; root PTC subdispatch writes', async () => {
   const { harness: ctx } = await setup()
   const remember = ctx.registered.find((tool) => tool.name === 'memory_remember')!
   const search = ctx.registered.find((tool) => tool.name === 'memory_search')!
   await assert.rejects(() => remember.execute({ content: 'x', kind: 'semantic' }, exec(SUBAGENT)), /denied for subagent/)
-  await assert.rejects(() => remember.execute({ content: 'x', kind: 'semantic' }, exec(AGENT, { token: 'nested' })), /denied for subagent/)
+  // ToolExecution.parent is the enclosing PTC/run_code transport token — a
+  // root Code Mode subdispatch carries it while remaining the root agent,
+  // so the write is allowed.
+  const root = (await remember.execute({ content: 'x', kind: 'semantic' }, exec(AGENT, { token: 'nested' }))) as { id: string }
+  assert.match(root.id, /^mem_/)
+  // A true subagent stays denied even inside a PTC subdispatch.
+  await assert.rejects(() => remember.execute({ content: 'y', kind: 'semantic' }, exec(SUBAGENT, { token: 'nested' })), /denied for subagent/)
   const result = (await search.execute({ query: '任意' }, exec(SUBAGENT))) as { hits: unknown[] }
   assert.deepEqual(result.hits, [])
 })

@@ -428,6 +428,12 @@ export function startInjection(deps: InjectionDeps): () => void {
       if (btn.isConnected) btn.remove()
       buttons.delete(btn)
     }
+    // Marks and row classes outlive the buttons on persistent settings rows:
+    // a stale mark makes a remount skip the row forever, so scrub them too.
+    for (const input of Array.from(document.querySelectorAll('input[data-mee-mark="1"]'))) {
+      input.removeAttribute('data-mee-mark')
+      input.parentElement?.classList.remove('mee-grid')
+    }
   }
 }
 

@@ -50,6 +50,9 @@ function makeCtx(options: { rejectToolbarSlot: boolean }) {
       list: { subscribe: () => () => {}, getSnapshot: () => ({ ids: [], byId: {}, current: undefined }) },
       open: () => {},
     },
+    uiSession: {
+      pendingInteractions: { getSnapshot: () => new Map(), subscribe: () => () => {} },
+    },
     uiWorkspace: { startSession: () => {} },
     slots: {
       inject: (_name: string, callback: () => (() => void) | void): (() => void) => {

@@ -605,6 +605,9 @@ export function aggregateUsage(usages: readonly (TokenUsage | undefined)[]): Tok
   for (const usage of present) {
     total.inputTokens += usage.inputTokens
     total.outputTokens += usage.outputTokens
+    if (usage.totalTokens !== undefined) {
+      total.totalTokens = (total.totalTokens ?? 0) + usage.totalTokens
+    }
     if (usage.cacheReadTokens !== undefined) {
       total.cacheReadTokens = (total.cacheReadTokens ?? 0) + usage.cacheReadTokens
     }

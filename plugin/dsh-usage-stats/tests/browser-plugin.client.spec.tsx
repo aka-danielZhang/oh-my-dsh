@@ -50,10 +50,18 @@ function loadBuiltClient(imports: Record<string, unknown>): { inject: string[], 
 // their published factories with the loader's exact explicit imports.
 vi.mock('@deepseek-ai/dsh-client-locale/client', async () => {
   const { loadBrowserModule } = await import('./browser-fixtures.ts')
+  const React = await import('react')
+  // The locale factory touches exactly two primitives members; the rc.1
+  // primitives bundle drags a highlighting toolchain the bench need not
+  // install, so the seat is stubbed permissively instead of loaded.
+  const primitivesStub = {
+    IconChevronDownOutline: (props: Record<string, unknown>) => React.createElement('svg', props),
+    Menu: (props: Record<string, unknown> & { children?: React.ReactNode }) => props.children ?? null,
+  }
   return loadBrowserModule('@deepseek-ai/dsh-client-locale/client', {
-    'react': await import('react'),
+    'react': React,
     'react/jsx-runtime': await import('react/jsx-runtime'),
-    '@deepseek-ai/dsh-client-ui-primitives': await import('@deepseek-ai/dsh-client-ui-primitives'),
+    '@deepseek-ai/dsh-client-ui-primitives': primitivesStub,
     '@deepseek-ai/dsh-client-store': await import('@deepseek-ai/dsh-client-store'),
   })
 })

@@ -1,6 +1,0 @@
-# Add to a copied user preset (e.g. one derived from `standard`). The plugin
-# contributes no service and needs no realm: it listens on the public
-# `fs/observed` event and the scoped `tools/pre-execute` gate, restoring
-# cross-process observation evidence before edit/write.
-- id: fs-observation-log
-  name: dsh-fs-observation-log

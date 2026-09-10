@@ -5,6 +5,9 @@
  * @module dsh-usage-stats/client
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
+// Type-only: pulls api-gateway's cordis Context merge (ctx.remote) so the
+// Remote mount below typechecks against the gateway face.
+import type {} from '@deepseek-ai/dsh-api-gateway/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { UsageStatsQuality } from '../types.ts'

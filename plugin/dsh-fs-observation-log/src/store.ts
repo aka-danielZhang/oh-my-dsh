@@ -5,9 +5,11 @@
  * provider before it is re-emitted, so a lost, stale, or corrupt sidecar can
  * never authorize anything the stock fs-observation-policy would not.
  *
- * The first line of each sidecar is a header record carrying the session's
- * fork parent, so the full lineage chain is resolvable from the store alone
- * (a fork inherits its parent's transcript, and therefore its reads).
+ * Sidecar filenames hash the full opaque session id (two ids that differ
+ * only in separator spelling can never collide), and the first line of each
+ * sidecar is a header record whose `id` is verified against the requested
+ * session on load — a file whose header names another session is treated as
+ * absent.
  *
  * Deliberately framework-free (plain node:fs) so it is unit-testable without
  * a Cordis context; the plugin wires it to events in src/index.ts.
@@ -22,9 +24,9 @@ import type { ObservationLogConfig } from './config.ts'
 /** Header record: the sidecar's first line, carrying fork lineage (format v1). */
 export interface HeaderRecord {
   hdr: 1
-  /** The owning session id (echoed for readability; the filename already encodes it). */
+  /** The owning session id (verified against the requested session on load). */
   id: string
-  /** The session this one was forked from, when any. */
+  /** The session this one was forked from; reserved for a future cut-bound healing scheme. */
   parent?: string
 }
 
@@ -52,15 +54,22 @@ export interface EvidenceHit {
 interface SidecarContents {
   header: HeaderRecord | undefined
   records: Map<string, EvidenceRecord>
+  /** Data records physically present in the file (duplicates included); drives compaction. */
+  physical: number
+  /** A loaded file whose header named another session: append is forbidden, the next write rewrites. */
+  orphaned: boolean
 }
 
-/** File-extension-safe encoding of a session id (ids are opaque; stay defensive). */
-export function sanitizeSessionId(id: string): string {
-  const cleaned = id.replace(/[^A-Za-z0-9._-]/g, '_')
-  if (cleaned.length <= 0 || cleaned.length > 128) {
-    return `${cleaned.slice(0, 64)}-${createHash('sha256').update(id).digest('hex').slice(0, 12)}`
-  }
-  return cleaned
+/**
+ * Collision-free filename stem for a session id: the SHA-256 of the full
+ * opaque id, hex-encoded. Session ids from different identity spaces can
+ * differ only in characters a filesystem-safe sanitizer would fold together
+ * (`a/b` vs `a_b`), so the hash is taken over the raw id, always.
+ * @param id - the opaque session id.
+ * @returns the fixed-length filename stem (`.jsonl` appended by the caller).
+ */
+export function sidecarFileId(id: string): string {
+  return createHash('sha256').update(id, 'utf8').digest('hex')
 }
 
 function isRecord(value: object): value is EvidenceRecord {
@@ -131,15 +140,17 @@ export class ObservationStore {
   }
 
   private fileFor(sessionId: string): string {
-    return join(this.dir, `${sanitizeSessionId(sessionId)}.jsonl`)
+    return join(this.dir, `${sidecarFileId(sessionId)}.jsonl`)
   }
 
   /** Idempotent lazy load of one session's sidecar into its mirror. */
   private ensureLoaded(sessionId: string): SidecarContents {
     let mirror = this.mirrors.get(sessionId)
-    if (mirror !== undefined || this.loaded.has(sessionId)) return mirror ?? { header: undefined, records: new Map() }
+    if (mirror !== undefined || this.loaded.has(sessionId)) {
+      return mirror ?? { header: undefined, records: new Map(), physical: 0, orphaned: false }
+    }
     this.loaded.add(sessionId)
-    mirror = { header: undefined, records: new Map() }
+    mirror = { header: undefined, records: new Map(), physical: 0, orphaned: false }
     try {
       const text = readFileSync(this.fileFor(sessionId), 'utf8')
       for (const line of text.split('\n')) {
@@ -149,38 +160,27 @@ export class ObservationStore {
           if (mirror.header === undefined) mirror.header = parsed
         } else {
           mirror.records.set(parsed.targetKey, parsed)
+          mirror.physical += 1
         }
       }
     } catch {
       // Absent sidecar (first observation for this session) or unreadable —
       // either way the mirror starts empty; evidence is advisory.
     }
+    // Identity check: a file whose header names another session (wrong or
+    // tampered filename) contributes nothing — the store treats it as absent.
+    if (mirror.header !== undefined && mirror.header.id !== sessionId) {
+      mirror = { header: undefined, records: new Map(), physical: 0, orphaned: true }
+    }
     this.mirrors.set(sessionId, mirror)
     return mirror
   }
 
   /**
-   * The fork parent of a session as persisted in its sidecar header — the
-   * lineage walker's ancestor lookup. A session with no sidecar has no known
-   * parent (its chain ends there), which is exactly the fail-safe answer.
-   */
-  parentOf(sessionId: string): string | undefined {
-    return this.ensureLoaded(sessionId).header?.parent
-  }
-
-  /** The in-memory mirror state for one target, if this session's sidecar holds it. */
-  lookupIn(sessionId: string, targetKey: string): EvidenceRecord | undefined {
-    return this.ensureLoaded(sessionId).records.get(targetKey)
-  }
-
-  /**
-   * Walk a session lineage (nearest first) for the freshest evidence of one
-   * target. Fork inheritance is exact: a fork inherits the reads its
-   * transcript actually contains, which is the parent's evidence.
-   * @param lineage - session ids, the acting session first, then ancestors.
+   * Look up one target in a session's own sidecar.
+   * @param lineage - the acting session's lineage: the session itself.
    * @param targetKey - the opaque stable target key to look up.
-   * @returns the first hit walking outward, or undefined when no lineage
-   *   session ever recorded the target.
+   * @returns the hit, or undefined when the session never recorded the target.
    */
   lookup(lineage: readonly string[], targetKey: string): EvidenceHit | undefined {
     for (const sessionId of lineage) {
@@ -190,15 +190,21 @@ export class ObservationStore {
     return undefined
   }
 
+  /** The in-memory mirror state for one target, if this session's sidecar holds it. */
+  private lookupIn(sessionId: string, targetKey: string): EvidenceRecord | undefined {
+    return this.ensureLoaded(sessionId).records.get(targetKey)
+  }
+
   /**
    * Record one present observation: update the mirror and append one JSONL
-   * line, writing the sidecar header first when the file is new. On per-file
-   * overflow the file is rewritten keeping the newest half (header kept).
-   * Writes are fail-soft: after `maxWriteFailures` consecutive failures the
-   * store disables itself (the mirror keeps serving this process's healing).
+   * line, writing the sidecar header first when the file is new. On physical
+   * overflow (data lines, duplicates included, exceeding the cap) the file is
+   * rewritten keeping the newest half by record time. Writes are fail-soft:
+   * after `maxWriteFailures` consecutive failures the store disables itself
+   * (the mirror keeps serving this process's healing).
    * @param sessionId - the observing session.
    * @param parentSessionId - the observing session's fork parent, when known;
-   *   persisted in the header so future lineage walks can resolve past depth one.
+   *   persisted in the header (reserved for a future cut-bound healing scheme).
    */
   record(sessionId: string, targetKey: string, displayPath: string, version: string, parentSessionId?: string): void {
     const mirror = this.ensureLoaded(sessionId)
@@ -222,19 +228,24 @@ export class ObservationStore {
     }
     if (this.disabled) return
     if (previous !== undefined && previous.version === record.version && !headerChanged) return
+    const physicalAfterAppend = mirror.physical + 1
     try {
       mkdirSync(this.dir, { recursive: true })
       const file = this.fileFor(sessionId)
-      if (mirror.records.size > this.config.maxEntriesPerSession || (headerChanged && existsSync(file))) {
-        // Full rewrite (compaction or late header fix): keep the newest half by
-        // record time, header first; a temp-file rename keeps it atomic.
+      if (mirror.orphaned
+        || physicalAfterAppend > this.config.maxEntriesPerSession
+        || mirror.records.size > this.config.maxEntriesPerSession
+        || (headerChanged && existsSync(file))) {
+        // Full rewrite (physical or distinct-key compaction, or a late header
+        // fix): keep the newest half by record time, header first; a temp-file
+        // rename keeps it atomic.
         const kept = [...mirror.records.values()]
           .sort((a, b) => b.at - a.at)
           .slice(0, Math.max(1, Math.floor(this.config.maxEntriesPerSession / 2)))
-        const compacted = new Map(kept.map((entry) => [entry.targetKey, entry]))
-        mirror.records = compacted
+        mirror.records = new Map(kept.map((entry) => [entry.targetKey, entry]))
+        mirror.physical = kept.length
         const temp = `${file}.tmp`
-        const body = [...compacted.values()].map(serializeSidecarLine).join('')
+        const body = kept.map(serializeSidecarLine).join('')
         writeFileSync(temp, mirror.header === undefined ? body : `${serializeSidecarLine(mirror.header)}${body}`, 'utf8')
         renameSync(temp, file)
       } else {
@@ -243,6 +254,7 @@ export class ObservationStore {
           `${headerChanged && mirror.header !== undefined ? serializeSidecarLine(mirror.header) : ''}${serializeSidecarLine(record)}`,
           'utf8',
         )
+        mirror.physical = physicalAfterAppend
       }
       this.consecutiveWriteFailures = 0
     } catch {

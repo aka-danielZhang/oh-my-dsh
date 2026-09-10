@@ -51,6 +51,7 @@ export const THINKING_FORMATS = [
   'deepseek',
   'openrouter',
   'together',
+  'baseten',
   'zai',
   'qwen',
   'chat-template',

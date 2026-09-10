@@ -36,7 +36,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { PreToolDecision, ToolExecution } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import { validateConfig } from './config.ts'
 import { healDecision, sessionLineage, type SessionHeaderView } from './heal.ts'
 import { ObservationStore } from './store.ts'
@@ -47,9 +47,20 @@ export const name = 'dsh-fs-observation-log'
 /** Hard deps: the fs provider for resolve/stat, the tools events for the pre-execute hook. */
 export const inject = ['fs', 'tools']
 
-/** The sidecar directory: `<DSH_HOME>/fs-observation-log` (DSH_HOME mirrors the harness convention). */
+/** The sidecar directory: `<DSH_HOME>/fs-observation-log`.
+ *
+ * DSH_HOME normalization mirrors the shell semantics users expect: unset or
+ * blank falls back to `<home>/.dsh`; a leading `~` expands to the user home;
+ * a relative path resolves against the process cwd (plain-Node convention).
+ * @param envHome - the raw `DSH_HOME` environment value.
+ * @param home - the OS user home directory.
+ */
 export function observationLogDir(envHome: string | undefined, home: string): string {
-  return join(envHome !== undefined && envHome.length > 0 ? envHome : join(home, '.dsh'), 'fs-observation-log')
+  let base: string
+  if (envHome === undefined || envHome.trim().length === 0) base = join(home, '.dsh')
+  else if (envHome === '~' || envHome.startsWith(`~/`) || envHome.startsWith(`~\\`)) base = join(home, envHome.slice(1))
+  else base = isAbsolute(envHome) ? envHome : resolve(envHome)
+  return join(base, 'fs-observation-log')
 }
 
 /** Minimal structural view of the fs/observed actor (see fs-observation-policy's types.ts precedent). */
@@ -104,7 +115,7 @@ export function apply(ctx: Context, rawConfig: unknown): void {
   ctx.on('tools/pre-execute', async (exec: ToolExecution, next: () => Promise<PreToolDecision>): Promise<PreToolDecision> => {
     if (exec.name !== 'edit' && exec.name !== 'write') return next()
     const header = headerOf(exec)
-    const lineage = sessionLineage(header ?? {}, config, (id) => store.parentOf(id))
+    const lineage = sessionLineage(header ?? {})
     if (lineage.length === 0) return next()
     const filePath = filePathOf(exec.arguments)
     if (filePath === undefined) return next()

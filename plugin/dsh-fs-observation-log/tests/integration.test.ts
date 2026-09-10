@@ -7,7 +7,9 @@
  * The scenario matrix:
  * - restart + unchanged file  → edit healed (the plugin's whole point)
  * - restart + changed file    → NOT healed, stock rejection stands
- * - fork lineage              → parent's evidence heals the child
+ * - fork lineage              → the child heals from its OWN sidecar only;
+ *   a parent's sidecar never heals the child (evidence is not bound to the
+ *   fork cut, so ancestor healing is out of scope)
  * - never observed            → stock rejection stands
  * @module dsh-fs-observation-log/tests/integration
  */
@@ -111,18 +113,34 @@ test('restart + externally changed file: NOT healed, the stock rejection stands'
   assert.match(resultText(edit as never), /file has not been read/)
 })
 
-test('fork lineage: the parent session\'s evidence heals the child', async () => {
+test('fork lineage: the child is NOT healed by the parent\'s sidecar evidence', async () => {
   const { home, file } = scratch()
   const first = await boot(home)
   await call(first, 'read', { file_path: file }, { id: 's-parent' })
-  // Process 2 with a forked session whose transcript contains the parent's read.
+  // Process 2 with a forked session: evidence is not bound to the fork cut,
+  // so a parent read recorded after the cut could authorize an edit outside
+  // the child's transcript — cross-session healing stays off entirely.
   const second = await boot(home)
   const edit = await call(second, 'edit', {
     file_path: file,
     old_string: 'gamma',
     new_string: 'GAMMA',
   }, { id: 's-child', parentSession: 's-parent' })
-  assert.equal(edit.isError, false, `fork child edit should heal via lineage, got: ${resultText(edit as never)}`)
+  assert.equal(edit.isError, true, 'the parent sidecar must not heal the child')
+  assert.match(resultText(edit as never), /file has not been read/)
+})
+
+test('a forked child that observed in its own right heals from its own sidecar', async () => {
+  const { home, file } = scratch()
+  const first = await boot(home)
+  await call(first, 'read', { file_path: file }, { id: 's-child', parentSession: 's-parent' })
+  const second = await boot(home)
+  const edit = await call(second, 'edit', {
+    file_path: file,
+    old_string: 'gamma',
+    new_string: 'GAMMA',
+  }, { id: 's-child', parentSession: 's-parent' })
+  assert.equal(edit.isError, false, `own-evidence healing must survive a restart, got: ${resultText(edit as never)}`)
 })
 
 test('a target never observed by anyone in the lineage still rejects', async () => {
@@ -144,5 +162,6 @@ test('sidecars are per-session JSONL files under the plugin directory', async ()
   const dir = join(home, 'fs-observation-log')
   const files = readdirSync(dir)
   assert.equal(files.length, 1)
-  assert.match(files[0], /^s-files\.jsonl$/)
+  // The filename hashes the full opaque session id (collision-free).
+  assert.match(files[0], /^[0-9a-f]{64}\.jsonl$/)
 })

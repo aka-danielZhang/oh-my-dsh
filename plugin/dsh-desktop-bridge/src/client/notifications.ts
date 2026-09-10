@@ -22,6 +22,16 @@ export interface NotifySurface {
   currentSessionId?: string
 }
 
+/**
+ * The blocking-interaction authority: `ctx.uiSession.pendingInteractions` —
+ * a live map of sessions with an open question/approval. The sessions list
+ * rows carry no such field; joining here keeps the await-input edge honest.
+ */
+export interface NotifyPending {
+  getSnapshot(): ReadonlyMap<string, unknown>
+  subscribe(fn: () => void): () => void
+}
+
 /** Sessions-list snapshot the installer consumes. */
 export interface NotifyListState {
   ids: readonly string[]
@@ -33,7 +43,6 @@ export interface NotifyRowLike {
   id: string
   displayTitle: string
   running: boolean
-  pendingInteraction?: string
 }
 
 export interface NotifyList {
@@ -74,6 +83,8 @@ export function bodyForEdge(kind: AttentionEdge['kind'], copy: NotifyCopy): stri
  */
 export function installNotifications(opts: {
   list: NotifyList
+  /** `ctx.uiSession.pendingInteractions` — the await-input authority. */
+  pending: NotifyPending
   invoke: DesktopInvoke
   logger: NotifyLog
   copy: NotifyCopy | (() => NotifyCopy)
@@ -90,8 +101,9 @@ export function installNotifications(opts: {
 
   const snapshot = (): { rows: AttentionRow[]; current?: string } => {
     const state = opts.list.getSnapshot()
+    const pending = opts.pending.getSnapshot()
     return {
-      rows: state.ids.map((id) => state.byId[id]).filter((row) => row !== undefined).map(rowOf),
+      rows: state.ids.map((id) => state.byId[id]).filter((row) => row !== undefined).map((row) => rowOf(row, pending)),
       ...(state.current !== undefined ? { current: state.current } : {}),
     }
   }
@@ -134,19 +146,24 @@ export function installNotifications(opts: {
   previous = attentionIndex(initial.rows)
   firstSeen = rememberFirstSeen(new Map(), previous.keys(), clock())
   const stopList = opts.list.subscribe(onFlush)
+  const stopPending = opts.pending.subscribe(onFlush)
   const stopClick = opts.invoke.on?.(NOTIFY_CLICK_EVENT, onClick)
   return () => {
     stopList()
+    stopPending()
     stopClick?.()
   }
 }
 
-function rowOf(row: NotifyRowLike): AttentionRow {
+/** Marker written into the attention row when the authority reports a live interaction. */
+const PENDING_MARKER = 'pending'
+
+function rowOf(row: NotifyRowLike, pending: ReadonlyMap<string, unknown>): AttentionRow {
   return {
     id: row.id,
     displayTitle: row.displayTitle,
     running: row.running,
-    ...(row.pendingInteraction !== undefined ? { pendingInteraction: row.pendingInteraction } : {}),
+    ...(pending.has(row.id) ? { pendingInteraction: PENDING_MARKER } : {}),
   }
 }
 

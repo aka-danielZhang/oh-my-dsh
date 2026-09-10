@@ -548,13 +548,21 @@ export class OhMyMemoManager extends TypertRemoteService {
     }
   }
 
-  /** Effective dream-extraction route: config override, else the harness default. */
+  /** Effective dream-extraction route: config override, else the harness default.
+   *
+   * Effort is route-owned: the default route's effort travels only with the
+   * default route. An overridden route uses an explicitly configured effort
+   * or none at all — an inherited id may not exist on the new route.
+   */
   private dreamRoute(config: StoreUserConfig): { provider: string; model: string; effort: string } {
     const fallback = this.ctx.agentDefaultModel.currentSelection()
+    const overridden = config.dream_model_provider !== '' || config.dream_model !== ''
     return {
       provider: config.dream_model_provider !== '' ? config.dream_model_provider : fallback.provider,
       model: config.dream_model !== '' ? config.dream_model : fallback.model,
-      effort: config.dream_effort !== '' ? config.dream_effort : fallback.reasoningEffort ?? '',
+      effort: config.dream_effort !== ''
+        ? config.dream_effort
+        : overridden ? '' : fallback.reasoningEffort ?? '',
     }
   }
 
@@ -611,7 +619,7 @@ export class OhMyMemoManager extends TypertRemoteService {
       const configSnapshot = this.memo.configSnapshot().config
       const fallback = this.ctx.agentDefaultModel.currentSelection()
       const route = this.dreamRoute(configSnapshot)
-      const model = { ...fallback, ...modelOverrides(configSnapshot, fallback, await this.routeEfforts(route.provider, route.model)) }
+      const model = { ...fallback, ...modelOverrides(configSnapshot, await this.routeEfforts(route.provider, route.model)) }
       progress.provider = model.provider
       progress.model = model.model
       progress.promptHash = `sha256:${hashString(promptInput.prompt)}`
@@ -1311,13 +1319,17 @@ function isMemoryPolicyRefusal(error: unknown): boolean {
  * validated against the route's declared levels; an unknown id falls back to
  * the route default rather than sending an invalid request.
  */
-function modelOverrides(config: StoreUserConfig, fallback: ModelSelection, efforts: readonly unknown[]): Partial<ModelSelection> {
+function modelOverrides(config: StoreUserConfig, efforts: readonly unknown[]): Partial<ModelSelection> {
   const patch: Partial<ModelSelection> = {}
   if (config.dream_model_provider !== '') patch.provider = config.dream_model_provider
   if (config.dream_model !== '') patch.model = config.dream_model
   if (config.dream_effort !== '') {
     const match = efforts.find(effort => String((effort as { id?: unknown }).id ?? effort) === config.dream_effort)
     if (match !== undefined) patch.reasoningEffort = (match as { id: ModelSelection['reasoningEffort'] }).id
+  } else if (config.dream_model_provider !== '' || config.dream_model !== '') {
+    // Effort is route-owned: drop the default route's inherited effort when
+    // the run is overridden to another route without an explicit effort.
+    patch.reasoningEffort = undefined
   }
   return patch
 }

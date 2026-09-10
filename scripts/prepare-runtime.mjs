@@ -24,7 +24,7 @@ import { execNpm, execPnpm } from './cli-bins.mjs'
 
 // Bump when the ASSEMBLY changes (deps, layout) so the SHA-keyed caches
 // invalidate themselves instead of shipping a stale tree.
-const SCRIPT_REV = 11
+const SCRIPT_REV = 12
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 function electronAbiToken() {
   try {
@@ -105,21 +105,26 @@ const skipped = []
 // 「发布纪律」); the runtime consumes those published versions instead of
 // packing the clone — same bytes the world can install, one provenance.
 // Source of truth: fork repo FORK.md (`node scripts/publish-fork.mjs --list`).
-// `dsh-client-ui-settings-models` was retired by revert ffffaf39 and removed
-// here on 2026-08-20. `dsh-tool-cordis` joined on 2026-08-21 to close its
-// generated catalog drift. `dsh-compaction-basic` joins in zw.2 on 2026-08-22:
-// the stock Provider now owns the bounded hierarchy fallback used by every
-// shipped preset. 0.1.2 deletes ApiProxy; `dsh-host-apiproxy` leaves and
-// `dsh-api-session-controller` joins (effort memory lives there). In 0.1.5,
+// The 0.1.5-rc.1 set restores the unified desktop toolbar dropped from the
+// old release-only lineage: `dsh-client-ui-layout` (shell.toolbar seat +
+// host registry), `dsh-client-ui-conversation` (session-header portal), and
+// `dsh-client-test-runtime` (its test support) join here, as does
+// `dsh-llm-pi-ai` (route-level session-affinity headers for affinity
+// gateways like OpenCode Go). Retired earlier:
+// `dsh-client-ui-settings-models` (revert ffffaf39, 2026-08-20). In 0.1.5
 // the upstream lifetime write lease replaces the retired fork persistence
-// coordinator, so session-persistence returns to the official package set.
+// coordinator, so session-persistence rides the official package set.
 const FORK_MODIFIED = new Set([
   '@deepseek-ai/dsh-agent-default-model',
   '@deepseek-ai/dsh-api-session-controller',
   '@deepseek-ai/dsh-client-modules',
+  '@deepseek-ai/dsh-client-test-runtime',
+  '@deepseek-ai/dsh-client-ui-conversation',
+  '@deepseek-ai/dsh-client-ui-layout',
   '@deepseek-ai/dsh-client-ui-model-selection',
   '@deepseek-ai/dsh-compaction-basic',
   '@deepseek-ai/dsh-host-frontend-static',
+  '@deepseek-ai/dsh-llm-pi-ai',
   '@deepseek-ai/dsh-mcp-client',
   '@deepseek-ai/dsh-todo-completion-guard',
   '@deepseek-ai/dsh-tool-cordis',
@@ -136,20 +141,21 @@ if (zwMatch === null) {
 const forkBaseVersion = zwMatch[1].slice(1)
 const wantedZw = Number(zwMatch[2])
 function resolveForkNpmVersion(forkName) {
-  for (let n = wantedZw; n >= 1; n--) {
-    const ver = `${forkBaseVersion}.zw.${n}`
-    try {
-      execNpm(['view', `${forkName}@${ver}`, 'version'], { stdio: 'pipe' })
-      return ver
-    } catch (err) {
-      if (err && (err.code === 'ENOENT' || err.code === 'EINVAL')) {
-        console.error(`prepare-runtime: could not run npm view (${err.code}: ${err.message.split('\n')[0]}) — npm must be on PATH`)
-        process.exit(1)
-      }
+  // Exact release only: letting each package descend to an older .zw layer
+  // assembles a mixed fork release — the failure mode the single-version
+  // discipline in FORK.md exists to prevent.
+  const ver = `${forkBaseVersion}.zw.${wantedZw}`
+  try {
+    execNpm(['view', `${forkName}@${ver}`, 'version'], { stdio: 'pipe' })
+    return ver
+  } catch (err) {
+    if (err && (err.code === 'ENOENT' || err.code === 'EINVAL')) {
+      console.error(`prepare-runtime: could not run npm view (${err.code}: ${err.message.split('\n')[0]}) — npm must be on PATH`)
+      process.exit(1)
     }
   }
-  console.error(`prepare-runtime: fork npm release not on the registry: ${forkName}@${forkBaseVersion}.zw.{${String(wantedZw)}..1}`)
-  console.error('  publish it in the fork repo (tag v*+zw.* -> npm release workflow), then re-run')
+  console.error(`prepare-runtime: fork npm release not on the registry: ${forkName}@${ver}`)
+  console.error('  publish the complete .zw layer in the fork repo (node scripts/publish-fork.mjs), then re-run')
   process.exit(1)
 }
 const forkNpmOf = {}
@@ -192,11 +198,14 @@ for (const pkg of packages) {
   // Rewrite fork-name references to the @crazx alias BEFORE packing. pnpm's
   // `npm:` alias overrides do not reach into file:-tarball manifests, so a
   // packed `@deepseek-ai/dsh-base` keeping `dsh-agent-default-model:
-  // workspace:^` (pack expands it to `^0.1.0-rc.8`) resolves the OFFICIAL
-  // registry copy of a fork-modified package once upstream publishes that rc
-  // (the zw.4 assembly leaked six packages this way). Dependency edges point
-  // at the alias; peer edges rename their key — the root manifest provides
-  // every alias as a direct dependency, so peers bind to the crazx instance.
+  // workspace:^` (pack expands it to the bare rc version) resolves the
+  // OFFICIAL registry copy of a fork-modified package once upstream
+  // publishes that rc (the zw.4 assembly leaked six packages this way).
+  // Dependency edges point at the alias; peer edges KEEP the original
+  // `@deepseek-ai/*` key and pin the exact fork version — the same policy
+  // publish-fork.mjs applies — because peers require semver, not npm
+  // aliases, and the overrides map re-points the original name at the
+  // @crazx instance for the install.
   let rewrote = false
   for (const field of ['dependencies', 'optionalDependencies']) {
     const deps = manifest[field]
@@ -210,8 +219,7 @@ for (const pkg of packages) {
   if (manifest.peerDependencies !== undefined) {
     for (const name of Object.keys(manifest.peerDependencies)) {
       if (!FORK_MODIFIED.has(name)) continue
-      delete manifest.peerDependencies[name]
-      manifest.peerDependencies[`${FORK_NPM_SCOPE}/${name.slice('@deepseek-ai/'.length)}`] = forkNpmOf[name]
+      manifest.peerDependencies[name] = forkNpmOf[name]
       rewrote = true
     }
   }
@@ -297,7 +305,7 @@ writeFileSync(resolve(runtimeDir, 'package.json'), JSON.stringify({
   // Deterministic installer: the pnpm shim honors the nearest packageManager
   // pin, so the runtime tree installs under the same major the repo pins
   // instead of whatever pnpm the assembling shell defaults to.
-  packageManager: 'pnpm@10.28.0',
+  packageManager: 'pnpm@11.7.0',
   dependencies: {
     ...forkDirectDeps,
     ...tarballDirectDeps,
@@ -443,7 +451,7 @@ rmSync(toolsDir, { recursive: true, force: true })
 mkdirSync(toolsDir, { recursive: true })
 writeFileSync(resolve(toolsDir, 'package.json'), JSON.stringify({
   private: true,
-  dependencies: { node: '24.9.0', pnpm: '^10.28.0' },
+  dependencies: { node: '24.9.0', pnpm: '11.7.0' },
 }, null, 2) + '\n')
 writeFileSync(resolve(toolsDir, 'pnpm-workspace.yaml'), 'allowBuilds:\n  node: true\n')
 if (process.platform === 'win32') {

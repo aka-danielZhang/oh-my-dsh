@@ -10,6 +10,12 @@ import type { DesktopInvoke } from '../src/client/env.ts'
 
 const copy = { turnDone: '回合已完成', awaitInput: '等待你的输入' }
 
+/** Empty authority stub: no session has a live interaction. */
+const emptyPending = {
+  getSnapshot: (): ReadonlyMap<string, unknown> => new Map(),
+  subscribe: (): (() => void) => () => {},
+}
+
 describe('shouldNotify', () => {
   const edge = { sessionId: 'a' }
   it('notifies when the window is hidden', () => {
@@ -74,6 +80,7 @@ describe('installNotifications', () => {
     let now = 0
     const stop = installNotifications({
       list,
+      pending: emptyPending,
       invoke,
       logger: { warn: () => {} },
       copy,
@@ -103,6 +110,7 @@ describe('installNotifications', () => {
     let ids: string[] = []
     let flush = (): void => {}
     const stop = installNotifications({
+      pending: emptyPending,
       list: {
         getSnapshot: () => ({ ids, byId: rows, current: 'a' }),
         subscribe: (fn: () => void) => {
@@ -144,6 +152,7 @@ describe('installNotifications', () => {
     const byId: Record<string, { id: string; displayTitle: string; running: boolean }> = {}
     let flush = (): void => {}
     const stop = installNotifications({
+      pending: emptyPending,
       list: {
         getSnapshot: () => ({ ids, byId }),
         subscribe: (fn: () => void) => {
@@ -165,5 +174,48 @@ describe('installNotifications', () => {
     flush()
     assert.deepEqual(recorded, [])
     stop()
+  })
+
+  it('raises await-input from the pending authority joined with the list', async () => {
+    const recorded: string[] = []
+    const rows: Record<string, { id: string; displayTitle: string; running: boolean }> = {
+      a: { id: 'a', displayTitle: 'Alpha', running: true },
+    }
+    let listFlush = (): void => {}
+    let pendingFlush = (): void => {}
+    let pendingMap = new Map<string, unknown>()
+    let unsubscribed = false
+    const stop = installNotifications({
+      list: {
+        getSnapshot: () => ({ ids: ['a'] as const, byId: rows, current: 'a' }),
+        subscribe: (fn) => {
+          listFlush = fn
+          return () => {}
+        },
+      },
+      pending: {
+        getSnapshot: () => pendingMap,
+        subscribe: (fn) => {
+          pendingFlush = fn
+          return () => { unsubscribed = true }
+        },
+      },
+      invoke: { invoke: async () => undefined },
+      logger: { warn: () => {} },
+      copy,
+      openSession: () => {},
+      record: (edge) => { recorded.push(`${edge.kind}:${edge.sessionId}`) },
+      surface: () => ({ hidden: true, focused: false }),
+    })
+    // The authority gains an interaction while the list row is unchanged.
+    pendingMap = new Map([['a', { kind: 'question' }]])
+    pendingFlush()
+    assert.deepEqual(recorded, ['await-input:a'])
+    // Clearing it does not re-notify; the edge is none→present only.
+    pendingMap = new Map()
+    pendingFlush()
+    assert.deepEqual(recorded, ['await-input:a'])
+    stop()
+    assert.equal(unsubscribed, true)
   })
 })
