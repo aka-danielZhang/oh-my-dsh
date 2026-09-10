@@ -26,11 +26,11 @@ describe('titlebarCss', () => {
   it('scopes the legacy band rules to the pre-toolbar fallback posture', () => {
     const css = titlebarCss(28)
     assert.ok(
-      css.includes('html:not([data-desktop-toolbar]) div:has(> [data-shell-overlay])>div:nth-child(1){box-sizing:border-box;padding-top:28px;}'),
+      css.includes('html:not([data-shell-toolbar-on]) div:has(> [data-shell-overlay])>div:nth-child(1){box-sizing:border-box;padding-top:28px;}'),
       'the sidebar band inset holds only until the toolbar grid row mounts',
     )
     assert.ok(
-      css.includes('html:not([data-desktop-toolbar]) div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:80px;}'),
+      css.includes('html:not([data-shell-toolbar-on]) div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:80px;}'),
       'the collapsed-header fallback is the fixed 80px light row; with the toolbar mounted the header portals away and the rule has no target',
     )
     assert.ok(!css.includes('--desktop-band-controls-right'), 'the dynamic-clearance experiment is superseded by the toolbar')

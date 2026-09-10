@@ -36,7 +36,7 @@ rc.12「内容顶到窗口上沿」把 session header、右栏页签条塞进 28
 - Trailing：运行面切换（直接触发 `dsh_desktop_switch_surface` 原生菜单，与 brand 右键同命令）、更新、通知、`sessionEndHost` cell。
 - 根背景 `-webkit-app-region: drag`；button/`a[href]`/input/textarea/`[role=button]`/`[role=tab]` 统一 no-drag。**普通模式的分段拖拽条（drag-strip.ts）整体删除**。
 - Host cell 通过 `ToolbarHostPublisher` 的 callback ref 发布：bridge 端（只发布/释放自己那对）+ fork 端（release 仅在 `current === hosts` 时生效）**两道独立身份栅栏**，旧 HMR disposer 永不误删新 host。
-- `data-desktop-toolbar` 标记挂 `documentElement`（挂载/卸载随 fiber），titlebar.ts 的旧规则用它门控。
+- `data-shell-toolbar-on` 标记挂 `documentElement`（挂载/卸载随 fiber），titlebar.ts 的旧规则用它门控——根标记与 toolbar 组件的 `data-desktop-toolbar` DOM 属性刻意不同名，避免属性选择器在探针/样式里误配 `<html>`。
 
 ### 4. fork session-controller：transient selection history
 
@@ -46,7 +46,7 @@ rc.12「内容顶到窗口上沿」把 session header、右栏页签条塞进 28
 
 ## 兼容与降级
 
-- **无 toolbar（fork 未升级 / bridge 未挂载）**：titlebar.ts 的旧规则（侧栏 28px 带 + 收起态固定 80px）以 `html:not([data-desktop-toolbar])` 门控继续生效——rc.13 行为即 fallback。
+- **无 toolbar（fork 未升级 / bridge 未挂载）**：titlebar.ts 的旧规则（侧栏 28px 带 + 收起态固定 80px）以 `html:not([data-shell-toolbar-on])` 门控继续生效——rc.13 行为即 fallback。
 - **fullscreen rightbar 不变**：仍 `fixed inset:0` 真接管（z-40 盖住 toolbar，toolbar 保持 mounted 不可见，退出走面板按钮）；首个 pane strip 让灯 + 自带拖拽语义原样保留。
 - **保留不变**：收起侧栏真实 0px + 原生 toggle 隐藏（rail.ts）、更新/通知/新会话/运行面现有业务回调、手写 style 的 `data-plugin`/`data-plugin-css` 所有权纪律。
 - **不再渲染假按钮**：没有 Terminal 能力就不画 Terminal；Help 无真实目标暂不渲染；`More` 菜单不做 DOM 克隆，若要统一菜单需先立 typed command/menu seam。

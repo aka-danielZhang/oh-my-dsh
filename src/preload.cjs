@@ -28,6 +28,47 @@ function isHarnessPage() {
   return /^https?:\/\/127\.0\.0\.1(?::\d+)?/i.test(location.href)
 }
 
+/**
+ * Unified-toolbar assertions (macOS fusion, 0.2.0-rc.14): run before the IPC
+ * round-trip so a layout regression fails the probe with a precise reason.
+ * Covers the no-session automatable slice of the acceptance matrix — single
+ * 38px row, buttons on one line clear of the traffic-light inset, drag
+ * region on the row background, and the columns starting exactly at the
+ * toolbar's bottom edge. Throws on the first violated invariant.
+ */
+function assertDesktopToolbar() {
+  if (platform !== 'macos') return
+  const toolbar = document.querySelector('[data-desktop-toolbar]')
+  if (!toolbar) throw new Error('toolbar DOM missing (desktop-toolbar not mounted)')
+  const bar = toolbar.getBoundingClientRect()
+  if (bar.height < 36 || bar.height > 40) throw new Error(`toolbar height ${bar.height} != 38`)
+  const buttons = [...toolbar.querySelectorAll('button')]
+  if (buttons.length < 4) throw new Error(`toolbar buttons ${buttons.length} < 4`)
+  const rects = buttons.map((button) => button.getBoundingClientRect())
+  const left = Math.min(...rects.map((rect) => rect.left))
+  if (left < 80) {
+    const layout = buttons
+      .map((button, index) => {
+        const rect = rects[index]
+        const label = button.getAttribute('aria-label') || button.textContent?.trim().slice(0, 24) || '<unlabeled>'
+        return `${label}@${Math.round(rect.left)},${Math.round(rect.top)} ${Math.round(rect.width)}x${Math.round(rect.height)}${rect.width === 0 ? ' (hidden)' : ''}`
+      })
+      .join(' | ')
+    throw new Error(`leading button at x=${left} overlaps the traffic lights (>=80 required): ${layout}`)
+  }
+  const tops = rects.map((rect) => rect.top)
+  const spread = Math.max(...tops) - Math.min(...tops)
+  if (spread > 2) throw new Error(`toolbar buttons span ${spread}px vertically (wrapped rows)`)
+  const region = getComputedStyle(toolbar).webkitAppRegion
+  if (region !== 'drag') throw new Error(`toolbar app-region ${region} != drag (window cannot be dragged)`)
+  const frame = document.querySelector('div:has(> [data-shell-overlay])')
+  const sidebar = frame?.children[1]
+  if (sidebar) {
+    const offset = sidebar.getBoundingClientRect().top - bar.bottom
+    if (Math.abs(offset) > 2) throw new Error(`columns start ${offset}px off the toolbar bottom edge`)
+  }
+}
+
 function startE2eProbe() {
   if (process.env.DSH_DESKTOP_E2E_PROBE !== '1') return
   if (!isHarnessPage()) return
@@ -52,6 +93,14 @@ function startE2eProbe() {
             const message = error && error.message ? error.message : String(error)
             return ipcRenderer.invoke('dsh_desktop_e2e_report', { verdict: `fail:${message}` })
           })
+        return
+      }
+      try {
+        assertDesktopToolbar()
+      } catch (error) {
+        ipcRenderer
+          .invoke('dsh_desktop_e2e_report', { verdict: `fail:${error.message}` })
+          .catch(() => {})
         return
       }
       ipcRenderer

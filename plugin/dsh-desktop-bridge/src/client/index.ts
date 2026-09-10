@@ -153,8 +153,8 @@ export function apply(ctx: ClientContext): void {
     // While the toolbar is mounted the frame's first grid row IS the band;
     // the fallback rules in titlebarCss scope themselves off this marker.
     ctx.effect(() => {
-      document.documentElement.setAttribute('data-desktop-toolbar', '')
-      return () => { document.documentElement.removeAttribute('data-desktop-toolbar') }
+      document.documentElement.setAttribute('data-shell-toolbar-on', '')
+      return () => { document.documentElement.removeAttribute('data-shell-toolbar-on') }
     }, 'desktop-bridge: toolbar marker')
     const toolbarInjected = (): DesktopToolbarInjected => ({
       ...updater,

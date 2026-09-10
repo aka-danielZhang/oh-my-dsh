@@ -9,7 +9,7 @@
  * the frame, occupied by the bridge's DesktopToolbar with the floating
  * lights inside its leading inset. THIS module now only carries the
  * pre-toolbar fallback: until the toolbar publishes its
- * `data-desktop-toolbar` marker on the document root, the legacy rules hold
+ * `data-shell-toolbar-on` marker on the document root, the legacy rules hold
  * (the sidebar column clears the lights; a collapsed session header clears
  * the light row with a fixed 80px inset). Once the toolbar mounts, its grid
  * row pushes every column below the band and the header portals into the
@@ -72,7 +72,7 @@ export function shouldFuseTitlebar(platform: string): boolean {
  */
 export function titlebarCss(zonePx: number): string {
   const band = `${String(zonePx)}px`
-  const pre = 'html:not([data-desktop-toolbar])'
+  const pre = 'html:not([data-shell-toolbar-on])'
   return [
     'html,body{overflow:hidden;}',
     `${pre} div:has(> [data-shell-overlay])>div:nth-child(1){box-sizing:border-box;padding-top:${band};}`,
