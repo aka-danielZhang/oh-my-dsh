@@ -2,21 +2,28 @@
  * macOS titlebar fusion, browser half. The shell builds the main window with
  * `TitleBarStyle::Overlay` and hides the painted title
  * (`NSWindowTitleVisibility::Hidden`): the traffic lights float over the page
- * and no native chrome is drawn. This module owns the CSS half of that
- * contract — the app's columns run edge to edge and their content tops out
- * at y=0 (macOS toolbar look), except the sidebar column whose surface sits
- * under the floating lights and whose content keeps clearing the reserved
- * top band; the drag region the Overlay style requires is a shell.overlay
- * entry (titlebar.tsx). Band controls that moved up to y=0 keep their events
- * via the segmented drag surface's holes (drag-strip.ts). Gated on the
- * shell platform: platforms that keep a native title bar get zero
- * DOM/CSS side effects.
+ * and no native chrome is drawn.
+ *
+ * Since the unified toolbar (bridge 0.2.0-rc.14) the desktop's band layout
+ * lives in ui-layout's `shell.toolbar` slot — a real first grid row owned by
+ * the frame, occupied by the bridge's DesktopToolbar with the floating
+ * lights inside its leading inset. THIS module now only carries the
+ * pre-toolbar fallback: until the toolbar publishes its
+ * `data-desktop-toolbar` marker on the document root, the legacy rules hold
+ * (the sidebar column clears the lights; a collapsed session header clears
+ * the light row with a fixed 80px inset). Once the toolbar mounts, its grid
+ * row pushes every column below the band and the header portals into the
+ * toolbar, so both legacy rules turn themselves off — plain web, Windows,
+ * and Linux never see any of this (the gate is the macOS platform only).
+ *
+ * The fullscreen right-sidebar keeps its rc.13 semantics untouched: a fixed
+ * `inset: 0` takeover whose first pane strip clears the lights and carries
+ * the drag region itself (the toolbar stays mounted underneath the z-40
+ * panel and resumes drag duty on exit).
  */
 
 /** Reserved top band height in px (the standard macOS titlebar height). */
 export const TITLEBAR_ZONE_PX = 28
-
-import { RAIL_CLEARANCE_VAR } from './rail.ts'
 
 /**
  * Whether the overlay-titlebar fusion applies to this shell platform. The
@@ -30,43 +37,25 @@ export function shouldFuseTitlebar(platform: string): boolean {
 }
 
 /**
- * The band rules. The app frame is the div whose direct child carries
- * `data-shell-overlay` (ui-layout's overlay layer); its first three element
- * children are the sidebar / center / details grid columns.
+ * The band rules. See the module doc: every layout rule here is scoped to
+ * `html:not([data-desktop-toolbar])` — the pre-toolbar fallback posture —
+ * because the toolbar's grid row supersedes them the moment it mounts.
  *
- * Only the FIRST column keeps the band inset (0.2.0-rc.12): the sidebar
- * surface paints under the floating traffic lights, so its content must
- * clear the band, while the center/details columns run their content up to
- * y=0 — the conversation header and the right-sidebar strip land inside the
- * band like a native macOS toolbar and the blank strip under the lights is
- * gone. Column padding cannot reach two kinds of surfaces, so they get their
- * own rules:
- *
- * - `[data-sidebar-right-panel]` is the runtime's ABSOLUTE right-sidebar
- *   surface (positioned against its zero-width grid column). `push`/`float`
- *   (z-10, under the overlay layer) stay at y=0 and get their strip holed
- *   like every other band control. `fullscreen` (0.2.0-rc.13) keeps its
- *   native `position:fixed; inset:0` and truly takes over the window — an
- *   rc.12 attempt to hold it below the band instead stranded it on a second
- *   row beside the still-visible center header. While fullscreen the panel
- *   (z-40) covers the overlay layer, so the drag segments cannot reach the
- *   band: the first pane's strip background becomes the drag surface (every
- *   interactive child opts out) and pads its left edge past the traffic
- *   lights. The band rail controls stay covered for the whole fullscreen
- *   session — a deliberate tradeoff; exit goes through the panel's own
- *   buttons.
- * - when the sidebar is collapsed the first grid track is 0px wide, so the
- *   center column starts at x=0 and its session header would slide under
- *   BOTH the traffic lights and the band's rail controls (0.2.0-rc.14): the
- *   lights span x≈16–70 but the controls — the persistent toggle plus the
- *   conditional updater, notify bell, and collapsed-only New Session
- *   bubble — run from left:86px to a DYNAMIC right edge, so no fixed
- *   padding can clear them (the rc.13 80px let titles run under the icons).
- *   The clearance is therefore the larger of the light row and the
- *   measured controls edge published as a CSS variable by
- *   installRailClearance (rail.ts); the var() fallback degrades to the
- *   80px light row before the first measurement or if the controls never
- *   appear. The expanded header already clears everything at x≥280.
+ * - The sidebar column keeps its band inset while no toolbar exists: its
+ *   surface paints under the floating traffic lights, so its content must
+ *   clear the band. With the toolbar mounted the columns start below the
+ *   first grid row and no inset is needed.
+ * - A collapsed session header keeps the fixed 80px light-row inset while
+ *   no toolbar exists (the same baseline the toolbar's leading inset sits
+ *   on; the rc.14 dynamic-clearance experiment is superseded by the
+ *   toolbar). With the toolbar mounted the header portals INTO the toolbar
+ *   and the in-body header collapses to `display: contents`, so the rule
+ *   has no target anyway.
+ * - The fullscreen right-sidebar is NOT fallback-scoped: it keeps its
+ *   native `position: fixed; inset: 0` takeover in every posture, and its
+ *   first pane strip clears the lights (the toolbar is covered by the z-40
+ *   panel while fullscreen, so the strip IS the drag surface — every
+ *   interactive child opts out).
  *
  * The same sheet locks the document itself non-scrollable: the app is a
  * fixed-viewport shell (html/body/#root height 100%), and any scrollable
@@ -77,33 +66,26 @@ export function shouldFuseTitlebar(platform: string): boolean {
  * "drifting up" until a resize clamps it). `overflow: hidden` on the root
  * pair makes the document unscrollable so the band geometry stays put.
  *
- * The drag surface itself is a set of gap segments inside the slot-rendered
- * host (drag-strip.ts); the segments carry `-webkit-app-region: drag` while
- * the host stays click-through so holes let band controls receive events.
  * `:has()` is supported by every WKWebView new enough to run the shells.
  * @param zonePx - reserved band height in px.
  * @returns the stylesheet text.
  */
 export function titlebarCss(zonePx: number): string {
   const band = `${String(zonePx)}px`
+  const pre = 'html:not([data-desktop-toolbar])'
   return [
     'html,body{overflow:hidden;}',
-    `div:has(> [data-shell-overlay])>div:nth-child(1){box-sizing:border-box;padding-top:${band};}`,
-    // rc.13: fullscreen truly takes over (native fixed inset:0, no top
-    // offset). The lights only overlap the first pane's strip background;
-    // tabs start at x=80 — the same baseline the rail controls sit on.
+    `${pre} div:has(> [data-shell-overlay])>div:nth-child(1){box-sizing:border-box;padding-top:${band};}`,
+    // Fullscreen truly takes over (native fixed inset:0, no top offset). The
+    // lights only overlap the first pane's strip background; tabs start at
+    // x=80 — the same baseline the toolbar's leading inset sits on.
     '[data-sidebar-right-panel="fullscreen"] [data-dockkit-pane]:first-of-type [data-dockkit-strip]{padding-left:80px;}',
-    // The z-40 panel covers the overlay layer, so the drag segments cannot
-    // reach the band while fullscreen — the strip background becomes the
-    // drag surface and every interactive child opts out.
+    // The z-40 panel covers the overlay layer AND the toolbar, so the strip
+    // background becomes the drag surface and every interactive child opts
+    // out.
     '[data-sidebar-right-panel="fullscreen"] [data-dockkit-strip]{-webkit-app-region:drag;}',
     '[data-sidebar-right-panel="fullscreen"] [data-dockkit-strip] :is(button, a[href], [role="button"], [role="tab"], input, textarea, [contenteditable="true"]){-webkit-app-region:no-drag;}',
-    // rc.14: the collapsed header clears the measured rail controls, not
-    // just the lights — max() keeps the 80px light row as the floor and the
-    // var() fallback degrades to it until installRailClearance measures.
-    `div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:max(80px, var(${RAIL_CLEARANCE_VAR}, 80px));}`,
-    '[data-desktop-drag-strip]{pointer-events:none;}',
-    '[data-desktop-drag-seg]{position:absolute;top:0;bottom:0;-webkit-app-region:drag;pointer-events:auto;}',
+    `${pre} div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:80px;}`,
   ].join('')
 }
 

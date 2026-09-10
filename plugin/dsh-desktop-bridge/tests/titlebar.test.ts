@@ -23,27 +23,27 @@ describe('titlebarCss', () => {
   it('locks the document scrollable root pair', () => {
     assert.ok(titlebarCss(28).includes('html,body{overflow:hidden;}'), 'the fixed-viewport shell must not be scrollable')
   })
-  it('marks only the gap segments for Electron window dragging, never the host', () => {
+  it('scopes the legacy band rules to the pre-toolbar fallback posture', () => {
     const css = titlebarCss(28)
-    assert.ok(css.includes('[data-desktop-drag-seg]{position:absolute;top:0;bottom:0;-webkit-app-region:drag;pointer-events:auto;}'))
-    assert.ok(css.includes('[data-desktop-drag-strip]{pointer-events:none;}'), 'the host stays click-through so band controls keep their events')
-    assert.ok(!css.includes('[data-desktop-drag-strip]{-webkit-app-region:drag;}'), 'a full-width drag strip covers band controls')
+    assert.ok(
+      css.includes('html:not([data-desktop-toolbar]) div:has(> [data-shell-overlay])>div:nth-child(1){box-sizing:border-box;padding-top:28px;}'),
+      'the sidebar band inset holds only until the toolbar grid row mounts',
+    )
+    assert.ok(
+      css.includes('html:not([data-desktop-toolbar]) div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:80px;}'),
+      'the collapsed-header fallback is the fixed 80px light row; with the toolbar mounted the header portals away and the rule has no target',
+    )
+    assert.ok(!css.includes('--desktop-band-controls-right'), 'the dynamic-clearance experiment is superseded by the toolbar')
+    assert.ok(!css.includes('[data-desktop-drag-seg]'), 'the segmented drag strip is superseded: the toolbar row is the drag region')
+    assert.ok(!css.includes('[data-desktop-drag-strip]'), 'no segmented strip host remains')
   })
   it('lets the fullscreen right-sidebar panel truly take over the window', () => {
     const css = titlebarCss(28)
     assert.ok(!css.includes('[data-sidebar-right-panel="fullscreen"]{top:'), 'fullscreen keeps native fixed inset:0 — a top offset strands it on a second row beside the center header')
     assert.ok(!css.includes('[data-sidebar-right-panel]{'), 'push/float stay at y=0 — the overlay layer holes their strip like any band control')
-    assert.ok(css.includes('[data-sidebar-right-panel="fullscreen"] [data-dockkit-pane]:first-of-type [data-dockkit-strip]{padding-left:80px;}'), 'the first pane strip clears the traffic lights (rail-controls baseline); a second split pane needs no carve')
-    assert.ok(css.includes('[data-sidebar-right-panel="fullscreen"] [data-dockkit-strip]{-webkit-app-region:drag;}'), 'the strip background is the drag surface while the z-40 panel covers the overlay layer')
+    assert.ok(css.includes('[data-sidebar-right-panel="fullscreen"] [data-dockkit-pane]:first-of-type [data-dockkit-strip]{padding-left:80px;}'), 'the first pane strip clears the traffic lights (toolbar leading-inset baseline); a second split pane needs no carve')
+    assert.ok(css.includes('[data-sidebar-right-panel="fullscreen"] [data-dockkit-strip]{-webkit-app-region:drag;}'), 'the strip background is the drag surface while the z-40 panel covers the toolbar')
     assert.ok(css.includes('[data-sidebar-right-panel="fullscreen"] [data-dockkit-strip] :is(button, a[href], [role="button"], [role="tab"], input, textarea, [contenteditable="true"]){-webkit-app-region:no-drag;}'), 'strip interactive children (tabs are role=tab, close is a button) keep their clicks')
-  })
-  it('clears the measured rail controls, not just the traffic lights (collapsed header)', () => {
-    const css = titlebarCss(28)
-    assert.ok(
-      css.includes('div[data-sidebar-collapsed]:has(> [data-shell-overlay]) [data-slot="conversation.session.header"]{padding-left:max(80px, var(--desktop-band-controls-right, 80px));}'),
-      'the collapsed header must clear the rail controls\' live right edge; max() floors it at the 80px light row and the var() fallback degrades to it until installRailClearance measures',
-    )
-    assert.ok(!css.includes('[data-slot="conversation.session.header"]{padding-left:80px;}'), 'a fixed 80px lets titles run under the rail controls (toggle/updater/bell/new-session)')
   })
   it('embeds the configured band height', () => {
     assert.ok(titlebarCss(TITLEBAR_ZONE_PX).includes(`padding-top:${String(TITLEBAR_ZONE_PX)}px`))

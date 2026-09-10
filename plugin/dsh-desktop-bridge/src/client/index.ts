@@ -27,11 +27,10 @@ import { DesktopBadge, type BadgeInjected } from './badge.tsx'
 import { UpdateIndicator, type UpdateIndicatorInjected } from './update-indicator.tsx'
 import { createUpdateCoordinator } from './update-coordinator.ts'
 import { en, zh, type DesktopBridgeKey } from './locales.ts'
-import { installRailClearance, installRailCss, installRailHider } from './rail.ts'
-import { DesktopRailControls, type RailControlsInjected } from './rail-controls.tsx'
+import { installRailCss, installRailHider } from './rail.ts'
+import { DesktopToolbar, type DesktopToolbarInjected } from './toolbar.tsx'
+import { ToolbarHostPublisher, type ToolbarHostRegistry } from './toolbar-hosts.ts'
 import { installTitlebarCss, shouldFuseTitlebar, TITLEBAR_ZONE_PX } from './titlebar.ts'
-import { DesktopDragStrip, type DragStripInjected } from './titlebar.tsx'
-import { installDragSegments } from './drag-strip.ts'
 import { installNotifications } from './notifications.ts'
 import { createNotifyInbox } from './notify-inbox.ts'
 import { NotifyIndicator, type NotifyCenterInjected } from './notify-center.tsx'
@@ -69,20 +68,20 @@ export function apply(ctx: ClientContext): void {
   }
   const { invoke } = probe
 
-  // macOS overlay-titlebar fusion: reserve the top band under the floating
-  // traffic lights; the strip entry registered below hosts the segmented
-  // drag surface (drag-strip.ts — gap segments, never a full-width strip, so
-  // absolute panel controls living in the band keep their events).
-  // Same gate hides the collapsed sidebar rail outright (rail.ts): the 56px
-  // strip ui-layout keeps would sit dead under the traffic lights.
+  // macOS overlay-titlebar fusion. Since 0.2.0-rc.14 the unified toolbar
+  // (toolbar.tsx) mounts into ui-layout's `shell.toolbar` slot — a real
+  // first grid row with the traffic lights in its leading inset; the row's
+  // background is the drag region and the session header portals into its
+  // hosts. The styles below carry the pre-toolbar FALLBACK (sidebar band
+  // inset, collapsed-header light row) plus the unchanged fullscreen
+  // semantics; the same gate hides the collapsed sidebar rail outright
+  // (rail.ts): the 56px strip ui-layout keeps would sit dead under the
+  // traffic lights.
   const fuseTitlebar = shouldFuseTitlebar(probe.gate.platform)
   if (fuseTitlebar) {
     ctx.effect(() => installTitlebarCss(document, TITLEBAR_ZONE_PX), 'desktop-bridge: titlebar band')
     ctx.effect(() => installRailCss(document), 'desktop-bridge: collapsed-rail css')
     ctx.effect(() => installRailHider(document), 'desktop-bridge: collapsed-rail hider')
-    // Publishes the rail controls' measured right edge for the collapsed
-    // header's clearance rule (titlebar.ts consumes the variable).
-    ctx.effect(() => installRailClearance(document), 'desktop-bridge: rail clearance')
   }
 
   ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'desktop-bridge: dictionaries')
@@ -121,16 +120,43 @@ export function apply(ctx: ClientContext): void {
       const disposeNotify = ctx.slots.register({ name: 'shell.overlay', id: 'desktop-notify-center', order: 7, locale: NS, inject: notifyInjected }, NotifyIndicator)
       return () => { disposeNotify(); disposeUpdate(); disposeBadge() }
     }
-    const dragInjected = (): DragStripInjected => ({
-      mount: (host) => installDragSegments(host, TITLEBAR_ZONE_PX),
-    })
-    const disposeStrip = ctx.slots.register({ name: 'shell.overlay', id: 'desktop-drag-strip', order: 0, inject: dragInjected }, DesktopDragStrip)
-    // Resolve ctx.layout lazily per click, never at registration time:
+    // Resolve ctx.layout lazily per use, never at registration time:
     // slots.inject fires the moment ui-layout's declaration lands — inside
     // that fiber's startup, before it turns ACTIVE — and strict ctx.get only
     // serves ACTIVE providers, so a registration-time read can miss a layout
-    // that is about to exist (the controls would never appear).
-    const railInjected = (): RailControlsInjected => ({
+    // that is about to exist (the controls would never appear). The
+    // toolbar-host registry is structural: an OLD runtime without it simply
+    // never publishes hosts, and the session header stays in place.
+    const toolbarRegistry = (): ToolbarHostRegistry | undefined => {
+      const layout = ctx.get('layout') as unknown as ToolbarHostRegistry | undefined
+      return layout !== undefined && typeof layout.setToolbarHosts === 'function' ? layout : undefined
+    }
+    const historyApi = (): Partial<{
+      canBack(): boolean
+      canForward(): boolean
+      back(): void
+      forward(): void
+    }> => ctx.sessions as unknown as Partial<{
+      canBack(): boolean
+      canForward(): boolean
+      back(): void
+      forward(): void
+    }>
+    // One publisher per fiber: identity-stable callback refs for the
+    // toolbar's two host cells (old-HMR disposers release only their OWN
+    // pair — see ToolbarHostPublisher).
+    let publisher: ToolbarHostPublisher | undefined
+    const publisherOf = (): ToolbarHostPublisher => {
+      publisher ??= new ToolbarHostPublisher(toolbarRegistry())
+      return publisher
+    }
+    // While the toolbar is mounted the frame's first grid row IS the band;
+    // the fallback rules in titlebarCss scope themselves off this marker.
+    ctx.effect(() => {
+      document.documentElement.setAttribute('data-desktop-toolbar', '')
+      return () => { document.documentElement.removeAttribute('data-desktop-toolbar') }
+    }, 'desktop-bridge: toolbar marker')
+    const toolbarInjected = (): DesktopToolbarInjected => ({
       ...updater,
       ...notifyInjected(),
       toggleSidebar: () => {
@@ -142,9 +168,26 @@ export function apply(ctx: ClientContext): void {
         layout.toggleSidebar()
       },
       startSession: () => { ctx.uiWorkspace.startSession() },
+      switchSurface: () => { void invoke.invoke('dsh_desktop_switch_surface').catch((error: unknown) => { logger.warn(`dsh-desktop-bridge: surface switch failed: ${String(error)}`) }) },
+      // Transient selection history from the session controller — structural
+      // again: a runtime older than the fork revision shipping the history
+      // simply reports both buttons disabled and no-ops them.
+      canBack: () => historyApi().canBack?.() ?? false,
+      canForward: () => historyApi().canForward?.() ?? false,
+      back: () => { historyApi().back?.() },
+      forward: () => { historyApi().forward?.() },
+      centerRef: (el) => { publisherOf().center(el) },
+      endRef: (el) => { publisherOf().end(el) },
     })
-    const disposeControls = ctx.slots.register({ name: 'shell.overlay', id: 'desktop-rail-controls', order: 5, locale: NS, inject: railInjected }, DesktopRailControls)
-    return () => { disposeControls(); disposeStrip(); disposeBadge() }
+    // The slot key and component face exist in the fork's SlotMap first; the
+    // pinned registry lags behind, so the registration casts through — same
+    // structural posture as the toolbar's runtime shares.
+    const disposeToolbar = (ctx.slots.register as Function)({ name: 'shell.toolbar', id: 'desktop-toolbar', locale: NS, inject: toolbarInjected }, DesktopToolbar) as () => void
+    return () => {
+      disposeToolbar()
+      publisher?.release()
+      disposeBadge()
+    }
   })
 }
 

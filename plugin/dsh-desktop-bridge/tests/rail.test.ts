@@ -1,12 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
-  RAIL_CLEARANCE_GAP_PX,
-  RAIL_CLEARANCE_VAR,
   collapseRailTemplate,
-  installRailClearance,
   installRailCss,
-  railClearanceValue,
   railCss,
   restoreRailTemplate,
 } from '../src/client/rail.ts'
@@ -58,200 +54,35 @@ describe('railCss', () => {
     const css = railCss()
     assert.ok(css.includes("div[data-slot='sidebar']>div>div:first-child>button:last-child{display:none;}"))
   })
-  it('seats the controls right of the traffic lights, centered on the dropped row', () => {
+  it('styles the unified toolbar row: 38px, native drag background, leading light inset', () => {
     const css = railCss()
-    assert.ok(css.includes('top:8px;left:86px;height:22px;'))
-    assert.ok(css.includes('gap:8px;'), 'breathing room between toggle and bubble')
-    assert.ok(css.includes('z-index:1'))
+    assert.ok(css.includes('[data-desktop-toolbar]{position:relative;display:flex;align-items:stretch;height:38px;'))
+    assert.ok(css.includes('[data-desktop-toolbar]{') && css.includes('-webkit-app-region:drag;'), 'the row background is the drag region')
+    assert.ok(css.includes('[data-desktop-toolbar-leading]{display:flex;align-items:center;gap:2px;flex:none;padding-left:86px;}'), 'the traffic lights own the leading inset')
   })
-  it('keeps the toggle always visible and clickable', () => {
+  it('lets every interactive child opt out of the drag region', () => {
     const css = railCss()
-    const toggleRule = css.match(/\[data-desktop-rail-controls\] \[data-desktop-rail-button\]\{[^}]*\}/)
-    assert.ok(toggleRule !== null)
-    assert.ok(toggleRule[0].includes('pointer-events:auto'))
-    assert.ok(toggleRule[0].includes('-webkit-app-region:no-drag!important'))
-    assert.ok(!toggleRule[0].includes('opacity:0'))
+    assert.ok(css.includes('[data-desktop-toolbar] button,[data-desktop-toolbar] a[href],[data-desktop-toolbar] input,[data-desktop-toolbar] textarea,[data-desktop-toolbar] [role="button"],[data-desktop-toolbar] [role="tab"]{-webkit-app-region:no-drag;}'))
   })
-  it('shows the New Session bubble only while collapsed, sliding in delayed', () => {
+  it('keeps the flexible center host cell and the trailing cluster', () => {
     const css = railCss()
-    assert.ok(css.includes('[data-desktop-rail-controls] [data-desktop-new-session]{opacity:0;visibility:hidden;transform:translateX(12px);pointer-events:none!important;'))
-    assert.ok(css.includes('div[data-sidebar-collapsed] [data-desktop-rail-controls] [data-desktop-new-session]{opacity:1;visibility:visible;'))
-    assert.ok(css.includes('transition:opacity .2s ease .18s,transform .2s ease .18s'))
+    assert.ok(css.includes('[data-desktop-toolbar-center]{flex:1 1 0;min-width:0;'))
+    assert.ok(css.includes('[data-desktop-toolbar-trailing]{display:flex;align-items:center;gap:2px;flex:none;padding-right:8px;}'))
   })
-  it('respects reduced motion', () => {
-    assert.ok(railCss().includes('@media (prefers-reduced-motion: reduce)'))
+  it('drops the collapsed-only New Session bubble (New Session lives in the toolbar)', () => {
+    const css = railCss()
+    assert.ok(!css.includes('data-desktop-new-session'), 'the bubble and its slide animation are superseded')
+  })
+  it('narrows responsively without shrinking type', () => {
+    const css = railCss()
+    assert.ok(css.includes('@media (max-width: 1099px)'), 'below 1100px the center truncates')
+    assert.ok(css.includes('@media (max-width: 767px){[data-desktop-toolbar-nav],[data-desktop-toolbar-workspace]{display:none;}}'), 'below 768px navigation and workspace affordances drop')
   })
   it('styles with semantic tokens only', () => {
     const css = railCss()
     assert.ok(css.includes('var(--dsw-alias-label-primary)'))
-    assert.ok(css.includes('var(--dsw-alias-interactive-bg-hover)'))
+    assert.ok(css.includes('var(--dsw-specific-sidebar-fill)'))
     assert.ok(!css.includes('#'), 'no literal colors')
-  })
-})
-
-describe('railClearanceValue', () => {
-  it('publishes the right edge plus the breathing gap, rounded up', () => {
-    assert.equal(railClearanceValue(350), '358px')
-    assert.equal(railClearanceValue(349.3), '358px', 'fractional widths must not shave the gap')
-    assert.equal(railClearanceValue(86), `${String(86 + RAIL_CLEARANCE_GAP_PX)}px`)
-  })
-  it('keeps the variable name the titlebar rule consumes', () => {
-    assert.equal(RAIL_CLEARANCE_VAR, '--desktop-band-controls-right')
-  })
-})
-
-describe('installRailClearance', () => {
-  class StubResizeObserver {
-    static instances: StubResizeObserver[] = []
-    readonly callback: () => void
-    observed: unknown[] = []
-    disconnected = false
-    constructor(callback: () => void) {
-      this.callback = callback
-      StubResizeObserver.instances.push(this)
-    }
-    observe(target: unknown): void { this.observed.push(target) }
-    disconnect(): void { this.disconnected = true }
-  }
-  class StubMutationObserver {
-    static instances: StubMutationObserver[] = []
-    readonly callback: () => void
-    observing = false
-    disconnected = false
-    constructor(callback: () => void) {
-      this.callback = callback
-      StubMutationObserver.instances.push(this)
-    }
-    observe(): void { this.observing = true }
-    disconnect(): void { this.disconnected = true }
-  }
-  function stubDoc() {
-    const props = new Map<string, string>()
-    let controls: unknown = null
-    return {
-      props,
-      setControls(el: unknown): void { controls = el },
-      doc: {
-        defaultView: { ResizeObserver: StubResizeObserver, MutationObserver: StubMutationObserver },
-        documentElement: {
-          style: {
-            setProperty: (k: string, v: string): void => { props.set(k, v) },
-            removeProperty: (k: string): void => { props.delete(k) },
-          },
-        },
-        querySelector: (selector: string): unknown => (selector === '[data-desktop-rail-controls]' ? controls : null),
-      },
-    }
-  }
-  function stubControls(right: number): { el: unknown; setRight: (v: number) => void } {
-    let edge = right
-    return {
-      el: { getBoundingClientRect: (): { right: number } => ({ right: edge }) },
-      setRight: (v: number): void => { edge = v },
-    }
-  }
-
-  it('publishes the measured edge and observes the container', () => {
-    StubResizeObserver.instances = []
-    StubMutationObserver.instances = []
-    const { el } = stubControls(350.4)
-    const { doc, props, setControls } = stubDoc()
-    setControls(el)
-    installRailClearance(doc as unknown as Document)
-    assert.equal(props.get(RAIL_CLEARANCE_VAR), '359px')
-    assert.equal(StubResizeObserver.instances.length, 1)
-    assert.deepEqual(StubResizeObserver.instances[0].observed, [el])
-  })
-  it('republishes when the controls resize (updater/bell mount or unmount)', () => {
-    StubResizeObserver.instances = []
-    StubMutationObserver.instances = []
-    const { el, setRight } = stubControls(200)
-    const { doc, props, setControls } = stubDoc()
-    setControls(el)
-    installRailClearance(doc as unknown as Document)
-    assert.equal(props.get(RAIL_CLEARANCE_VAR), '208px')
-    setRight(350)
-    StubResizeObserver.instances[0].callback()
-    assert.equal(props.get(RAIL_CLEARANCE_VAR), '358px')
-  })
-  it('removes the variable and disconnects both observers on dispose', () => {
-    StubResizeObserver.instances = []
-    StubMutationObserver.instances = []
-    const { el } = stubControls(350)
-    const { doc, props, setControls } = stubDoc()
-    setControls(el)
-    const dispose = installRailClearance(doc as unknown as Document)
-    assert.ok(props.has(RAIL_CLEARANCE_VAR))
-    dispose()
-    assert.ok(!props.has(RAIL_CLEARANCE_VAR), 'the effect must not leak its variable into the next mount')
-    assert.equal(StubResizeObserver.instances[0].disconnected, true)
-    assert.equal(StubMutationObserver.instances[0].disconnected, true)
-  })
-  it('waits for the slot-rendered container when absent at apply time', () => {
-    StubResizeObserver.instances = []
-    StubMutationObserver.instances = []
-    const { el } = stubControls(300)
-    const { doc, props, setControls } = stubDoc()
-    const dispose = installRailClearance(doc as unknown as Document)
-    assert.ok(!props.has(RAIL_CLEARANCE_VAR), 'nothing published before the container exists')
-    assert.ok(StubMutationObserver.instances[0].observing, 'a watch observer waits for the slot render')
-    setControls(el)
-    StubMutationObserver.instances[0].callback()
-    assert.equal(props.get(RAIL_CLEARANCE_VAR), '308px')
-    assert.ok(!StubMutationObserver.instances[0].disconnected, 'the watch observer stays alive — the slot may redeclare and replace the node later')
-    dispose()
-    assert.ok(!props.has(RAIL_CLEARANCE_VAR))
-  })
-  it('rebinds when the slot redeclares and replaces the node, then follows the new node', () => {
-    StubResizeObserver.instances = []
-    StubMutationObserver.instances = []
-    const first = stubControls(300)
-    const second = stubControls(250)
-    const { doc, props, setControls } = stubDoc()
-    setControls(first.el)
-    installRailClearance(doc as unknown as Document)
-    assert.equal(props.get(RAIL_CLEARANCE_VAR), '308px')
-    // ui-layout remount: old node unmounted, fresh node mounted.
-    setControls(second.el)
-    StubMutationObserver.instances[0].callback()
-    assert.equal(props.get(RAIL_CLEARANCE_VAR), '258px', 'the replacement republishes immediately')
-    assert.equal(StubResizeObserver.instances.length, 2)
-    assert.equal(StubResizeObserver.instances[0].disconnected, true, 'the observer bound to the detached node is dropped')
-    assert.deepEqual(StubResizeObserver.instances[1].observed, [second.el], 'the current node is observed')
-    // Width changes on the NEW node (e.g. the updater button appears) must republish.
-    second.setRight(350)
-    StubResizeObserver.instances[1].callback()
-    assert.equal(props.get(RAIL_CLEARANCE_VAR), '358px')
-  })
-  it('drops the variable while the node is absent between remounts', () => {
-    StubResizeObserver.instances = []
-    StubMutationObserver.instances = []
-    const { el } = stubControls(300)
-    const { doc, props, setControls } = stubDoc()
-    setControls(el)
-    installRailClearance(doc as unknown as Document)
-    assert.equal(props.get(RAIL_CLEARANCE_VAR), '308px')
-    setControls(null)
-    StubMutationObserver.instances[0].callback()
-    assert.ok(!props.has(RAIL_CLEARANCE_VAR), 'absence must fall the rule back to its 80px floor, not a stale edge')
-    assert.equal(StubResizeObserver.instances[0].disconnected, true)
-  })
-  it('is a no-op without observer support (rule degrades to its 80px fallback)', () => {
-    const props = new Map<string, string>()
-    const doc = {
-      defaultView: {},
-      documentElement: {
-        style: {
-          setProperty: (k: string, v: string): void => { props.set(k, v) },
-          removeProperty: (k: string): void => { props.delete(k) },
-        },
-      },
-      querySelector: (): unknown => null,
-    }
-    const dispose = installRailClearance(doc as unknown as Document)
-    assert.ok(!props.has(RAIL_CLEARANCE_VAR))
-    dispose()
-    assert.ok(!props.has(RAIL_CLEARANCE_VAR))
   })
 })
 
