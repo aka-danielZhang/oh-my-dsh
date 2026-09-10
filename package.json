@@ -33,12 +33,5 @@
     "tsx": "^4.20.3",
     "typescript": "^5.9.2"
   },
-  "packageManager": "pnpm@10.28.0",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "electron",
-      "esbuild",
-      "electron-winstaller"
-    ]
-  }
+  "packageManager": "pnpm@11.7.0"
 }

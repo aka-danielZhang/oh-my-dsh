@@ -1,9 +1,4 @@
-lockfileVersion: '9.0'
-
-settings:
-  autoInstallPeers: false
-  excludeLinksFromLockfile: false
-
+autoInstallPeers: false
 overrides:
   '@deepseek-ai/dsh-acp': 0.1.5-rc.1
   '@deepseek-ai/dsh-api-gateway': 0.1.5-rc.1
@@ -277,7 +272,3 @@ overrides:
   '@deepseek-ai/dsh-desktop': 0.1.5-rc.1
   '@deepseek-ai/dsh-desktop-host': 0.1.5-rc.1
   '@deepseek-ai/dsh-web-frontend': 0.1.5-rc.1
-
-importers:
-
-  .: {}

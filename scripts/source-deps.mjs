@@ -212,7 +212,22 @@ for (const name of fixed) {
   manifest.devDependencies = Object.fromEntries(
     Object.entries(deps).sort(([a], [b]) => a.localeCompare(b)),
   )
-  manifest.pnpm = { ...manifest.pnpm, overrides: { ...dshOverrides(sources ?? new Map(), name) } }
+  // Overrides live in pnpm-workspace.yaml: pnpm 11+ no longer reads the
+  // package.json `pnpm` field, and 10.x reads the yaml form as well.
+  const workspacePath = resolve(pkgPath, '..', 'pnpm-workspace.yaml')
+  const overrideBlock = ['overrides:',
+    ...Object.entries(dshOverrides(sources ?? new Map(), name)).map(([dep, version]) => `  '${dep}': ${version}`),
+  ].join('\n')
+  if (existsSync(workspacePath)) {
+    const text = readFileSync(workspacePath, 'utf8')
+    if (/^overrides:\n/m.test(text)) {
+      writeFileSync(workspacePath, text.replace(/^overrides:\n(?:  .*\n?)*/m, `${overrideBlock}\n`))
+    } else {
+      writeFileSync(workspacePath, `${text.replace(/\n*$/, '\n')}\n${overrideBlock}\n`)
+    }
+  } else {
+    writeFileSync(workspacePath, `${overrideBlock}\n`)
+  }
   writeFileSync(pkgPath, JSON.stringify(manifest, null, 2) + '\n')
   if (touched === 0) {
     console.log(`${name}: already ${link ? 'link' : 'registry'} posture (overrides refreshed)`)

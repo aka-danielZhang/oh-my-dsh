@@ -108,6 +108,12 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
   /** Whether the installed stock engine owns the same bounded fallback. */
   private readonly stockOwnsHierarchy: boolean
 
+  /**
+   * The mount context, kept by this class because the stock base class does
+   * not expose its own `ctx` to subclasses through its published typings.
+   */
+  private readonly ownCtx: Context
+
   constructor(
     ctx: Context,
     config: HierarchicalCompactionConfig = {},
@@ -117,6 +123,7 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
       config,
       stockOwnsHierarchy ? BasicCompactionEngine.Config : {},
     ))
+    this.ownCtx = ctx
     this.hierarchy = resolveHierarchyConfig(config)
     this.stockOwnsHierarchy = stockOwnsHierarchy
     ctx.logger.info(
@@ -138,7 +145,7 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
     signal?.throwIfAborted()
     if (this.stockOwnsHierarchy) return super.summarize(input, agent, signal)
     const target = this.resolveSummaryTarget(agent)
-    const model = await this.ctx.llm.resolveModelInfo(target.provider, target.model, signal)
+    const model = await this.ownCtx.llm.resolveModelInfo(target.provider, target.model, signal)
     const contextWindow = model.context?.contextWindow
     if (contextWindow === undefined || !Number.isSafeInteger(contextWindow) || contextWindow < 1) {
       throw new Error(
@@ -153,7 +160,7 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
       'map',
     )
 
-    const estimate = (message: Message): number => this.ctx.tokenMeter.estimateMessage(message)
+    const estimate = (message: Message): number => this.ownCtx.tokenMeter.estimateMessage(message)
     const units = toolBalancedUnits(input.messages)
     const totalUnits = units.length
     const oneShotTokens = this.estimateCallInput(
@@ -515,7 +522,7 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
       purpose: 'compaction',
       ...signal === undefined ? {} : { signal },
     }
-    for await (const chunk of this.ctx.llm.stream(options)) assembler.push(chunk)
+    for await (const chunk of this.ownCtx.llm.stream(options)) assembler.push(chunk)
     const finishFailure = finishError(assembler.finish)
     if (finishFailure !== undefined) throw finishFailure
 
