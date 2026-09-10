@@ -24,7 +24,7 @@ import { execNpm, execPnpm } from './cli-bins.mjs'
 
 // Bump when the ASSEMBLY changes (deps, layout) so the SHA-keyed caches
 // invalidate themselves instead of shipping a stale tree.
-const SCRIPT_REV = 15
+const SCRIPT_REV = 16
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 function electronAbiToken() {
   try {
@@ -402,6 +402,13 @@ execPnpm(['install', '--no-frozen-lockfile'], { cwd: runtimeDir, stdio: 'inherit
       if (hit === null) continue
       const pkg = `@deepseek-ai/${hit[1]}`
       const version = hit[2]
+      // pnpm truncates over-long tarball directory names to arbitrary
+      // prefixes (`@f_<hash>`), so a non-numeric "version" is a packed
+      // file: instance, never a registry copy to baseline-check.
+      if (!/^\d/.test(version)) {
+        packedNames.add(pkg)
+        continue
+      }
       if (FORK_MODIFIED.has(pkg)) drifted.push(`${pkg} (${entry})`)
       // A registry-semver instance of a package that ALSO has a packed tarball
       // instance is a duplicate module build regardless of version equality:
