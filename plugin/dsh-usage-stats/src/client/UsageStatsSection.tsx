@@ -17,10 +17,11 @@ import type {
   UsageStatsActivity,
   UsageStatsBreakdown,
   UsageStatsDaily,
+  UsageStatsQuality,
   UsageStatsSummary,
 } from '../types.ts'
 import type { UsageStatsRangeSpec } from '../fold.ts'
-import { ActivityHeatmap, DonutChart, TrendChart, seriesColor } from './charts.tsx'
+import { ActivityHeatmap, DonutChart, QualityBars, TrendChart, seriesColor } from './charts.tsx'
 import { formatDuration, formatRelative, formatTokens, type Translate } from './format.ts'
 import styles from './UsageStatsSection.module.css'
 
@@ -37,6 +38,7 @@ export interface UsageStatsFace {
   daily(range: UsageStatsRange): Promise<UsageStatsDaily>
   activity(mode: UsageStatsActivity['mode']): Promise<UsageStatsActivity>
   breakdown(range: UsageStatsRange): Promise<UsageStatsBreakdown>
+  quality(range: UsageStatsRange): Promise<UsageStatsQuality>
 }
 
 /** Props delivered by the slot outlet (the inject face spread flat). */
@@ -58,6 +60,7 @@ export function UsageStatsSection({ face, t }: UsageStatsSectionProps): ReactNod
   const [activity, setActivity] = useState<UsageStatsActivity | undefined>(undefined)
   const [daily, setDaily] = useState<UsageStatsDaily | undefined>(undefined)
   const [breakdown, setBreakdown] = useState<UsageStatsBreakdown | undefined>(undefined)
+  const [quality, setQuality] = useState<UsageStatsQuality | undefined>(undefined)
   const [error, setError] = useState('')
   const [activityMode, setActivityMode] = useState<UsageStatsActivity['mode']>('daily')
   const [range, setRange] = useState<RangeTab>('7')
@@ -75,17 +78,19 @@ export function UsageStatsSection({ face, t }: UsageStatsSectionProps): ReactNod
   const load = useCallback(async () => {
     if (face === undefined || wireRange === null) return
     try {
-      const [nextSummary, nextActivity, nextDaily, nextBreakdown] = await Promise.all([
+      const [nextSummary, nextActivity, nextDaily, nextBreakdown, nextQuality] = await Promise.all([
         face.summary(),
         face.activity(activityMode),
         face.daily(wireRange),
         face.breakdown(wireRange),
+        face.quality(wireRange),
       ])
       setError('')
       setSummary(nextSummary)
       setActivity(nextActivity)
       setDaily(nextDaily)
       setBreakdown(nextBreakdown)
+      setQuality(nextQuality)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     }
@@ -273,6 +278,17 @@ export function UsageStatsSection({ face, t }: UsageStatsSectionProps): ReactNod
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {quality !== undefined && (
+            <div className={styles.card}>
+              <div className={styles.cardHeader}>
+                <h3 className={styles.cardTitle}>{t('quality.title')}</h3>
+              </div>
+              {quality.models.length === 0
+                ? <p className={styles.state}>{t('donut.empty')}</p>
+                : <QualityBars key={rangeKey} quality={quality} />}
             </div>
           )}
 

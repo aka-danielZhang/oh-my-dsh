@@ -6,6 +6,7 @@
  */
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { UsageStatsQuality } from '../types.ts'
 import type { UsageStatsRange } from './UsageStatsSection.tsx'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import TYPERT_REMOTE from '../typert.remote-client.ts'
@@ -31,6 +32,7 @@ interface UsageStatsRemote {
   daily(params: UsageStatsRange): Promise<RemoteOutcome<import('../types.ts').UsageStatsDaily>>
   activity(params: { mode: 'daily' | 'weekly' | 'cumulative' }): Promise<RemoteOutcome<import('../types.ts').UsageStatsActivity>>
   breakdown(params: UsageStatsRange): Promise<RemoteOutcome<import('../types.ts').UsageStatsBreakdown>>
+  quality(params: UsageStatsRange): Promise<RemoteOutcome<import('../types.ts').UsageStatsQuality>>
 }
 
 /** RemoteResult flattened to the two shapes the face needs. */
@@ -74,6 +76,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       daily: async range => unwrap(await remote.daily(range)),
       activity: async mode => unwrap(await remote.activity({ mode })),
       breakdown: async range => unwrap(await remote.breakdown(range)),
+      quality: async range => unwrap(await remote.quality(range)),
     }
 
     ctx.slots.inject('settings.section', () => ctx.slots.register({

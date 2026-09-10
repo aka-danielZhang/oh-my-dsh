@@ -17,6 +17,7 @@ import {
   breakdownOf,
   dailySeries,
   localUtcOffsetMinutes,
+  qualityByModel,
   summarize,
   type UsageStatsRangeSpec,
 } from './fold.ts'
@@ -25,6 +26,7 @@ import type {
   UsageStatsActivity,
   UsageStatsBreakdown,
   UsageStatsDaily,
+  UsageStatsQuality,
   UsageStatsSummary,
 } from './types.ts'
 
@@ -106,6 +108,17 @@ export class UsageStatsGateway extends TypertRemoteService {
       rangeSpec(params),
       this.providerLabels(),
     )
+  }
+
+  /**
+   * Per-model cache-hit and apparent-rate grouped bars over the requested range.
+   * @param params - a range as in daily.
+   */
+  @Remote('quality')
+  async quality(params: WireRange): Promise<UsageStatsQuality> {
+    const store = await awaitStore()
+    await store.rescan()
+    return qualityByModel(store.aggregates, Date.now(), localUtcOffsetMinutes(), rangeSpec(params))
   }
 
   /** Provider id → display name, resolved through the live llm runtime when present. */

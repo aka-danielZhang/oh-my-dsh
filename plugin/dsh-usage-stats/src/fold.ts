@@ -151,6 +151,22 @@ export interface SessionSpan {
   last: number
 }
 
+/** Per-model quality/token bucket behind `DayAggregate.byModel`. */
+export interface ModelBucket {
+  /** Σ recordTotal. */
+  tokens: number
+  /** Σ cache-read tokens. */
+  cr: number
+  /** Σ billed input (in + cr + cw). */
+  billed: number
+  /** Σ output tokens. */
+  out: number
+  /** Σ call durations (reply − step start), when the step start was seen. */
+  durMs: number
+  /** Number of call-duration samples. */
+  durSamples: number
+}
+
 /** Aggregate of one local day. */
 export interface DayAggregate {
   /** Σ recordTotal of the day. */
@@ -161,8 +177,8 @@ export interface DayAggregate {
   calls: number
   /** provider → Σ total. */
   byProvider: Record<string, number>
-  /** `provider/model` → Σ total. */
-  byModel: Record<string, number>
+  /** `provider/model` → quality/token bucket. */
+  byModel: Record<string, ModelBucket>
   /** session → first/last event times seen that day. */
   sessions: Record<string, SessionSpan>
 }
@@ -195,12 +211,25 @@ function emptyDay(): DayAggregate {
 export function applyRecord(days: DayAggregates, record: UsageRecord, dateKey: string): void {
   const day = days[dateKey] ?? emptyDay()
   const total = recordTotal(record)
+  const billed = record.in + (record.cr ?? 0) + (record.cw ?? 0)
   day.total += total
   if (total > day.peak) day.peak = total
   day.calls += 1
   day.byProvider[record.provider] = (day.byProvider[record.provider] ?? 0) + total
   const modelKey = `${record.provider}/${record.model}`
-  day.byModel[modelKey] = (day.byModel[modelKey] ?? 0) + total
+  const bucket = day.byModel[modelKey] ?? { tokens: 0, cr: 0, billed: 0, out: 0, durMs: 0, durSamples: 0 }
+  bucket.tokens += total
+  bucket.cr += record.cr ?? 0
+  bucket.billed += billed
+  bucket.out += record.out
+  if (record.sd !== undefined) {
+    const duration = record.t - record.sd
+    if (duration > 0) {
+      bucket.durMs += duration
+      bucket.durSamples += 1
+    }
+  }
+  day.byModel[modelKey] = bucket
   const span = day.sessions[record.sid]
   if (span === undefined) {
     day.sessions[record.sid] = { first: record.t, last: record.t }
@@ -384,7 +413,7 @@ export function dailySeries(
       continue
     }
     const byModel = Object.entries(day.byModel)
-      .map(([model, tokens]) => ({ model, tokens }))
+      .map(([model, bucket]) => ({ model, tokens: bucket.tokens }))
       .sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model))
     entries.push({ date, total: day.total, byModel })
   }
@@ -504,4 +533,57 @@ export function breakdownOf(
     }))
     .sort((a, b) => b.tokens - a.tokens || a.key.localeCompare(b.key))
   return { dim, total, slices }
+}
+
+/** Per-model call-quality entry for the bar chart. */
+export interface ModelQualityEntry {
+  /** `provider/model` key. */
+  model: string
+  /** Cache-hit share over billed input (null when the model logged no input). */
+  hitRate: number | null
+  /** Apparent output rate (null when the model logged no duration samples). */
+  speedTokensPerSec: number | null
+  /** Call-duration samples behind the rate. */
+  samples: number
+}
+
+/** Quality payload for the bar chart. */
+export interface UsageStatsQuality {
+  models: ModelQualityEntry[]
+}
+
+/**
+ * Per-model cache-hit and apparent-rate over the requested range, from the
+ * day aggregates' model buckets.
+ */
+export function qualityByModel(
+  days: DayAggregates,
+  now: number,
+  utcOffsetMinutes: number,
+  range: UsageStatsRangeSpec,
+): UsageStatsQuality {
+  const totals = new Map<string, { cr: number; billed: number; out: number; durMs: number; durSamples: number }>()
+  for (const date of rangeDateKeysOf(now, utcOffsetMinutes, range)) {
+    const day = days[date]
+    if (day === undefined) continue
+    for (const [model, bucket] of Object.entries(day.byModel)) {
+      const acc = totals.get(model) ?? { cr: 0, billed: 0, out: 0, durMs: 0, durSamples: 0 }
+      acc.cr += bucket.cr
+      acc.billed += bucket.billed
+      acc.out += bucket.out
+      acc.durMs += bucket.durMs
+      acc.durSamples += bucket.durSamples
+      totals.set(model, acc)
+    }
+  }
+  return {
+    models: [...totals.entries()]
+      .map(([model, acc]) => ({
+        model,
+        hitRate: acc.billed > 0 ? acc.cr / acc.billed : null,
+        speedTokensPerSec: acc.durMs > 0 ? acc.out / (acc.durMs / 1000) : null,
+        samples: acc.durSamples,
+      }))
+      .sort((a, b) => b.samples - a.samples || a.model.localeCompare(b.model)),
+  }
 }

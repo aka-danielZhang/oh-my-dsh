@@ -12,6 +12,7 @@ import type {
   UsageStatsActivity,
   UsageStatsBreakdown,
   UsageStatsDaily,
+  UsageStatsQuality,
   UsageStatsSummary,
 } from './types.ts'
 
@@ -78,15 +79,26 @@ const breakdownParamsSchema = rangeParamsSchema.extend({
   dim: z.enum(['model', 'provider']).optional(),
 })
 
+const qualitySchema = z.object({
+  models: z.array(z.object({
+    model: z.string(),
+    hitRate: z.number().nullable(),
+    speedTokensPerSec: z.number().nullable(),
+    samples: z.number(),
+  })),
+})
+
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$75736167655374617473 {
     summary: () => Promise<RemoteResult<UsageStatsSummary>>
+    quality: (params: { range?: 7 | 30, from?: string, to?: string }) => Promise<RemoteResult<UsageStatsQuality>>
     daily: (params: { range?: 7 | 30, from?: string, to?: string }) => Promise<RemoteResult<UsageStatsDaily>>
     activity: (params: { mode: 'daily' | 'weekly' | 'cumulative' }) => Promise<RemoteResult<UsageStatsActivity>>
     breakdown: (params: { dim?: 'model' | 'provider', range?: 7 | 30, from?: string, to?: string }) => Promise<RemoteResult<UsageStatsBreakdown>>
   }
   interface TypertRemoteMap {
     'usageStats/summary': () => Promise<RemoteResult<UsageStatsSummary>>
+    'usageStats/quality': (params: { range?: 7 | 30, from?: string, to?: string }) => Promise<RemoteResult<UsageStatsQuality>>
     'usageStats/daily': (params: { range?: 7 | 30, from?: string, to?: string }) => Promise<RemoteResult<UsageStatsDaily>>
     'usageStats/activity': (params: { mode: 'daily' | 'weekly' | 'cumulative' }) => Promise<RemoteResult<UsageStatsActivity>>
     'usageStats/breakdown': (params: { dim?: 'model' | 'provider', range?: 7 | 30, from?: string, to?: string }) => Promise<RemoteResult<UsageStatsBreakdown>>
@@ -157,6 +169,29 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         mode: 'strict',
         typeSymbol: 'dsh-usage-stats/types#UsageStatsActivity',
         schema: activitySchema,
+      },
+      sourceLocation: { file: 'src/gateway.ts', line: 1, column: 3 },
+    },
+    {
+      id: 'dsh-usage-stats#usageStats/quality',
+      service: 'usageStats',
+      namespace: 'usageStats',
+      method: 'quality',
+      invocation: { kind: 'direct' },
+      parameters: [{
+        name: 'params',
+        wire: 'params',
+        source: 'json',
+        codec: {
+          mode: 'strict',
+          typeSymbol: 'dsh-usage-stats/types#UsageStatsQualityParams',
+          schema: rangeParamsSchema,
+        },
+      }],
+      result: {
+        mode: 'strict',
+        typeSymbol: 'dsh-usage-stats/types#UsageStatsQuality',
+        schema: qualitySchema,
       },
       sourceLocation: { file: 'src/gateway.ts', line: 1, column: 3 },
     },

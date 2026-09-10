@@ -40,6 +40,7 @@ export const zh = {
 
   'trend.title': '每日 Token 趋势',
 
+  'quality.title': '模型质量',
   'donut.title': '模型用量',
   'donut.empty': '所选范围内没有用量',
   'donut.share': '{share} · {tokens}',
@@ -90,6 +91,7 @@ export const en = {
 
   'trend.title': 'Daily token trend',
 
+  'quality.title': 'Model quality',
   'donut.title': 'Model usage',
   'donut.empty': 'No usage in the selected range',
   'donut.share': '{share} · {tokens}',

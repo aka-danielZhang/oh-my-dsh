@@ -12,7 +12,7 @@
 
 import * as React from 'react'
 import type { ReactNode } from 'react'
-import type { UsageStatsActivity, UsageStatsActivityCell, UsageStatsBreakdown, UsageStatsDaily } from '../types.ts'
+import type { UsageStatsActivity, UsageStatsActivityCell, UsageStatsBreakdown, UsageStatsDaily, UsageStatsQuality } from '../types.ts'
 import type { Translate } from './format.ts'
 
 /** Series palette (model/provider lines and donut slices), all token-based. */
@@ -439,3 +439,132 @@ function smoothPath(points: Array<[number, number]>): string {
   }
   return path
 }
+
+interface QualityProps {
+  quality: UsageStatsQuality
+}
+
+interface QualityHover {
+  model: string
+  hitRate: number | null
+  speedTokensPerSec: number | null
+}
+
+const HIT_FILL = 'var(--dsw-static-blue-500)'
+const SPEED_FILL = 'var(--dsw-static-green-500)'
+const MAX_MODELS_IN_CHART = 8
+
+/**
+ * Grouped dual-axis bar chart: per model one cache-hit bar (left axis, %)
+ * and one apparent-rate bar (right axis, tok/s), with a hover data card.
+ */
+export function QualityBars({ quality }: QualityProps): ReactNode {
+  const [hover, setHover] = React.useState<QualityHover | null>(null)
+  const models = quality.models.slice(0, MAX_MODELS_IN_CHART)
+  const width = 640
+  const height = 220
+  const left = 46
+  const right = 46
+  const topChart = 14
+  const bottom = 40
+  const plotWidth = width - left - right
+  const plotHeight = height - topChart - bottom
+  const groupWidth = models.length > 0 ? plotWidth / models.length : plotWidth
+  const barWidth = Math.min(22, groupWidth * 0.28)
+  let maxSpeed = 1
+  for (const m of models) {
+    const s = m.speedTokensPerSec ?? 0
+    if (s > maxSpeed) maxSpeed = s
+  }
+  const kids: ReactNode[] = [0, 0.25, 0.5, 0.75, 1].flatMap(ratio => [
+    <line
+      key={`gl${ratio}`}
+      x1={left}
+      x2={width - right}
+      y1={topChart + ratio * plotHeight}
+      y2={topChart + ratio * plotHeight}
+      className="usageTrendGrid"
+    />,
+    <text
+      key={`glt${ratio}`}
+      x={left - 6}
+      y={topChart + ratio * plotHeight + 3.5}
+      textAnchor="end"
+      className="usageTrendAxis"
+    >
+      {Math.round((1 - ratio) * 100) + '%'}
+    </text>,
+    <text
+      key={`grt${ratio}`}
+      x={width - right + 6}
+      y={topChart + ratio * plotHeight + 3.5}
+      className="usageTrendAxis"
+    >
+      {String(Math.round(maxSpeed * (1 - ratio)))}
+    </text>,
+  ])
+  models.forEach((m, index) => {
+    const centerX = left + groupWidth * index + groupWidth / 2
+    const hitHeight = (m.hitRate ?? 0) * plotHeight
+    const speedHeight = ((m.speedTokensPerSec ?? 0) / maxSpeed) * plotHeight
+    kids.push(
+      <rect key={`h${m.model}`} x={centerX - barWidth - 2} y={topChart + plotHeight - hitHeight} width={barWidth} height={hitHeight} rx={2} fill={HIT_FILL} />,
+      <rect key={`s${m.model}`} x={centerX + 2} y={topChart + plotHeight - speedHeight} width={barWidth} height={speedHeight} rx={2} fill={SPEED_FILL} />,
+    )
+    const name = m.model.slice(m.model.indexOf('/') + 1)
+    const short = name.length > 10 ? name.slice(0, 9) + '…' : name
+    kids.push(
+      <text key={`x${m.model}`} x={centerX} y={height - 10} textAnchor="middle" className="usageTrendAxis">
+        {short}
+      </text>,
+      <rect
+        key={`c${m.model}`}
+        x={left + groupWidth * index}
+        y={topChart}
+        width={groupWidth}
+        height={plotHeight}
+        className="usageQualityHover"
+        onMouseEnter={() => setHover(m)}
+        onMouseLeave={() => setHover(null)}
+      />,
+    )
+  })
+  const tip = hover === null ? null : (
+    <div className="usageTipCard" style={{ left: '50%', top: 4, transform: 'translateX(-50%)' }}>
+      <div className="usageTipTitle">{hover.model}</div>
+      <div className="usageTipRow">
+        <span className="usageTipSwatch" style={{ background: HIT_FILL }} />
+        缓存命中
+        <span className="usageTipValue">
+          {hover.hitRate === null ? '—' : Math.round(hover.hitRate * 1000) / 10 + '%'}
+        </span>
+      </div>
+      <div className="usageTipRow">
+        <span className="usageTipSwatch" style={{ background: SPEED_FILL }} />
+        输出速度
+        <span className="usageTipValue">
+          {hover.speedTokensPerSec === null ? '—' : Math.round(hover.speedTokensPerSec * 10) / 10 + ' tok/s'}
+        </span>
+      </div>
+    </div>
+  )
+  return (
+    <div className="usageQualityWrap">
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="模型质量">
+        {kids}
+      </svg>
+      {tip}
+      <ul className="usageLegend">
+        <li className="usageLegendItem">
+          <span className="usageTipSwatch" style={{ background: HIT_FILL }} />
+          缓存命中
+        </li>
+        <li className="usageLegendItem">
+          <span className="usageTipSwatch" style={{ background: SPEED_FILL }} />
+          输出速度 tok/s
+        </li>
+      </ul>
+    </div>
+  )
+}
+

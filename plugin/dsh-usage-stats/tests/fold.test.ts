@@ -112,7 +112,7 @@ test('applyRecord aggregates totals, peaks, provider/model sums, session spans',
   assert.equal(day9.peak, 150)
   assert.equal(day9.calls, 2)
   assert.equal(day9.byProvider['deepseek'], 200)
-  assert.equal(day9.byModel['deepseek/deepseek-chat'], 200)
+  assert.equal(day9.byModel['deepseek/deepseek-chat'].tokens, 200)
   assert.deepEqual(day9.sessions['s1'], { first: 1_000, last: 2_000 })
   assert.equal(days['2026-09-10']!.byProvider['zai'], 15)
 })
@@ -295,4 +295,28 @@ test('activityCells daily cells carry per-day call counts', () => {
   const activity = activityCells(days, 'daily', now, UTC)
   assert.equal(activity.cells.find(c => c.date === '2026-09-09')?.calls, 2)
   assert.equal(activity.cells.find(c => c.date === '2026-09-08')?.calls, 0)
+})
+
+test('qualityByModel aggregates per-model hit rate and apparent rate over range', async () => {
+  const { qualityByModel } = await import('../src/fold.ts')
+  const now = Date.parse('2026-09-09T12:00:00.000Z')
+  const days: DayAggregates = {}
+  // deepseek: cr 40 / billed 100 → 40% hit; duration 10s → 5 tok/s
+  applyRecord(days, record({ mid: 'q1', in: 60, out: 50, cr: 40, sd: Date.parse('2026-09-09T10:00:00.000Z'), t: Date.parse('2026-09-09T10:00:10.000Z') }), '2026-09-09')
+  // zai: 无缓存 → hit 0%；duration 5s，out 100 → 20 tok/s
+  applyRecord(days, record({ mid: 'q2', provider: 'zai', model: 'glm-5', in: 10, out: 100, sd: Date.parse('2026-09-09T11:00:00.000Z'), t: Date.parse('2026-09-09T11:00:05.000Z') }), '2026-09-09')
+  // 范围外不计
+  applyRecord(days, record({ mid: 'q3', provider: 'old', model: 'legacy', in: 999, out: 999 }), '2026-08-01')
+  const q = qualityByModel(days, now, UTC, { days: 7 })
+  assert.equal(q.models.length, 2)
+  const deepseek = q.models.find(m => m.model === 'deepseek/deepseek-chat')!
+  assert.equal(deepseek.hitRate, 0.4)
+  assert.equal(deepseek.speedTokensPerSec, 5)
+  const zai = q.models.find(m => m.model === 'zai/glm-5')!
+  assert.equal(zai.hitRate, 0)
+  assert.equal(zai.speedTokensPerSec, 20)
+  // 自定义日期区间（范围外不进）
+  const scoped = qualityByModel(days, now, UTC, { from: '2026-08-01', to: '2026-08-02' })
+  assert.equal(scoped.models.length, 1)
+  assert.equal(scoped.models[0]!.model, 'old/legacy')
 })

@@ -128,3 +128,20 @@ export interface UsageStatsBreakdown {
   /** Slices sorted by tokens, descending. */
   slices: UsageStatsBreakdownSlice[]
 }
+
+/** Per-model call-quality entry for the bar chart. */
+export interface UsageStatsModelQualityEntry {
+  /** `provider/model` key. */
+  model: string
+  /** Cache-hit share over billed input (null when the model logged no input). */
+  hitRate: number | null
+  /** Apparent output rate (null when the model logged no duration samples). */
+  speedTokensPerSec: number | null
+  /** Call-duration samples behind the rate. */
+  samples: number
+}
+
+/** Grouped-bar payload: per-model cache hit and apparent output rate. */
+export interface UsageStatsQuality {
+  models: UsageStatsModelQualityEntry[]
+}

@@ -433,3 +433,18 @@
   display: inline-block;
   flex: none;
 }
+
+.qualityWrap {
+  position: relative;
+}
+
+.qualityWrap svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+:global(.usageQualityHover) {
+  fill: transparent;
+  cursor: pointer;
+}

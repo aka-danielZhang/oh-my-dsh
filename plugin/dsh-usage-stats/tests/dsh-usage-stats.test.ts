@@ -15,7 +15,7 @@ test('collector row exports a loadable plugin', () => {
   assert.equal(typeof collectorApply, 'function')
 })
 
-test('typert host contribution mirrors the four Remote endpoints', () => {
+test('typert host contribution mirrors the five Remote endpoints', () => {
   assert.equal(TYPERT_HOST.package, 'dsh-usage-stats')
   assert.deepEqual(
     TYPERT_HOST.invocations.map(invocation => invocation.id).sort(),
@@ -23,6 +23,7 @@ test('typert host contribution mirrors the four Remote endpoints', () => {
       'dsh-usage-stats#usageStats/activity',
       'dsh-usage-stats#usageStats/breakdown',
       'dsh-usage-stats#usageStats/daily',
+      'dsh-usage-stats#usageStats/quality',
       'dsh-usage-stats#usageStats/summary',
     ],
   )
