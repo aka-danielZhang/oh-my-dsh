@@ -60,17 +60,19 @@ test('formatShare / formatPercent / formatSpeed', () => {
   assert.equal(formatShare(0), '0%')
   assert.equal(formatShare(0.4231), '42.3%')
   assert.equal(formatShare(1), '100%')
+  assert.equal(formatShare(Number.NaN), '0%')
   assert.equal(formatPercent(null), '—')
   assert.equal(formatPercent(0.942), '94.2%')
   assert.equal(formatSpeed(null), '—')
   assert.equal(formatSpeed(31.66), '31.7 tok/s')
 })
 
-test('formatDuration: minutes and hours in both profiles', () => {
+test('formatDuration: seconds, minutes, and hours in both profiles', () => {
   assert.equal(formatDuration(null, 'zh'), '—')
   assert.equal(formatDuration(0, 'en'), '—')
-  assert.equal(formatDuration(59_999, 'zh'), '<1 分钟')
-  assert.equal(formatDuration(59_999, 'en'), '<1 min')
+  assert.equal(formatDuration(500, 'zh'), '1 s')
+  assert.equal(formatDuration(41_200, 'en'), '41 s')
+  assert.equal(formatDuration(59_999, 'zh'), '59 s')
   assert.equal(formatDuration(5 * 60_000, 'zh'), '5 分钟')
   assert.equal(formatDuration(65 * 60_000, 'zh'), '1 小时 5 分')
   assert.equal(formatDuration(65 * 60_000, 'en'), '1 h 5 min')

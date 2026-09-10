@@ -370,6 +370,22 @@ async function main() {
       await page.waitForTimeout(1200)
       check('rapid range switching stays coherent', (await page.locator('section svg').count()) >= 3)
       await page.getByRole('heading', { name: '模型质量' }).scrollIntoViewIfNeeded()
+
+      // Quality legend filters either metric and restores the paired view.
+      const cacheToggle = page.getByRole('button', { name: '缓存命中', exact: true })
+      const speedToggle = page.getByRole('button', { name: '输出速度 tok/s', exact: true })
+      await cacheToggle.click()
+      check('quality cache-only filter',
+        await page.locator('[data-quality-bar="cache"]').count() > 0
+        && await page.locator('[data-quality-bar="speed"]').count() === 0)
+      await speedToggle.click()
+      check('quality speed-only filter',
+        await page.locator('[data-quality-bar="cache"]').count() === 0
+        && await page.locator('[data-quality-bar="speed"]').count() > 0)
+      await speedToggle.click()
+      check('quality filter restores both series',
+        await page.locator('[data-quality-bar="cache"]').count() > 0
+        && await page.locator('[data-quality-bar="speed"]').count() > 0)
       await page.screenshot({ path: join(outDir, 'zh-dark-1208-lower.png') })
 
       // Resize the already-loaded page as well as opening isolated narrow

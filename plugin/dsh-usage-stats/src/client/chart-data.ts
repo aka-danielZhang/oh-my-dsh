@@ -136,8 +136,9 @@ export function gutterOf(ticks: ReadonlyArray<string>, options?: {
  * exactly 1 — the ring and the ranking can never disagree about 100%.
  */
 export function normalizedShares(values: ReadonlyArray<number>): number[] {
+  if (values.some(value => !Number.isFinite(value) || value < 0)) return values.map(() => 0)
   const total = values.reduce((sum, value) => sum + value, 0)
-  if (total <= 0) return values.map(() => 0)
+  if (!Number.isFinite(total) || total <= 0) return values.map(() => 0)
   const shares = values.map(value => value / total)
   // Re-anchor on the largest slice (index 0 after sorting; callers pass
   // descending data, but be robust to any order).

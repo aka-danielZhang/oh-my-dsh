@@ -124,6 +124,8 @@ test('normalizedShares: parts always sum to exactly 1, zero-total safe', () => {
   assert.ok(Math.abs(sum - 1) < 1e-12, `sum ${sum} must be 1`)
   assert.deepEqual(normalizedShares([0, 0, 0]), [0, 0, 0])
   assert.deepEqual(normalizedShares([5]), [1])
+  assert.deepEqual(normalizedShares([Number.NaN, 1]), [0, 0])
+  assert.deepEqual(normalizedShares([-1, 2]), [0, 0])
 })
 
 test('breakdownCut: donut series sums to 100% with top-5 + other', () => {

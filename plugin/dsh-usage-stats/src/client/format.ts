@@ -96,11 +96,11 @@ export function formatPercent(ratio: number | null): string {
   return `${trim(round1(ratio * 100))}%`
 }
 
-/** Call duration in milliseconds as “X 分钟” / “1 小时 5 分” / “X min” / “1 h 5 min”. */
+/** Call duration in milliseconds as seconds below one minute, then localized minutes/hours. */
 export function formatDuration(ms: number | null, lang: UsageStatsLang): string {
   if (ms === null || !Number.isFinite(ms) || ms <= 0) return '—'
   const minutes = Math.floor(ms / 60_000)
-  if (minutes < 1) return lang === 'zh' ? '<1 分钟' : '<1 min'
+  if (minutes < 1) return `${Math.max(1, Math.floor(ms / 1000))} s`
   if (minutes < 60) return lang === 'zh' ? `${minutes} 分钟` : `${minutes} min`
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60

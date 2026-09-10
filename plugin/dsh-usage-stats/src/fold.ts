@@ -516,10 +516,16 @@ export function breakdownOf(
   for (const date of rangeDateKeysOf(now, utcOffsetMinutes, range)) {
     const day = days[date]
     if (day === undefined) continue
-    const source = dim === 'provider' ? day.byProvider : day.byModel
-    for (const [key, tokens] of Object.entries(source)) {
-      totals.set(key, (totals.get(key) ?? 0) + tokens)
-      total += tokens
+    if (dim === 'provider') {
+      for (const [key, tokens] of Object.entries(day.byProvider)) {
+        totals.set(key, (totals.get(key) ?? 0) + tokens)
+        total += tokens
+      }
+    } else {
+      for (const [key, bucket] of Object.entries(day.byModel)) {
+        totals.set(key, (totals.get(key) ?? 0) + bucket.tokens)
+        total += bucket.tokens
+      }
     }
   }
   const slices: UsageStatsBreakdownSlice[] = [...totals.entries()]

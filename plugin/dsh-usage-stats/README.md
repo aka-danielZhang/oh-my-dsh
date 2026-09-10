@@ -12,7 +12,7 @@
 | `dsh-usage-stats/gateway` | Typert Remote `usageStats` 命名空间：`summary` / `daily` / `activity` / `breakdown` / `quality` 五查询，返回聚合好的纯 JSON |
 | `dsh-usage-stats`（主行） | typert strict contribution 注册（装配 runtime 下 `/api/usageStats/*` 可路由）+ 浏览器半载体 |
 
-浏览器半注册 `settings.section`（id `usage-stats`，models 之后）。页面按设置面板既有的卡片化仪表盘表达：页头（标题/说明/新鲜度 + 刷新）→ 四张独立摘要卡（宽屏四列，窄屏 2×2/单列）→ Token 活动热力图卡（每日/每周，52 周×7 天）→ 无外框时间范围行（近 7/30 天或自定义 ≤120 天）→ 多模型按日平滑折线卡→ 模型质量分组双轴柱卡（缓存命中率 / 输出速度）→ 模型用量圆环与排行卡（Top 5 + 其他，合计 100%）。手写 SVG，无第三方图表库；样式使用 `--dsw-*` token 与 CSS Modules。请求分 summary/activity/range 三组独立加载，保留 generation guard、局部重试、中英文格式化和键盘可访问性。
+浏览器半注册 `settings.section`（id `usage-stats`，models 之后）。页面按设置面板既有的卡片化仪表盘表达：页头（标题/说明/新鲜度 + 刷新）→ 四张独立摘要卡（宽屏四列，窄屏 2×2/单列）→ Token 活动热力图卡（每日/每周，52 周×7 天）→ 无外框时间范围行（近 7/30 天或自定义 ≤120 天）→ 多模型按日平滑折线卡→ 模型质量分组双轴柱卡（缓存命中率 / 输出速度；点击图例可单独查看任一指标，再次点击恢复双柱）→ 模型用量圆环与排行卡（Top 5 + 其他，合计 100%）。手写 SVG，无第三方图表库；样式使用 `--dsw-*` token 与 CSS Modules。请求分 summary/activity/range 三组独立加载，保留 generation guard、局部重试、中英文格式化和键盘可访问性。
 
 ## 存储（`$DSH_HOME/usage-stats/`）
 
@@ -42,7 +42,7 @@ state.json                   # 每 session 已消费 seq 水位 + 回填完成�
 | 累计 Token | Σ 每条 record 的 in+cr+cw+out（互斥口径，billed input 含 cache），全时段 |
 | 平均缓存命中 | cr ÷ 计费输入（in+cr+cw），全时段；副文案「计费输入」 |
 | 平均输出速度 | output ÷ 调用端到端时长（step 起点→回复），全时段；副文案「端到端」 |
-| 平均调用时长 | 调用开始 → 回复完成的均值，全时段 |
+| 平均调用时长 | 调用开始 → 回复完成的均值，全时段；一分钟内按整数秒（`s`）显示 |
 | 峰值 Token / 最长聊天 / 连续天数 | 保留在 wire（`summary` 字段），v1 页面不上卡 |
 | 热力图档位 | 区间内最大值 4 等分（非零即至少 1 档） |
 | 趋势/模型用量 | 受时间范围过滤驱动（近 7/30 天或自定义 ≤120 天） |

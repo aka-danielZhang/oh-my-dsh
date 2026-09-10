@@ -237,8 +237,9 @@ export function UsageStatsSection({ face, t, lang }: UsageStatsSectionProps): Re
   )
 
   const refreshButton = (
-    <Tooltip label={t('action.refresh')}>
+    <Tooltip label={t('action.refresh')} side="bottom">
       <Button
+        className={styles.iconButton}
         variant="toolbar"
         size="sm"
         disabled={refreshing}

@@ -248,7 +248,11 @@ test('breakdownOf groups and shares with provider display-name fallback', () => 
     { key: 'zai', label: 'zai', tokens: 25, share: 0.25 },
   ])
   const byModel = breakdownOf(days, 'model', now, UTC, { days: 7 }, new Map())
-  assert.deepEqual(byModel.slices.map(slice => slice.label), ['deepseek-chat', 'glm-4.7'])
+  assert.equal(byModel.total, 100)
+  assert.deepEqual(byModel.slices, [
+    { key: 'deepseek/deepseek-chat', label: 'deepseek-chat', tokens: 75, share: 0.75 },
+    { key: 'zai/glm-4.7', label: 'glm-4.7', tokens: 25, share: 0.25 },
+  ])
 })
 
 test('rangeDateKeysOf supports explicit from/to windows', async () => {

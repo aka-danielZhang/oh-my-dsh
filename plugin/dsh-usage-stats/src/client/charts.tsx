@@ -18,7 +18,7 @@ import type { UsageStatsActivity, UsageStatsActivityCell, UsageStatsQuality } fr
 import type { NamedCut } from './chart-data.ts'
 import { OTHER_KEY, gutterOf, niceCeil, stackedPoints } from './chart-data.ts'
 import type { UsageStatsLang } from './format.ts'
-import { formatDateFull, formatDateShort, formatPercent, formatSpeed, formatTokens, formatTokensAxis } from './format.ts'
+import { formatDateFull, formatDateShort, formatPercent, formatShare, formatSpeed, formatTokens, formatTokensAxis } from './format.ts'
 import type { Translate } from './UsageStatsSection.tsx'
 import styles from './UsageStatsSection.module.css'
 
@@ -466,10 +466,14 @@ const QUALITY_WIDTH = 560
 const QUALITY_HEIGHT = 220
 const HIT_FILL = 'var(--us-s2)'
 const SPEED_FILL = 'var(--us-s3)'
+type QualityMetric = 'both' | 'cache' | 'speed'
 
 /** Cache-hit and output-rate grouped bars, matching the established board. */
 export function QualityBars({ quality, t }: { quality: UsageStatsQuality, t: Translate }): ReactNode {
   const [hover, setHover] = React.useState<{ index: number, x: number, y: number } | null>(null)
+  const [metric, setMetric] = React.useState<QualityMetric>('both')
+  const showCache = metric !== 'speed'
+  const showSpeed = metric !== 'cache'
   const models = quality.models.slice(0, 8)
   const left = 38
   const right = 38
@@ -478,7 +482,7 @@ export function QualityBars({ quality, t }: { quality: UsageStatsQuality, t: Tra
   const plotWidth = QUALITY_WIDTH - left - right
   const plotHeight = QUALITY_HEIGHT - top - bottom
   const groupWidth = models.length > 0 ? plotWidth / models.length : plotWidth
-  const barWidth = Math.min(22, groupWidth * 0.3)
+  const barWidth = Math.min(metric === 'both' ? 22 : 28, groupWidth * (metric === 'both' ? 0.3 : 0.42))
   const maxSpeed = niceCeil(models.reduce((max, model) => Math.max(max, model.speedTokensPerSec ?? 0), 1))
   const kids: ReactNode[] = []
 
@@ -486,8 +490,8 @@ export function QualityBars({ quality, t }: { quality: UsageStatsQuality, t: Tra
     const y = top + ratio * plotHeight
     kids.push(
       <line key={`g${ratio}`} x1={left} x2={QUALITY_WIDTH - right} y1={y} y2={y} className={styles.gridLine} />,
-      <text key={`l${ratio}`} x={left - 6} y={y + 3.5} textAnchor="end" className={styles.axisText}>{Math.round((1 - ratio) * 100)}%</text>,
-      <text key={`r${ratio}`} x={QUALITY_WIDTH - right + 6} y={y + 3.5} className={styles.axisText}>{Math.round(maxSpeed * (1 - ratio))}</text>,
+      showCache && <text key={`l${ratio}`} x={left - 6} y={y + 3.5} textAnchor="end" className={styles.axisText}>{Math.round((1 - ratio) * 100)}%</text>,
+      showSpeed && <text key={`r${ratio}`} x={QUALITY_WIDTH - right + 6} y={y + 3.5} className={styles.axisText}>{Math.round(maxSpeed * (1 - ratio))}</text>,
     )
   }
 
@@ -497,9 +501,12 @@ export function QualityBars({ quality, t }: { quality: UsageStatsQuality, t: Tra
     const speedHeight = ((model.speedTokensPerSec ?? 0) / maxSpeed) * plotHeight
     const bare = model.model.slice(model.model.indexOf('/') + 1)
     const short = bare.length > 10 ? `${bare.slice(0, 8)}…` : bare
+    const ariaParts = [bare]
+    if (showCache) ariaParts.push(`${t('quality.cacheHit')} ${formatPercent(model.hitRate)}`)
+    if (showSpeed) ariaParts.push(`${t('quality.speed')} ${formatSpeed(model.speedTokensPerSec)}`)
     kids.push(
-      <rect key={`h${model.model}`} x={center - barWidth - 2} y={top + plotHeight - hitHeight} width={barWidth} height={hitHeight} rx={2} fill={HIT_FILL} data-quality-bar="cache" />,
-      <rect key={`s${model.model}`} x={center + 2} y={top + plotHeight - speedHeight} width={barWidth} height={speedHeight} rx={2} fill={SPEED_FILL} data-quality-bar="speed" />,
+      showCache && <rect key={`h${model.model}`} x={metric === 'both' ? center - barWidth - 2 : center - barWidth / 2} y={top + plotHeight - hitHeight} width={barWidth} height={hitHeight} rx={2} fill={HIT_FILL} data-quality-bar="cache" />,
+      showSpeed && <rect key={`s${model.model}`} x={metric === 'both' ? center + 2 : center - barWidth / 2} y={top + plotHeight - speedHeight} width={barWidth} height={speedHeight} rx={2} fill={SPEED_FILL} data-quality-bar="speed" />,
       <text key={`x${model.model}`} x={center} y={QUALITY_HEIGHT - 10} textAnchor="middle" className={styles.axisText}>{short}</text>,
       <rect
         key={`hit${model.model}`}
@@ -510,7 +517,7 @@ export function QualityBars({ quality, t }: { quality: UsageStatsQuality, t: Tra
         className={styles.trendHit}
         tabIndex={0}
         role="button"
-        aria-label={`${bare} · ${t('quality.cacheHit')} ${formatPercent(model.hitRate)} · ${t('quality.speed')} ${formatSpeed(model.speedTokensPerSec)}`}
+        aria-label={ariaParts.join(' · ')}
         onFocus={event => {
           const rect = event.currentTarget.getBoundingClientRect()
           setHover({ index, x: rect.left + rect.width / 2, y: rect.top })
@@ -532,15 +539,33 @@ export function QualityBars({ quality, t }: { quality: UsageStatsQuality, t: Tra
         {kids}
       </svg>
       {hover !== null && active !== undefined && (
-        <TipCard x={hover.x} y={hover.y} width={210} height={76}>
+        <TipCard x={hover.x} y={hover.y} width={210} height={metric === 'both' ? 76 : 52}>
           <div className={styles.tipTitle}>{active.model}</div>
-          <div className={styles.tipRow}><span className={styles.swatch} style={{ background: HIT_FILL }} />{t('quality.cacheHit')}<span className={styles.tipValue}>{formatPercent(active.hitRate)}</span></div>
-          <div className={styles.tipRow}><span className={styles.swatch} style={{ background: SPEED_FILL }} />{t('quality.speed')}<span className={styles.tipValue}>{formatSpeed(active.speedTokensPerSec)}</span></div>
+          {showCache && <div className={styles.tipRow}><span className={styles.swatch} style={{ background: HIT_FILL }} />{t('quality.cacheHit')}<span className={styles.tipValue}>{formatPercent(active.hitRate)}</span></div>}
+          {showSpeed && <div className={styles.tipRow}><span className={styles.swatch} style={{ background: SPEED_FILL }} />{t('quality.speed')}<span className={styles.tipValue}>{formatSpeed(active.speedTokensPerSec)}</span></div>}
         </TipCard>
       )}
       <ul className={styles.legendRow}>
-        <li className={styles.legendItem}><span className={styles.swatch} style={{ background: HIT_FILL }} />{t('quality.cacheHit')}</li>
-        <li className={styles.legendItem}><span className={styles.swatch} style={{ background: SPEED_FILL }} />{t('quality.speedLegend')}</li>
+        <li>
+          <button
+            type="button"
+            className={showCache ? styles.qualityToggle : `${styles.qualityToggle} ${styles.qualityToggleMuted}`}
+            aria-pressed={showCache}
+            onClick={() => { setHover(null); setMetric(current => current === 'cache' ? 'both' : 'cache') }}
+          >
+            <span className={styles.swatch} style={{ background: HIT_FILL }} />{t('quality.cacheHit')}
+          </button>
+        </li>
+        <li>
+          <button
+            type="button"
+            className={showSpeed ? styles.qualityToggle : `${styles.qualityToggle} ${styles.qualityToggleMuted}`}
+            aria-pressed={showSpeed}
+            onClick={() => { setHover(null); setMetric(current => current === 'speed' ? 'both' : 'speed') }}
+          >
+            <span className={styles.swatch} style={{ background: SPEED_FILL }} />{t('quality.speedLegend')}
+          </button>
+        </li>
       </ul>
     </div>
   )
@@ -648,7 +673,7 @@ export function DonutChart({ cut, shares, lang, t }: DonutProps): ReactNode {
                 {labelOf(entry.key, entry.label, t)}
               </span>
               <span className={styles.donutValue}>
-                {`${formatTokens(entry.tokens, lang)} · ${Math.round(share * 1000) / 10}%`}
+                {`${formatTokens(entry.tokens, lang)} · ${formatShare(share)}`}
               </span>
             </li>
           )

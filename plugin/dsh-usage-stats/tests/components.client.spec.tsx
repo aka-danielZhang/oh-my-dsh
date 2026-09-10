@@ -207,6 +207,31 @@ describe('UsageStatsSection', () => {
     expect((await screen.findAllByText('alpha')).length).toBeGreaterThanOrEqual(2)
   })
 
+  it('filters quality bars through the interactive legend and restores both series', async () => {
+    const scripted = scriptedFace()
+    renderSection(scripted)
+    await settle(scripted)
+    const cache = screen.getByRole('button', { name: '缓存命中' })
+    const speed = screen.getByRole('button', { name: '输出速度 tok/s' })
+    expect(cache.getAttribute('aria-pressed')).toBe('true')
+    expect(speed.getAttribute('aria-pressed')).toBe('true')
+
+    fireEvent.click(cache)
+    expect(document.querySelectorAll('[data-quality-bar="cache"]')).toHaveLength(2)
+    expect(document.querySelectorAll('[data-quality-bar="speed"]')).toHaveLength(0)
+    expect(cache.getAttribute('aria-pressed')).toBe('true')
+    expect(speed.getAttribute('aria-pressed')).toBe('false')
+
+    fireEvent.click(speed)
+    expect(document.querySelectorAll('[data-quality-bar="cache"]')).toHaveLength(0)
+    expect(document.querySelectorAll('[data-quality-bar="speed"]')).toHaveLength(2)
+
+    fireEvent.click(speed)
+    expect(document.querySelectorAll('[data-quality-bar]')).toHaveLength(4)
+    expect(cache.getAttribute('aria-pressed')).toBe('true')
+    expect(speed.getAttribute('aria-pressed')).toBe('true')
+  })
+
   it('maps pointer coordinates through a scaled heatmap viewBox', async () => {
     const scripted = scriptedFace()
     renderSection(scripted)
