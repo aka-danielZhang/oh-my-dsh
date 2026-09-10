@@ -24,7 +24,7 @@ import { execNpm, execPnpm } from './cli-bins.mjs'
 
 // Bump when the ASSEMBLY changes (deps, layout) so the SHA-keyed caches
 // invalidate themselves instead of shipping a stale tree.
-const SCRIPT_REV = 14
+const SCRIPT_REV = 15
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 function electronAbiToken() {
   try {
@@ -276,7 +276,9 @@ mkdirSync(runtimeDir, { recursive: true })
 // the built tree relocates with the repo.
 const relSpec = (spec) => {
   if (!spec.startsWith('file:')) return spec
-  return 'file:' + relative(runtimeDir, spec.slice('file:'.length))
+  // Forward slashes: pnpm's allowBuilds keys (and its own diagnostics) spell
+  // file: specs canonically with /, so a Windows backslash path never matches.
+  return 'file:' + relative(runtimeDir, spec.slice('file:'.length)).split('\\').join('/')
 }
 const overrideLines = []
 for (const [name, spec] of Object.entries(finalOverrides)) {
