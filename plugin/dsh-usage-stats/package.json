@@ -33,6 +33,11 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
+    "desktop": {
+      "ship": true,
+      "tarball": "usage-stats.tar.gz",
+      "dest": "plugins/dsh-usage-stats"
+    },
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
