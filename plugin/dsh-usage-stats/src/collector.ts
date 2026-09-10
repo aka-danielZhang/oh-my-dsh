@@ -130,7 +130,11 @@ export function apply(ctx: Context, rawConfig: unknown): () => void {
     // the dedup set exists could double-count a message another process (or
     // this one, before a crash) already persisted. Events appended in the
     // meantime stay in the session logs and enter through the backfill walk.
-    disposers.push(ctx.on('session/event', onEvent))
+    const onSessionEvent = ctx.on as unknown as (
+      event: 'session/event',
+      listener: (session: unknown, event: unknown) => void,
+    ) => () => void
+    disposers.push(onSessionEvent('session/event', onEvent))
     const query = (ctx as unknown as { sessionQuery: SessionQueryView }).sessionQuery
     await runBackfill(query, folder, ctx, store, () => disposed)
   })()

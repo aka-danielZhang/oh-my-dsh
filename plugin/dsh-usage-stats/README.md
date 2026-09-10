@@ -1,6 +1,6 @@
 # dsh-usage-stats
 
-设置·使用统计：摘要带（累计 Token/缓存命中/输出速度/调用时长）、Token 活动热力图、按日堆叠趋势与模型用量圆环排行。数据零改动采集自既有会话日志，不含费用估算。
+设置·使用统计：四张摘要卡（累计 Token/缓存命中/输出速度/调用时长）、Token 活动热力图、多模型按日折线趋势、模型质量分组柱和模型用量圆环排行。数据零改动采集自既有会话日志，不含费用估算。
 
 ## 形态
 
@@ -9,10 +9,10 @@
 | 行 | 职责 |
 |---|---|
 | `dsh-usage-stats/collector` | 采集：`ctx.on('session/event')` live fold + 启动回填（`ctx.sessionQuery.listSessions()` → `readSession`），`message.id` 跨会话去重，写入 `$DSH_HOME/usage-stats/` |
-| `dsh-usage-stats/gateway` | Typert Remote `usageStats` 命名空间：`summary` / `daily` / `activity` / `breakdown` 四查询，返回聚合好的纯 JSON |
+| `dsh-usage-stats/gateway` | Typert Remote `usageStats` 命名空间：`summary` / `daily` / `activity` / `breakdown` / `quality` 五查询，返回聚合好的纯 JSON |
 | `dsh-usage-stats`（主行） | typert strict contribution 注册（装配 runtime 下 `/api/usageStats/*` 可路由）+ 浏览器半载体 |
 
-浏览器半注册 `settings.section`（id `usage-stats`，models 之后）。页面是单列安静统计面板：页头（标题/说明/新鲜度元数据 + 刷新按钮）→ 摘要带（累计 Token / 平均缓存命中（计费输入）/ 平均输出速度（端到端）/ 平均调用时长——全时段口径，一张带边框紧凑容器，容器查询 680/520/420px 决定 4 列/2×2/单列）→ 活动热力图（每日/每周两档，52 周×7 天 8px 格，整年在默认内容宽完整显示；累计模式已从 UI 移除，Remote `cumulative` 保留兼容）→ 时间范围过滤（近 7/30 天或自定义 ≤120 天，无效日期就地报错且不发请求，仅驱动趋势与模型用量）→ 按日堆叠柱趋势（柱总高=当日总 Token，模型按颜色分层，Top 5 + 其他）→ 模型用量圆环与排行（同源 Top 5 + 其他，圆环/排行恒合计 100%）。手写 SVG，无第三方图表库；样式只用 `--dsw-*` token，数据系列色集中为组件级 `--us-*` 变量，CSS Modules 内联时预打 `data-plugin` 标记。请求分 summary/activity/range 三组独立加载，各自持 generation guard（快速切换旧响应不覆盖新选择）、局部错误就地重试；数字格式中文 `万/亿`、英文 `K/M/B`，日期经 locale profile 本地化（本地日历，不走 UTC），筛选/刷新/Tooltip/数据明细均可键盘访问。文案 `ctx.locale.register('usage-stats', { zh, en })`，中文优先。
+浏览器半注册 `settings.section`（id `usage-stats`，models 之后）。页面按设置面板既有的卡片化仪表盘表达：页头（标题/说明/新鲜度 + 刷新）→ 四张独立摘要卡（宽屏四列，窄屏 2×2/单列）→ Token 活动热力图卡（每日/每周，52 周×7 天）→ 无外框时间范围行（近 7/30 天或自定义 ≤120 天）→ 多模型按日平滑折线卡→ 模型质量分组双轴柱卡（缓存命中率 / 输出速度）→ 模型用量圆环与排行卡（Top 5 + 其他，合计 100%）。手写 SVG，无第三方图表库；样式使用 `--dsw-*` token 与 CSS Modules。请求分 summary/activity/range 三组独立加载，保留 generation guard、局部重试、中英文格式化和键盘可访问性。
 
 ## 存储（`$DSH_HOME/usage-stats/`）
 

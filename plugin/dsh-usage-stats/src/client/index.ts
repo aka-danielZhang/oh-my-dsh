@@ -4,8 +4,9 @@
  *
  * @module dsh-usage-stats/client
  */
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SlotRegistry } from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type { UsageStatsQuality } from '../types.ts'
 import type { UsageStatsRange } from './UsageStatsSection.tsx'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
@@ -83,7 +84,8 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       quality: async range => unwrap(await remote.quality(range)),
     }
 
-    ctx.slots.inject('settings.section', () => ctx.slots.register({
+    const slots = ctx.get('slots') as unknown as SlotRegistry
+    slots.inject('settings.section', () => slots.register({
       name: 'settings.section',
       id: 'usage-stats',
       order: 11,

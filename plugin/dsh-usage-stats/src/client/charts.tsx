@@ -14,11 +14,11 @@
 
 import * as React from 'react'
 import type { ReactNode } from 'react'
-import type { UsageStatsActivity, UsageStatsActivityCell } from '../types.ts'
+import type { UsageStatsActivity, UsageStatsActivityCell, UsageStatsQuality } from '../types.ts'
 import type { NamedCut } from './chart-data.ts'
 import { OTHER_KEY, gutterOf, niceCeil, stackedPoints } from './chart-data.ts'
 import type { UsageStatsLang } from './format.ts'
-import { formatDateFull, formatDateShort, formatTokens, formatTokensAxis } from './format.ts'
+import { formatDateFull, formatDateShort, formatPercent, formatSpeed, formatTokens, formatTokensAxis } from './format.ts'
 import type { Translate } from './UsageStatsSection.tsx'
 import styles from './UsageStatsSection.module.css'
 
@@ -93,8 +93,8 @@ interface HeatFocus {
 
 /**
  * GitHub-style activity grid: 7 weekday rows × ~52 week columns (weekly mode:
- * one row of week cells). Cells size for the 564px default content width
- * (8px cell + 2px gap ≈ 544px grid); below ~520px only this wrapper scrolls.
+ * one row of week cells). Its fixed viewBox preserves the 8px cell rhythm,
+ * while CSS scales the complete year to the available card width.
  * Interaction: hover (pointer), click/touch (toggle pin), and a
  * roving-tabindex keyboard cursor (arrows / Home / End) over the cells.
  */
@@ -137,8 +137,9 @@ export function ActivityHeatmap({ activity, lang, t }: HeatmapProps): ReactNode 
 
   const locate = (event: { clientX: number, clientY: number, currentTarget: Element }): UsageStatsActivityCell | undefined => {
     const rect = event.currentTarget.getBoundingClientRect()
-    const x = event.clientX - rect.left
-    const y = event.clientY - rect.top
+    if (rect.width <= 0 || rect.height <= 0) return undefined
+    const x = (event.clientX - rect.left) * (width / rect.width)
+    const y = (event.clientY - rect.top) * (height / rect.height)
     const column = Math.floor((x - left) / step)
     const row = weekly ? 0 : Math.floor((y - top) / step)
     const index = weekly ? column : column * 7 + row
@@ -177,10 +178,12 @@ export function ActivityHeatmap({ activity, lang, t }: HeatmapProps): ReactNode 
       const rect = event.currentTarget.getBoundingClientRect()
       const column = weekly ? next : Math.floor(next / 7)
       const row = weekly ? 0 : next % 7
+      const scaleX = rect.width / width
+      const scaleY = rect.height / height
       setHover({
         cell: entry,
-        x: rect.left + left + column * step + step / 2,
-        y: rect.top + top + row * step,
+        x: rect.left + (left + column * step + step / 2) * scaleX,
+        y: rect.top + (top + row * step) * scaleY,
       })
     }
   }
@@ -208,7 +211,7 @@ export function ActivityHeatmap({ activity, lang, t }: HeatmapProps): ReactNode 
     const row = weekly ? 0 : index - column * 7
     kids.push(
       <rect
-        key={entry.date}
+        key={`${entry.date}:${index}`}
         x={left + column * step}
         y={top + row * step}
         width={cell}
@@ -250,7 +253,7 @@ export function ActivityHeatmap({ activity, lang, t }: HeatmapProps): ReactNode 
   )
 
   return (
-    <div className={styles.heatWrap}>
+    <div className={styles.heatWrap} data-usage-heatmap="chart">
       <svg
         width={width}
         height={height}
@@ -282,7 +285,7 @@ export function ActivityHeatmap({ activity, lang, t }: HeatmapProps): ReactNode 
   )
 }
 
-// ── Stacked-bar daily trend ───────────────────────────────────────────────
+// ── Multi-series daily trend ─────────────────────────────────────────────
 
 interface TrendProps {
   days: ReadonlyArray<{ date: string, total: number, byModel: ReadonlyArray<{ model: string, tokens: number }> }>
@@ -302,16 +305,14 @@ const TREND_WIDTH = 560
 const TREND_HEIGHT = 190
 
 /**
- * Per-day stacked bars: one bar per calendar day, models layered bottom-up in
- * the shared series order, the bar's full height always equal to the day's
- * total (the reference design's core expression — no smoothed multi-lines
- * inventing peaks between sparse days).
+ * Per-model daily lines. The shared cut keeps line, legend, and donut colors
+ * stable while the curve matches the established usage dashboard treatment.
  */
 export function TrendChart({ days, cut, lang, t }: TrendProps): ReactNode {
   const [hover, setHover] = React.useState<TrendHover | null>(null)
   const points = React.useMemo(() => stackedPoints(days, cut), [days, cut])
   const axisMax = React.useMemo(
-    () => niceCeil(points.reduce((max, point) => Math.max(max, point.total), 0)),
+    () => niceCeil(points.reduce((max, point) => Math.max(max, ...point.values), 0)),
     [points],
   )
   const ticks = React.useMemo(
@@ -327,9 +328,8 @@ export function TrendChart({ days, cut, lang, t }: TrendProps): ReactNode {
 
   if (points.length === 0) return <p className={styles.blockState}>{t('trend.empty')}</p>
 
-  const slot = points.length > 1 ? plotWidth / points.length : Math.min(plotWidth, 64)
-  const barWidth = clamp(slot * 0.68, 2, 30)
-  const xOf = (index: number): number => left + slot * index + (slot - barWidth) / 2
+  const slot = points.length > 1 ? plotWidth / (points.length - 1) : plotWidth
+  const xOf = (index: number): number => points.length === 1 ? left + plotWidth / 2 : left + slot * index
   const yOf = (value: number): number => top + plotHeight - (value / axisMax) * plotHeight
 
   const dateLabel = (index: number): string => formatDateShort(points[index]!.date, lang)
@@ -342,13 +342,13 @@ export function TrendChart({ days, cut, lang, t }: TrendProps): ReactNode {
       <line
         x1={left}
         x2={TREND_WIDTH - right}
-        y1={top + (1 - index / (ticks.length - 1)) * plotHeight}
-        y2={top + (1 - index / (ticks.length - 1)) * plotHeight}
+        y1={top + (index / (ticks.length - 1)) * plotHeight}
+        y2={top + (index / (ticks.length - 1)) * plotHeight}
         className={styles.gridLine}
       />
       <text
         x={left - 6}
-        y={top + (1 - index / (ticks.length - 1)) * plotHeight + 3.5}
+        y={top + (index / (ticks.length - 1)) * plotHeight + 3.5}
         textAnchor="end"
         className={styles.axisText}
       >
@@ -358,30 +358,22 @@ export function TrendChart({ days, cut, lang, t }: TrendProps): ReactNode {
   ))
   tickIndexes.forEach(index => {
     kids.push(
-      <text key={`t${index}`} x={xOf(index) + barWidth / 2} y={TREND_HEIGHT - 6} textAnchor="middle" className={styles.axisText}>
+      <text key={`t${index}`} x={xOf(index)} y={TREND_HEIGHT - 6} textAnchor="middle" className={styles.axisText}>
         {dateLabel(index)}
       </text>,
     )
   })
-  points.forEach((point, index) => {
-    let acc = 0
-    cut.all.forEach((entry, series) => {
-      const value = point.values[series] ?? 0
-      if (value <= 0) return
-      const yTop = yOf(acc + value)
-      const height = Math.max(1, yOf(acc) - yTop)
-      kids.push(
-        <rect
-          key={`b${point.date}:${entry.key}`}
-          x={xOf(index)}
-          y={yTop}
-          width={barWidth}
-          height={height}
-          fill={entry.key === OTHER_KEY ? OTHER_COLOR : seriesColor(series)}
-        />,
-      )
-      acc += value
-    })
+  cut.all.forEach((entry, series) => {
+    const line = points.map((point, index): [number, number] => [xOf(index), yOf(point.values[series] ?? 0)])
+    kids.push(
+      <path
+        key={entry.key}
+        d={smoothPath(line)}
+        stroke={entry.key === OTHER_KEY ? OTHER_COLOR : seriesColor(series)}
+        className={styles.trendLine}
+        data-trend-line="series"
+      />,
+    )
   })
 
   const hoverPoint = hover === null ? undefined : points[hover.index]
@@ -389,8 +381,8 @@ export function TrendChart({ days, cut, lang, t }: TrendProps): ReactNode {
     kids.push(
       <line
         key="hoverline"
-        x1={xOf(hover.index) + barWidth / 2}
-        x2={xOf(hover.index) + barWidth / 2}
+        x1={xOf(hover.index)}
+        x2={xOf(hover.index)}
         y1={top}
         y2={top + plotHeight}
         className={styles.gridLine}
@@ -428,7 +420,7 @@ export function TrendChart({ days, cut, lang, t }: TrendProps): ReactNode {
         const rect = svg.getBoundingClientRect()
         const scale = rect.width / TREND_WIDTH
         const x = (event.clientX - rect.left) / scale
-        const index = Math.floor((x - left) / slot)
+        const index = Math.round((x - left) / slot)
         if (index < 0 || index >= points.length) {
           setHover(null)
           return
@@ -448,6 +440,108 @@ export function TrendChart({ days, cut, lang, t }: TrendProps): ReactNode {
         {kids}
       </svg>
       {tip}
+    </div>
+  )
+}
+
+/** Catmull-Rom spline emitted as cubic Bezier segments. */
+function smoothPath(points: Array<[number, number]>): string {
+  if (points.length === 0) return ''
+  if (points.length === 1) return `M ${points[0]![0]} ${points[0]![1]}`
+  const tension = 0.16
+  let path = `M ${points[0]![0]} ${points[0]![1]}`
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const p0 = points[i - 1] ?? points[i]!
+    const p1 = points[i]!
+    const p2 = points[i + 1]!
+    const p3 = points[i + 2] ?? p2
+    path += ` C ${p1[0] + (p2[0] - p0[0]) * tension} ${p1[1] + (p2[1] - p0[1]) * tension}, ${p2[0] - (p3[0] - p1[0]) * tension} ${p2[1] - (p3[1] - p1[1]) * tension}, ${p2[0]} ${p2[1]}`
+  }
+  return path
+}
+
+// ── Model quality grouped bars ───────────────────────────────────────────
+
+const QUALITY_WIDTH = 560
+const QUALITY_HEIGHT = 220
+const HIT_FILL = 'var(--us-s2)'
+const SPEED_FILL = 'var(--us-s3)'
+
+/** Cache-hit and output-rate grouped bars, matching the established board. */
+export function QualityBars({ quality, t }: { quality: UsageStatsQuality, t: Translate }): ReactNode {
+  const [hover, setHover] = React.useState<{ index: number, x: number, y: number } | null>(null)
+  const models = quality.models.slice(0, 8)
+  const left = 38
+  const right = 38
+  const top = 12
+  const bottom = 40
+  const plotWidth = QUALITY_WIDTH - left - right
+  const plotHeight = QUALITY_HEIGHT - top - bottom
+  const groupWidth = models.length > 0 ? plotWidth / models.length : plotWidth
+  const barWidth = Math.min(22, groupWidth * 0.3)
+  const maxSpeed = niceCeil(models.reduce((max, model) => Math.max(max, model.speedTokensPerSec ?? 0), 1))
+  const kids: ReactNode[] = []
+
+  for (const ratio of [0, 0.25, 0.5, 0.75, 1]) {
+    const y = top + ratio * plotHeight
+    kids.push(
+      <line key={`g${ratio}`} x1={left} x2={QUALITY_WIDTH - right} y1={y} y2={y} className={styles.gridLine} />,
+      <text key={`l${ratio}`} x={left - 6} y={y + 3.5} textAnchor="end" className={styles.axisText}>{Math.round((1 - ratio) * 100)}%</text>,
+      <text key={`r${ratio}`} x={QUALITY_WIDTH - right + 6} y={y + 3.5} className={styles.axisText}>{Math.round(maxSpeed * (1 - ratio))}</text>,
+    )
+  }
+
+  models.forEach((model, index) => {
+    const center = left + groupWidth * index + groupWidth / 2
+    const hitHeight = (model.hitRate ?? 0) * plotHeight
+    const speedHeight = ((model.speedTokensPerSec ?? 0) / maxSpeed) * plotHeight
+    const bare = model.model.slice(model.model.indexOf('/') + 1)
+    const short = bare.length > 10 ? `${bare.slice(0, 8)}…` : bare
+    kids.push(
+      <rect key={`h${model.model}`} x={center - barWidth - 2} y={top + plotHeight - hitHeight} width={barWidth} height={hitHeight} rx={2} fill={HIT_FILL} data-quality-bar="cache" />,
+      <rect key={`s${model.model}`} x={center + 2} y={top + plotHeight - speedHeight} width={barWidth} height={speedHeight} rx={2} fill={SPEED_FILL} data-quality-bar="speed" />,
+      <text key={`x${model.model}`} x={center} y={QUALITY_HEIGHT - 10} textAnchor="middle" className={styles.axisText}>{short}</text>,
+      <rect
+        key={`hit${model.model}`}
+        x={left + groupWidth * index}
+        y={top}
+        width={groupWidth}
+        height={plotHeight}
+        className={styles.trendHit}
+        tabIndex={0}
+        role="button"
+        aria-label={`${bare} · ${t('quality.cacheHit')} ${formatPercent(model.hitRate)} · ${t('quality.speed')} ${formatSpeed(model.speedTokensPerSec)}`}
+        onFocus={event => {
+          const rect = event.currentTarget.getBoundingClientRect()
+          setHover({ index, x: rect.left + rect.width / 2, y: rect.top })
+        }}
+        onBlur={() => { setHover(null) }}
+        onPointerEnter={event => { setHover({ index, x: event.clientX, y: event.clientY }) }}
+        onPointerMove={event => { setHover({ index, x: event.clientX, y: event.clientY }) }}
+        onPointerLeave={() => { setHover(null) }}
+      />,
+    )
+  })
+
+  const active = hover === null ? undefined : models[hover.index]
+  return (
+    <div className={styles.qualityWrap}>
+      <svg viewBox={`0 0 ${QUALITY_WIDTH} ${QUALITY_HEIGHT}`} className={styles.chartSvg} role="img" aria-label={t('quality.title')}>
+        <title>{t('quality.title')}</title>
+        <desc>{t('quality.desc')}</desc>
+        {kids}
+      </svg>
+      {hover !== null && active !== undefined && (
+        <TipCard x={hover.x} y={hover.y} width={210} height={76}>
+          <div className={styles.tipTitle}>{active.model}</div>
+          <div className={styles.tipRow}><span className={styles.swatch} style={{ background: HIT_FILL }} />{t('quality.cacheHit')}<span className={styles.tipValue}>{formatPercent(active.hitRate)}</span></div>
+          <div className={styles.tipRow}><span className={styles.swatch} style={{ background: SPEED_FILL }} />{t('quality.speed')}<span className={styles.tipValue}>{formatSpeed(active.speedTokensPerSec)}</span></div>
+        </TipCard>
+      )}
+      <ul className={styles.legendRow}>
+        <li className={styles.legendItem}><span className={styles.swatch} style={{ background: HIT_FILL }} />{t('quality.cacheHit')}</li>
+        <li className={styles.legendItem}><span className={styles.swatch} style={{ background: SPEED_FILL }} />{t('quality.speedLegend')}</li>
+      </ul>
     </div>
   )
 }
@@ -500,6 +594,7 @@ export function DonutChart({ cut, shares, lang, t }: DonutProps): ReactNode {
         strokeLinecap="butt"
         transform={`rotate(-90 ${center} ${center})`}
         className={dimmed ? `${styles.donutArc} ${styles.donutDim}` : styles.donutArc}
+        data-donut-arc="slice"
         tabIndex={0}
         role="button"
         aria-label={`${labelOf(entry.key, entry.label, t)} · ${formatTokens(entry.tokens, lang)}`}

@@ -51,6 +51,10 @@ scratch home 复制 4 个真实会话（含 v3 与迁移态目录），起 `dsh 
 
 ## 0.1.1 视觉重构落地（2026-09-10，方案见 2026-09-10-usage-stats-visual-redesign.md）
 
+### 0.1.2 视觉回调（2026-09-10）
+
+实机对照现有设置页参考图后，撤回“唯一摘要带 + 无框图表分区 + 堆叠柱”的视觉表达，恢复为四张独立摘要卡、热力图卡、多模型平滑折线卡、模型质量双指标柱卡和模型用量圆环卡。时间范围仍保持无框过滤行；三组请求、generation guard、局部重试、CSS Modules、国际化和键盘交互保留。
+
 按定稿方案一次完成 P0/P1 修复与结构重构，Client 表现层全部重写，Host 采集/records/Remote 五查询/wire 格式零改动：
 
 - **P0 修复**：`charts.tsx` 57 处原始 `usage*` 类名全部改走 CSS Module 映射（构建产物断言 bundle 不含 `usage(Heat|Trend|Donut|...)` 原始串）；筛选只变外观不刷新的根因（`load()` 捕获 mode/range 但 effect 只依赖 face）改为三组请求状态 + 每 group 独立 effect + generation guard（快速切换旧响应丢弃）；`formatTokens` 10^8/10^9 边界修复（500M→5亿/500M、1B→10亿/1B，含 rounded `10000万`→`1亿` 进位）。

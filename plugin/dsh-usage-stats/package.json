@@ -1,6 +1,6 @@
 {
   "name": "dsh-usage-stats",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "设置·使用统计：Token 用量、活动热力图、Provider/模型分布与每日趋势",
   "type": "module",
   "main": "lib/index.js",

@@ -87,6 +87,13 @@ function breakdownFixture(model: string): UsageStatsBreakdown {
   }
 }
 
+const QUALITY = {
+  models: [
+    { model: 'p/quality-one', hitRate: 0.92, speedTokensPerSec: 31.7, samples: 12 },
+    { model: 'p/quality-two', hitRate: 0.67, speedTokensPerSec: 18.4, samples: 8 },
+  ],
+}
+
 /** Scripted face: every call returns a fresh deferred the test resolves. */
 interface Scripted {
   face: UsageStatsFace
@@ -100,7 +107,7 @@ interface Scripted {
 
 function scriptedFace(): Scripted {
   const calls: Scripted['calls'] = { summary: [], activity: [], range: [], breakdown: [] }
-  const quality = vi.fn(async () => ({ models: [] }))
+  const quality = vi.fn(async () => QUALITY)
   const face: UsageStatsFace = {
     summary: () => {
       const d = deferred<UsageStatsSummary>()
@@ -178,7 +185,7 @@ describe('UsageStatsSection', () => {
     expect(screen.getByText('正在读取统计…')).toBeTruthy()
   })
 
-  it('renders the summary band, heatmap, stacked trend, and donut from data', async () => {
+  it('renders metric cards, heatmap, line trend, quality bars, and donut from data', async () => {
     const scripted = scriptedFace()
     renderSection(scripted)
     await settle(scripted)
@@ -190,11 +197,40 @@ describe('UsageStatsSection', () => {
     // Meta line composes time, first date, and active days.
     expect(screen.getByText(/自 9月1日 起 · 活跃 9 天/)).toBeTruthy()
     // Charts: heatmap SVG with weekday labels, stacked-bar SVG, donut ring.
-    expect(svgTitles()).toContain('活动')
+    expect(svgTitles()).toContain('Token 活动热力图')
     expect(svgTitles()).toContain('按日 Token 趋势')
+    expect(svgTitles()).toContain('模型质量')
     expect(svgTitles()).toContain('模型用量')
+    expect(document.querySelectorAll('[data-quality-bar]').length).toBe(4)
+    expect(document.body.textContent).not.toContain('NaN')
     // The donut ranking and the trend legend both carry the series.
     expect((await screen.findAllByText('alpha')).length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('maps pointer coordinates through a scaled heatmap viewBox', async () => {
+    const scripted = scriptedFace()
+    renderSection(scripted)
+    await settle(scripted)
+    const svg = screen.getByRole('img', { name: 'Token 活动热力图' })
+    expect(svg).toBeInstanceOf(SVGSVGElement)
+    const heatmap = svg as unknown as SVGSVGElement
+    vi.spyOn(heatmap, 'getBoundingClientRect').mockReturnValue({
+      x: 100,
+      y: 50,
+      left: 100,
+      top: 50,
+      right: 373,
+      bottom: 93,
+      width: 273,
+      height: 43,
+      toJSON: () => ({}),
+    })
+
+    // Logical cell column 10, row 3 is centered at (130, 50). The rendered
+    // SVG is exactly half-size, so the pointer reaches it at (165, 75).
+    fireEvent.pointerMove(heatmap, { clientX: 165, clientY: 75 })
+    expect(screen.getByText('2025年10月18日')).toBeTruthy()
+    expect(screen.getByText('3,000 · 3 轮')).toBeTruthy()
   })
 
   it('shows the empty state instead of charts when nothing was collected', async () => {

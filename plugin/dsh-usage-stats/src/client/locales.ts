@@ -22,13 +22,15 @@ export const zh = {
   'meta.line': '更新于 {time} · 自 {date} 起 · 活跃 {days} 天',
 
   'summary.totalTokens': '累计 Token',
+  'summary.totalTokens.hint': '{calls} 次调用',
   'summary.cacheHit': '平均缓存命中',
   'summary.cacheHit.hint': '计费输入',
   'summary.speed': '平均输出速度',
   'summary.speed.hint': '端到端',
   'summary.call': '平均调用时长',
+  'summary.call.hint': '调用开始 → 回复完成',
 
-  'heatmap.title': '活动',
+  'heatmap.title': 'Token 活动热力图',
   'heatmap.mode.daily': '每日',
   'heatmap.mode.weekly': '每周',
   'heatmap.legend.less': '少',
@@ -52,9 +54,15 @@ export const zh = {
   'range.tooLong': '自定义范围最多 120 天（当前 {days} 天）。',
 
   'trend.title': '按日 Token 趋势',
-  'trend.desc': '每天一根堆叠柱，柱内按模型分色，柱高等于当日总 Token。',
+  'trend.desc': '所选时间范围内，各模型的每日 Token 用量趋势。',
   'trend.empty': '所选范围内没有用量。',
   'series.other': '其他',
+
+  'quality.title': '模型质量',
+  'quality.desc': '按模型对比缓存命中率和平均输出速度。',
+  'quality.cacheHit': '缓存命中',
+  'quality.speed': '输出速度',
+  'quality.speedLegend': '输出速度 tok/s',
 
   'donut.title': '模型用量',
   'donut.desc': '所选范围内各模型的 Token 占比圆环与排行。',
@@ -76,13 +84,15 @@ export const en = {
   'meta.line': 'Updated {time} · Since {date} · {days} active days',
 
   'summary.totalTokens': 'Total tokens',
+  'summary.totalTokens.hint': '{calls} calls',
   'summary.cacheHit': 'Avg cache hit',
   'summary.cacheHit.hint': 'of billed input',
   'summary.speed': 'Avg output rate',
   'summary.speed.hint': 'end-to-end',
   'summary.call': 'Avg call duration',
+  'summary.call.hint': 'Call start to response complete',
 
-  'heatmap.title': 'Activity',
+  'heatmap.title': 'Token activity heatmap',
   'heatmap.mode.daily': 'Daily',
   'heatmap.mode.weekly': 'Weekly',
   'heatmap.legend.less': 'Less',
@@ -106,9 +116,15 @@ export const en = {
   'range.tooLong': 'Custom ranges span at most 120 days (currently {days}).',
 
   'trend.title': 'Daily token trend',
-  'trend.desc': 'One stacked bar per day, colored by model; the bar height equals that day’s total tokens.',
+  'trend.desc': 'Daily token usage by model over the selected range.',
   'trend.empty': 'No usage in the selected range.',
   'series.other': 'Other',
+
+  'quality.title': 'Model quality',
+  'quality.desc': 'Cache hit rate and average output rate by model.',
+  'quality.cacheHit': 'Cache hit',
+  'quality.speed': 'Output rate',
+  'quality.speedLegend': 'Output rate tok/s',
 
   'donut.title': 'Model usage',
   'donut.desc': 'Donut and ranking of each model’s token share over the selected range.',

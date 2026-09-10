@@ -20,9 +20,10 @@ import type {
   UsageStatsActivity,
   UsageStatsBreakdown,
   UsageStatsDaily,
+  UsageStatsQuality,
   UsageStatsSummary,
 } from '../types.ts'
-import { ActivityHeatmap, DonutChart, LegendRow, TrendChart } from './charts.tsx'
+import { ActivityHeatmap, DonutChart, LegendRow, QualityBars, TrendChart } from './charts.tsx'
 import { breakdownCut, cutNamed, modelTotalsOf } from './chart-data.ts'
 import {
   daysBetween,
@@ -54,7 +55,7 @@ export interface UsageStatsFace {
   daily(range: UsageStatsRange): Promise<UsageStatsDaily>
   activity(mode: UsageStatsActivity['mode']): Promise<UsageStatsActivity>
   breakdown(range: UsageStatsRange): Promise<UsageStatsBreakdown>
-  quality(range: UsageStatsRange): Promise<{ models: unknown[] }>
+  quality(range: UsageStatsRange): Promise<UsageStatsQuality>
 }
 
 /** Props delivered by the slot outlet (the inject face spread flat). */
@@ -86,7 +87,11 @@ type RangeIssue = { key: 'range.missing' | 'range.invalid' } | { key: 'range.too
 export function UsageStatsSection({ face, t, lang }: UsageStatsSectionProps): ReactNode {
   const [summaryState, setSummaryState] = useState<Group<UsageStatsSummary>>(INITIAL)
   const [activityState, setActivityState] = useState<Group<UsageStatsActivity>>(INITIAL)
-  const [rangeState, setRangeState] = useState<Group<{ daily: UsageStatsDaily, breakdown: UsageStatsBreakdown }>>(INITIAL)
+  const [rangeState, setRangeState] = useState<Group<{
+    daily: UsageStatsDaily
+    breakdown: UsageStatsBreakdown
+    quality: UsageStatsQuality
+  }>>(INITIAL)
   const [activityMode, setActivityMode] = useState<ActivityMode>('daily')
   const [range, setRange] = useState<RangeTab>('7')
   const [from, setFrom] = useState(() => localDaysAgoKey(29))
@@ -147,15 +152,13 @@ export function UsageStatsSection({ face, t, lang }: UsageStatsSectionProps): Re
     const gen = ++rangeGen.current
     setRangeState(state => ({ ...state, loading: true }))
     try {
-      // quality rides the same generation (kept on the wire for future use;
-      // the page itself renders only daily + breakdown).
-      const [daily, breakdown] = await Promise.all([
+      const [daily, breakdown, quality] = await Promise.all([
         face.daily(wireRange),
         face.breakdown(wireRange),
-        face.quality(wireRange).catch(() => undefined),
+        face.quality(wireRange),
       ])
       if (gen !== rangeGen.current) return
-      setRangeState({ data: { daily, breakdown }, loading: false })
+      setRangeState({ data: { daily, breakdown, quality }, loading: false })
     } catch (error) {
       if (gen !== rangeGen.current) return
       setRangeState({ error: messageOf(error), loading: false })
@@ -248,7 +251,7 @@ export function UsageStatsSection({ face, t, lang }: UsageStatsSectionProps): Re
   )
 
   const pillGroup = (options: Array<{ id: string, label: string }>, active: string, onSelect: (id: string) => void): ReactNode => (
-    <span className={styles.pillGroup} role="group">
+    <span className={styles.pillGroup} role="group" data-usage-filter="group">
       {options.map(option => (
         <Pill
           key={option.id}
@@ -270,7 +273,7 @@ export function UsageStatsSection({ face, t, lang }: UsageStatsSectionProps): Re
   )
 
   return (
-    <section className={styles.section}>
+    <section className={styles.section} data-usage-stats="root">
       <header className={styles.header}>
         <div>
           <h2 className={styles.title}>{t('page.title')}</h2>
@@ -293,24 +296,26 @@ export function UsageStatsSection({ face, t, lang }: UsageStatsSectionProps): Re
             })}
           </p>
 
-          <div className={styles.summaryBand}>
-            <div className={styles.summaryCell}>
-              <span className={styles.summaryLabel}>{t('summary.totalTokens')}</span>
-              <span className={styles.summaryValue}>{formatTokens(summary.totalTokens, language)}</span>
+          <div className={styles.summaryGrid} data-usage-summary="grid">
+            <div className={styles.statCard}>
+              <span className={styles.statLabel}>{t('summary.totalTokens')}</span>
+              <span className={styles.statValue}>{formatTokens(summary.totalTokens, language)}</span>
+              <span className={styles.statHint}>{t('summary.totalTokens.hint', { calls: summary.calls })}</span>
             </div>
-            <div className={styles.summaryCell}>
-              <span className={styles.summaryLabel}>{t('summary.cacheHit')}</span>
-              <span className={styles.summaryValue}>{formatPercent(summary.cacheHitRate)}</span>
-              <span className={styles.summaryHint}>{t('summary.cacheHit.hint')}</span>
+            <div className={styles.statCard}>
+              <span className={styles.statLabel}>{t('summary.cacheHit')}</span>
+              <span className={styles.statValue}>{formatPercent(summary.cacheHitRate)}</span>
+              <span className={styles.statHint}>{t('summary.cacheHit.hint')}</span>
             </div>
-            <div className={styles.summaryCell}>
-              <span className={styles.summaryLabel}>{t('summary.speed')}</span>
-              <span className={styles.summaryValue}>{formatSpeed(summary.speedTokensPerSec)}</span>
-              <span className={styles.summaryHint}>{t('summary.speed.hint')}</span>
+            <div className={styles.statCard}>
+              <span className={styles.statLabel}>{t('summary.speed')}</span>
+              <span className={styles.statValue}>{formatSpeed(summary.speedTokensPerSec)}</span>
+              <span className={styles.statHint}>{t('summary.speed.hint')}</span>
             </div>
-            <div className={styles.summaryCell}>
-              <span className={styles.summaryLabel}>{t('summary.call')}</span>
-              <span className={styles.summaryValue}>{formatDuration(summary.avgCallMs, language)}</span>
+            <div className={styles.statCard}>
+              <span className={styles.statLabel}>{t('summary.call')}</span>
+              <span className={styles.statValue}>{formatDuration(summary.avgCallMs, language)}</span>
+              <span className={styles.statHint}>{t('summary.call.hint')}</span>
             </div>
           </div>
 
@@ -318,9 +323,9 @@ export function UsageStatsSection({ face, t, lang }: UsageStatsSectionProps): Re
 
           {!empty && (
             <>
-              <div className={styles.block}>
-                <div className={styles.blockHead}>
-                  <h3 className={styles.blockTitle}>{t('heatmap.title')}</h3>
+              <div className={styles.chartCard}>
+                <div className={styles.cardHead}>
+                  <h3 className={styles.cardTitle}>{t('heatmap.title')}</h3>
                   {pillGroup([
                     { id: 'daily', label: t('heatmap.mode.daily') },
                     { id: 'weekly', label: t('heatmap.mode.weekly') },
@@ -333,9 +338,9 @@ export function UsageStatsSection({ face, t, lang }: UsageStatsSectionProps): Re
                     : <ActivityHeatmap activity={activity} lang={language} t={t} />}
               </div>
 
-              <div className={styles.block}>
-                <div className={styles.blockHead}>
-                  <h3 className={styles.blockTitle}>{t('range.title')}</h3>
+              <div className={styles.rangeRow}>
+                <div className={styles.rangeHead}>
+                  <h3 className={styles.rangeTitle}>{t('range.title')}</h3>
                   <span className={styles.rangeControls}>
                     {pillGroup([
                       { id: '7', label: t('range.7') },
@@ -370,9 +375,9 @@ export function UsageStatsSection({ face, t, lang }: UsageStatsSectionProps): Re
                 )}
               </div>
 
-              <div className={styles.block}>
-                <div className={styles.blockHead}>
-                  <h3 className={styles.blockTitle}>{t('trend.title')}</h3>
+              <div className={styles.chartCard}>
+                <div className={styles.cardHead}>
+                  <h3 className={styles.cardTitle}>{t('trend.title')}</h3>
                 </div>
                 {rangeState.error !== undefined
                   ? sectionError(rangeState.error, () => { void loadRange() })
@@ -388,9 +393,24 @@ export function UsageStatsSection({ face, t, lang }: UsageStatsSectionProps): Re
                 )}
               </div>
 
-              <div className={styles.block}>
-                <div className={styles.blockHead}>
-                  <h3 className={styles.blockTitle}>{t('donut.title')}</h3>
+              <div className={styles.chartCard}>
+                <div className={styles.cardHead}>
+                  <h3 className={styles.cardTitle}>{t('quality.title')}</h3>
+                </div>
+                {rangeState.error !== undefined
+                  ? null
+                  : rangeData === undefined
+                    ? rangeIssue !== null
+                      ? null
+                      : <p className={styles.blockState}>{t('state.loading')}</p>
+                    : rangeData.quality.models.length === 0
+                      ? <p className={styles.blockState}>{t('trend.empty')}</p>
+                      : <QualityBars quality={rangeData.quality} t={t} />}
+              </div>
+
+              <div className={styles.chartCard}>
+                <div className={styles.cardHead}>
+                  <h3 className={styles.cardTitle}>{t('donut.title')}</h3>
                 </div>
                 {rangeState.error !== undefined
                   ? null

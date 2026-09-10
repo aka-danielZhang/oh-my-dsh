@@ -86,7 +86,7 @@ const SUMMARY: UsageStatsSummary = {
 /** Cordis bench: real SlotRegistry + LocaleRuntime + a remote namespace. */
 async function bench(withNamespace: boolean) {
   const ctx = new Context()
-  await ctx.plugin(SlotRegistry).await()
+  await ctx.plugin(SlotRegistry, []).await()
   const locale = new LocaleRuntime(ctx)
   ctx.provide('locale', locale)
   const summary = vi.fn(async (): Promise<ListResult> => ({ ok: true, value: SUMMARY }))
@@ -108,11 +108,12 @@ async function bench(withNamespace: boolean) {
   }
   new RemoteService(ctx)
   if (withNamespace) ctx.provide('remote.usageStats', namespace)
-  const declare = (): () => void => ctx.slots.register({
+  const slots = ctx.get('slots') as unknown as SlotRegistry
+  const declare = (): () => void => slots.register({
     name: 'root',
     children: { 'settings.section': { kind: 'list', scope: 'root' } },
   } as never, () => null)
-  return { ctx, slots: ctx.get('slots') as unknown as SlotRegistry, locale, declare, namespace, mount }
+  return { ctx, slots, locale, declare, namespace, mount }
 }
 
 /** The built client module under the loader's exact import posture. */

@@ -1,15 +1,5 @@
-/* Usage-stats settings page — a quiet, single-column stats panel.
- *
- * Design language: 16/24 title, 14/22 body, 12/18 captions, 12px rhythm.
- * The ONLY bordered container is the summary band; chart sections are open
- * blocks separated by hairlines. Everything colors through `--dsw-alias-*`
- * surfaces and the component-level `--us-*` data palette below (mapped to
- * the static scale, never bare hex). Layout decisions ride container
- * queries on `.section` — the settings modal's real content width is ~564px,
- * with 720px as the ceiling, not the default. */
-
+/* Card-based usage dashboard matching the rest of the settings experience. */
 .section {
-  /* Data palette: series colors live here once, not scattered in JSX. */
   --us-s1: var(--dsw-static-deepseek-500);
   --us-s2: var(--dsw-static-blue-500);
   --us-s3: var(--dsw-static-green-500);
@@ -21,519 +11,86 @@
   --us-heat-2: var(--dsw-static-blue-300);
   --us-heat-3: var(--dsw-static-blue-450);
   --us-heat-4: var(--dsw-static-blue-600);
-
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 18px;
   width: 100%;
+  max-width: 760px;
   min-width: 0;
   box-sizing: border-box;
   container-type: inline-size;
-  max-width: 720px;
   color: var(--dsw-alias-label-primary);
 }
-
-/* ── Header ─────────────────────────────────────────────────────────── */
-
-.header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.title {
-  margin: 0;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 500;
-}
-
-.intro {
-  margin: 4px 0 0;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.meta {
-  margin: 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.state {
-  margin: 4px 0 0;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.error {
-  margin: 4px 0 0;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-state-error-primary);
-}
-
-/* Politely announced refresh result; visually quiet on purpose. */
-.announce {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-.spin {
-  animation: us-spin 0.9s linear infinite;
-}
-
-@keyframes us-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .spin {
-    animation: none;
-  }
-}
-
-/* ── Summary band (the one bordered container) ──────────────────────── */
-
-.summaryBand {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0;
-  border: 0.5px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-  background: var(--dsw-alias-bg-layer-1);
-  padding: 2px 0;
-}
-
-.summaryCell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  padding: 10px 14px;
-}
-
-.summaryLabel {
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-tertiary);
-  /* Two lines allowed — labels never ellipsize into mystery meat. */
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
-.summaryValue {
-  font-size: 18px;
-  line-height: 24px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
-}
-
-.summaryHint {
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--dsw-alias-label-quaternary);
-}
-
-/* ── Open chart sections (hairline-separated, no card chrome) ───────── */
-
-.block {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  border-top: 1px solid var(--dsw-alias-border-l1);
-  padding-top: 12px;
-  min-width: 0;
-}
-
-.blockHead {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 24px;
-  flex-wrap: wrap;
-}
-
-.blockTitle {
-  margin: 0;
-  font-size: 14px;
-  line-height: 22px;
-  font-weight: 500;
-}
-
-.blockState {
-  margin: 0;
-  font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.blockError {
-  margin: 0;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--dsw-alias-state-error-primary);
-}
-
-.blockErrorRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-/* ── Filter groups ──────────────────────────────────────────────────── */
-
-.pillGroup {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: wrap;
-}
-
-.rangeRow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.rangeControls {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.rangeDates {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.dateInput {
-  box-sizing: border-box;
-  height: 32px;
-  background: transparent;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-  color: var(--dsw-alias-label-primary);
-  padding: 0 8px;
-  font-size: 12px;
-  line-height: 18px;
-  font-variant-numeric: tabular-nums;
-}
-
-.dateInput:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 1px;
-}
-
-.rangeError {
-  margin: 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-state-error-primary);
-}
-
-/* ── Charts ─────────────────────────────────────────────────────────── */
-
-.chartSvg {
-  display: block;
-}
-
-/* The heatmap keeps its true pixel size (8px cells read as cells); below the
- * breakpoint only THIS wrapper scrolls — the page never grows a horizontal
- * scrollbar. */
-.heatWrap {
-  position: relative;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
-}
-
-.heatAxis {
-  font-size: 9px;
-  line-height: 12px;
-  fill: var(--dsw-alias-label-tertiary);
-}
-
-.heatCell {
-  cursor: pointer;
-}
-
-.heatCell:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 1px;
-}
-
-.heatLegendRow {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 4px;
-  margin-top: 2px;
-}
-
-.heatLegendText {
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.trendWrap {
-  position: relative;
-}
-
-.trendWrap .chartSvg {
-  width: 100%;
-  height: auto;
-}
-
-.axisText {
-  font-size: 10px;
-  line-height: 14px;
-  fill: var(--dsw-alias-label-tertiary);
-}
-
-.gridLine {
-  stroke: var(--dsw-alias-border-l1);
-  stroke-width: 1;
-}
-
-.trendHit {
-  fill: transparent;
-}
-
-.legendRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 14px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.legendItem {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-secondary);
-  min-width: 0;
-}
-
-.donutRow {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  min-width: 0;
-}
-
-.donutWrap {
-  position: relative;
-  width: 128px;
-  height: 128px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.donutWrap .chartSvg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-
-.donutCenter {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0;
-  pointer-events: none;
-}
-
-.donutCenterValue {
-  font-size: 15px;
-  line-height: 22px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.donutCenterLabel {
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.donutArc {
-  cursor: pointer;
-  transition: opacity 0.15s ease;
-}
-
-.donutArc:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 2px;
-}
-
-.donutDim {
-  opacity: 0.35;
-}
-
-.donutList {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  flex: 1 1 200px;
-}
-
-.donutItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  line-height: 20px;
-  min-width: 0;
-  border-radius: 6px;
-  padding: 1px 4px;
-  margin: -1px -4px;
-}
-
-.donutItem:focus-visible {
-  outline: 2px solid var(--dsw-alias-state-business-primary);
-  outline-offset: 1px;
-}
-
-.donutLabel {
-  flex: 1 1 auto;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--dsw-alias-label-primary);
-  text-align: left;
-}
-
-.donutValue {
-  flex: none;
-  font-variant-numeric: tabular-nums;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.swatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  display: inline-block;
-  flex: none;
-}
-
-/* ── Data cards (tooltips) ──────────────────────────────────────────── */
-
-.tipCard {
-  position: fixed;
-  pointer-events: none;
-  z-index: 50;
-  max-width: 240px;
-  background: var(--dsw-alias-bg-layer-2);
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 8px;
-  padding: 8px 10px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-primary);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-}
-
-.tipTitle {
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.tipRow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.tipValue {
-  font-variant-numeric: tabular-nums;
-  margin-left: auto;
-  padding-left: 12px;
-  color: var(--dsw-alias-label-primary);
-}
-
-/* ── Container-driven layout decisions ──────────────────────────────── */
-
-/* Settings modal default (~564px): summary reads best as 2×2. */
-@container (max-width: 679px) {
-  .summaryBand {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .summaryCell:nth-child(2n) {
-    border-left: 0.5px solid var(--dsw-alias-border-l1);
-  }
-
-  .summaryCell:nth-child(n + 3) {
-    border-top: 0.5px solid var(--dsw-alias-border-l1);
-  }
-}
-
-/* Narrow: the donut centers and the ranking moves below it. */
+.header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.title { margin: 0; font-size: 18px; line-height: 26px; font-weight: 600; }
+.intro { margin: 4px 0 0; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-tertiary); }
+.meta { margin: -12px 0 -4px; font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); }
+.state, .blockState { margin: 0; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-tertiary); }
+.error, .blockError, .rangeError { margin: 0; font-size: 12px; line-height: 18px; color: var(--dsw-alias-state-error-primary); }
+.blockErrorRow { display: flex; align-items: center; gap: 8px; margin: 0; flex-wrap: wrap; }
+.announce { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.spin { animation: us-spin 0.9s linear infinite; }
+@keyframes us-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+.summaryGrid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.statCard, .chartCard { min-width: 0; box-sizing: border-box; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-1); }
+.statCard { display: flex; flex-direction: column; gap: 4px; min-height: 88px; padding: 14px 16px 12px; }
+.statLabel { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); white-space: normal; }
+.statValue { font-size: 20px; line-height: 26px; font-weight: 600; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.statHint { margin-top: auto; min-width: 0; overflow: hidden; color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; white-space: nowrap; text-overflow: ellipsis; }
+.chartCard { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+.cardHead, .rangeHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; flex-wrap: wrap; }
+.cardTitle, .rangeTitle { margin: 0; font-size: 14px; line-height: 22px; font-weight: 600; }
+
+.rangeRow { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rangeControls, .rangeDates { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.pillGroup { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 999px; flex-wrap: nowrap; }
+.dateInput { box-sizing: border-box; height: 32px; max-width: 136px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; padding: 0 8px; background: transparent; color: var(--dsw-alias-label-primary); font-size: 12px; line-height: 18px; font-variant-numeric: tabular-nums; }
+.dateInput:focus-visible, .heatCell:focus-visible, .donutArc:focus-visible, .trendHit:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary); outline-offset: 1px; }
+
+.chartSvg { display: block; }
+.heatWrap { position: relative; max-width: 100%; overflow: hidden; }
+.heatWrap .chartSvg { width: 100%; height: auto; }
+.heatAxis, .axisText { fill: var(--dsw-alias-label-tertiary); font-size: 10px; line-height: 14px; }
+.heatCell, .donutArc, .trendHit { cursor: pointer; }
+.heatLegendRow { display: flex; align-items: center; justify-content: flex-end; gap: 5px; margin-top: 4px; }
+.heatLegendText { color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; }
+.trendWrap, .qualityWrap { position: relative; min-width: 0; }
+.trendWrap .chartSvg, .qualityWrap .chartSvg { width: 100%; height: auto; }
+.gridLine { stroke: var(--dsw-alias-border-l1); stroke-width: 1; }
+.trendLine { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.trendHit { fill: transparent; }
+.legendRow { display: flex; flex-wrap: wrap; gap: 7px 16px; margin: 0; padding: 0; list-style: none; }
+.legendItem { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 18px; }
+
+.donutRow { display: flex; align-items: center; gap: 24px; min-width: 0; }
+.donutWrap { position: relative; width: 148px; height: 148px; flex: none; display: flex; align-items: center; justify-content: center; }
+.donutWrap .chartSvg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.donutCenter { display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+.donutCenterValue { font-size: 16px; line-height: 24px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.donutCenterLabel { color: var(--dsw-alias-label-tertiary); font-size: 11px; line-height: 16px; }
+.donutArc { transition: opacity 0.15s ease; }
+.donutDim { opacity: 0.35; }
+.donutList { display: flex; flex: 1 1 220px; flex-direction: column; gap: 6px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.donutItem { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 1px 4px; margin: -1px -4px; border-radius: 6px; font-size: 13px; line-height: 20px; }
+.donutLabel { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--dsw-alias-label-primary); white-space: nowrap; text-align: left; text-overflow: ellipsis; }
+.donutValue { flex: none; color: var(--dsw-alias-label-secondary); font-variant-numeric: tabular-nums; }
+.swatch { display: inline-block; width: 8px; height: 8px; flex: none; border-radius: 2px; }
+
+.tipCard { position: fixed; z-index: 50; max-width: 240px; padding: 8px 10px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; background: var(--dsw-alias-bg-layer-2); box-shadow: 0 4px 16px rgb(0 0 0 / 25%); color: var(--dsw-alias-label-primary); font-size: 12px; line-height: 18px; pointer-events: none; }
+.tipTitle { margin-bottom: 4px; font-weight: 600; }
+.tipRow { display: flex; align-items: center; gap: 6px; color: var(--dsw-alias-label-secondary); }
+.tipValue { margin-left: auto; padding-left: 12px; color: var(--dsw-alias-label-primary); font-variant-numeric: tabular-nums; }
+
+@container (max-width: 479px) { .summaryGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @container (max-width: 519px) {
-  .donutRow {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-
-  .donutWrap {
-    align-self: center;
-  }
+  .donutRow { flex-direction: column; align-items: stretch; gap: 14px; }
+  .donutWrap { align-self: center; }
+  .rangeHead { align-items: flex-start; flex-direction: column; }
 }
-
-/* Very narrow: single-column summary with hairline separators. */
-@container (max-width: 419px) {
-  .summaryBand {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .summaryCell {
-    border-left: none;
-  }
-
-  .summaryCell + .summaryCell {
-    border-top: 0.5px solid var(--dsw-alias-border-l1);
-  }
-
-  .rangeDates {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .dateInput {
-    width: 100%;
-  }
+@container (max-width: 379px) {
+  .summaryGrid { grid-template-columns: minmax(0, 1fr); }
+  .rangeDates { align-items: stretch; flex-direction: column; width: 100%; }
+  .dateInput { width: 100%; max-width: none; }
 }

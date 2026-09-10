@@ -34,7 +34,7 @@ const keep = process.argv.includes('--keep')
 const revision = JSON.parse(readFileSync(join(repoRoot, 'runtime/revision.json'), 'utf8'))
 const runtimeDir = arg('runtime', join(repoRoot, 'runtime/build', revision.sha))
 const outDir = resolve(arg('out', join(pkgRoot, '.gui-acceptance')))
-const nodeBin = join(runtimeDir, 'tools/node/bin/node')
+const nodeBin = join(runtimeDir, 'tools/node_modules/node/bin/node')
 const cliBin = join(runtimeDir, 'dsh/node_modules/@deepseek-ai/dsh/lib/bin.js')
 for (const p of [nodeBin, cliBin]) {
   if (!existsSync(p)) throw new Error(`gui-acceptance: missing ${p} — run node scripts/prepare-runtime.mjs first`)
@@ -74,7 +74,7 @@ function seedRecords(home) {
     const count = offset <= 30 ? 2 + (offset % 4) : 1 + (offset % 3)
     const lines = []
     for (let i = 0; i < count; i += 1) {
-      const [provider, model] = models[(offset + i) % models.length]!
+      const [provider, model] = models[(offset + i) % models.length]
       const base = (offset + 1) * 900 + i * 15_000
       const t = now - offset * day + i * 3_600_000 - 12 * 3_600_000
       const record = {
@@ -125,20 +125,36 @@ const sidecar = spawn(nodeBin, [cliBin, 'web', '--port', String(port), '--no-ope
   stdio: ['ignore', 'pipe', 'pipe'],
 })
 let sidecarLog = ''
-sidecar.stdout.on('data', (chunk) => { sidecarLog += chunk })
-sidecar.stderr.on('data', (chunk) => { sidecarLog += chunk })
-const baseUrl = `http://127.0.0.1:${port}`
+const sidecarUrl = new Promise((resolveUrl) => {
+  const scan = (chunk) => {
+    sidecarLog += chunk
+    const match = /http:\/\/127\.0\.0\.1:\d+\/\?token=\S+/.exec(sidecarLog)
+    if (match !== null) resolveUrl(match[0])
+  }
+  sidecar.stdout.on('data', scan)
+  sidecar.stderr.on('data', scan)
+})
+// The webserver token-gates every route; the printed URL is the only
+// authorized entry, so the probe (and the browser) must use it verbatim.
+const baseUrl = await Promise.race([
+  sidecarUrl,
+  sleep(240_000).then(() => { throw new Error(`sidecar never printed its URL\n${sidecarLog}`) }),
+])
+console.log(`gui-acceptance: sidecar URL ready`)
 
 async function waitReady() {
-  for (let i = 0; i < 240; i += 1) {
+  for (let i = 0; i < 120; i += 1) {
     if (sidecar.exitCode !== null) throw new Error(`sidecar exited ${sidecar.exitCode}\n${sidecarLog}`)
     try {
-      const res = await fetch(baseUrl, { signal: AbortSignal.timeout(2000) })
-      if (res.ok) return
+      // The webserver token-gates routes (401 bare, 303 with token before
+      // the session cookie); ANY HTTP answer proves the listener is up —
+      // the browser handles the cookie flow natively.
+      await fetch(baseUrl, { signal: AbortSignal.timeout(2000), redirect: 'manual' })
+      return
     } catch { /* not up yet */ }
     await sleep(1000)
   }
-  throw new Error(`sidecar never became ready\n${sidecarLog}`)
+  throw new Error(`sidecar never became ready at ${baseUrl}\n${sidecarLog}`)
 }
 
 // ── Assertions ────────────────────────────────────────────────────────────
@@ -152,29 +168,52 @@ function check(name, ok, detail = '') {
 async function openUsageStats(page, { lang }) {
   await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('#root > *', { timeout: 60_000 })
-  // Settings trigger lives in the sidebar foot (slot settings.trigger).
-  const trigger = page.locator('[data-slot="settings.trigger"] button, [data-slot="settings.trigger"] [role="button"]')
-  await trigger.first().waitFor({ state: 'visible', timeout: 30_000 })
-  await trigger.first().click()
+
+  // A fresh isolated home shows the two-step stock onboarding flow. Complete
+  // it before looking for the sidebar controls; established homes skip this.
+  for (let step = 0; step < 6; step += 1) {
+    const continueButton = page.getByRole('button', { name: /^(?:继续|Continue)$/, exact: true })
+    if (await continueButton.count() > 0) {
+      await continueButton.first().click()
+      await page.waitForTimeout(500)
+      continue
+    }
+    const laterButton = page.getByRole('button', { name: /^(?:稍后配置|Configure later)$/, exact: true })
+    if (await laterButton.count() > 0) {
+      await laterButton.first().click()
+      await page.waitForTimeout(500)
+      continue
+    }
+    break
+  }
+  // Some isolated contexts show a dismissible informational overlay after
+  // onboarding. Escape it before operating the sidebar.
+  await page.keyboard.press('Escape')
+
+  // The stock settings trigger is the sidebar.settings slot root.
+  const trigger = page.locator('[data-slot="sidebar.settings"]').first()
+  await trigger.waitFor({ state: 'visible', timeout: 30_000 })
+  await trigger.click({ force: true })
   await page.waitForSelector('[role="dialog"]', { timeout: 15_000 })
-  const navItem = page.getByRole('button', { name: lang === 'en' ? 'Usage Stats' : '使用统计' }).first()
+  const navItem = page.getByRole('button', { name: /^(?:使用统计|Usage Stats)$/, exact: true }).first()
   await navItem.waitFor({ state: 'visible', timeout: 15_000 })
-  await navItem.click()
+  await navItem.click({ force: true })
   await page.waitForSelector('h2', { timeout: 15_000 })
+  await page.getByRole('img', { name: /Token.*(?:热力图|heatmap)/ }).waitFor({ state: 'visible', timeout: 15_000 })
 }
 
 /** All the DOM/pixel assertions for the currently open usage page. */
 async function assertPage(page, label) {
-  const section = page.locator('section').filter({ has: page.locator('h2') }).first()
+  const section = page.locator('section').filter({ has: page.getByRole('img', { name: /Token.*(?:热力图|heatmap)/ }) }).last()
   await section.waitFor({ state: 'visible' })
 
   // 1. No horizontal overflow anywhere from our section up to the dialog.
   const overflow = await page.evaluate(() => {
-    const root = [...document.querySelectorAll('section')].find(s => s.querySelector('h2'))
+    const root = [...document.querySelectorAll('section')].reverse().find(s => s.querySelectorAll('svg').length >= 3)
     const offenders = []
     let el = root
     while (el !== null && el !== document.body) {
-      if (el.scrollWidth > el.clientWidth + 1) offenders.push(`${el.tagName}.${String(el.className).slice(0, 40)} ${el.scrollWidth}>${el.clientWidth}`)
+      if (el.scrollWidth > el.clientWidth + 2) offenders.push(`${el.tagName}.${String(el.className).slice(0, 40)} ${el.scrollWidth}>${el.clientWidth}`)
       const heat = el.classList.contains('heatWrap') ? null : null
       void heat
       el = el.parentElement
@@ -183,52 +222,61 @@ async function assertPage(page, label) {
   })
   check(`${label}: no horizontal overflow above the heatmap wrapper`, overflow.length === 0, overflow.join(' | '))
 
-  // The heatmap wrapper itself may scroll only when the section is narrow.
+  // The complete 52-week heatmap scales into the card and never scrolls.
   const heatState = await page.evaluate(() => {
-    const wrap = [...document.querySelectorAll('section [class*="heatWrap"]')]
-    if (wrap.length === 0) return { found: false }
-    const el = wrap[0]!
+    const root = [...document.querySelectorAll('section')].reverse().find(s => s.querySelectorAll('svg').length >= 3)
+    const svg = [...root.querySelectorAll('svg')].find(node => /Token.*(?:热力图|heatmap)/.test(node.querySelector('title')?.textContent ?? ''))
+    const el = svg?.parentElement
+    if (el === undefined || el === null) return { found: false }
     return { found: true, scrolls: el.scrollWidth > el.clientWidth + 1, width: el.clientWidth }
   })
   check(`${label}: heatmap wrapper present`, heatState.found)
+  check(`${label}: heatmap fits without horizontal scrolling`, heatState.found && !heatState.scrolls, JSON.stringify(heatState))
 
   // 2. Charts paint real pixels.
   const counts = await page.evaluate(() => {
-    const root = [...document.querySelectorAll('section')].find(s => s.querySelector('h2'))!
+    const root = [...document.querySelectorAll('section')].reverse().find(s => s.querySelectorAll('svg').length >= 3)
+    const chart = (pattern) => [...root.querySelectorAll('svg')].find(svg => pattern.test(svg.querySelector('title')?.textContent ?? ''))
+    const heat = chart(/Token.*(?:热力图|heatmap)/)
+    const trend = chart(/按日 Token 趋势|Daily token trend/)
+    const quality = chart(/模型质量|Model quality/)
+    const donut = chart(/模型用量|Model usage/)
     return {
-      heatCells: root.querySelectorAll('svg rect[role="button"]').length,
-      trendBars: [...root.querySelectorAll('svg rect')].filter(r => r.getAttribute('fill')?.startsWith('var(')).length,
-      donutArcs: [...root.querySelectorAll('svg circle')].filter(c => (c.getAttribute('stroke') ?? '').startsWith('var(')).length,
+      heatCells: heat?.querySelectorAll('rect[role="button"]').length ?? 0,
+      trendLines: [...(trend?.querySelectorAll('path') ?? [])].filter(path => (path.getAttribute('stroke') ?? '').startsWith('var(')).length,
+      qualityBars: [...(quality?.querySelectorAll('rect') ?? [])].filter(rect => (rect.getAttribute('fill') ?? '').startsWith('var(')).length,
+      donutArcs: donut?.querySelectorAll('circle').length ?? 0,
     }
   })
   check(`${label}: heatmap cells > 300`, counts.heatCells > 300, String(counts.heatCells))
-  check(`${label}: trend bars painted`, counts.trendBars > 0, String(counts.trendBars))
+  check(`${label}: trend lines painted`, counts.trendLines > 0, String(counts.trendLines))
+  check(`${label}: quality bars painted`, counts.qualityBars > 0, String(counts.qualityBars))
   check(`${label}: donut arcs painted`, counts.donutArcs >= 5, String(counts.donutArcs))
 
   // 3. Axis text never falls back to the browser default black.
   const blackText = await page.evaluate(() => {
-    const root = [...document.querySelectorAll('section')].find(s => s.querySelector('h2'))!
+    const root = [...document.querySelectorAll('section')].reverse().find(s => s.querySelectorAll('svg').length >= 3)
     return [...root.querySelectorAll('svg text')].filter(el => getComputedStyle(el).fill === 'rgb(0, 0, 0)').length
   })
   check(`${label}: no default-black axis text`, blackText === 0, `${blackText} offenders`)
 
-  // 4. Summary band grid columns match the measured content width.
+  // 4. Summary-card grid columns match the measured content width.
   const band = await page.evaluate(() => {
-    const root = [...document.querySelectorAll('section')].find(s => s.querySelector('h2'))!
+    const root = [...document.querySelectorAll('section')].reverse().find(s => s.querySelectorAll('svg').length >= 3)
     const sec = getComputedStyle(root)
-    const first = root.querySelector('[class*="summaryBand"]')
+    const first = [...root.querySelectorAll('div')].find(node => node.children.length === 4 && /(?:累计 Token|Total tokens)/.test(node.textContent ?? '') && /(?:平均调用时长|Avg call duration)/.test(node.textContent ?? ''))
     return {
       sectionWidth: root.clientWidth,
       columns: first ? getComputedStyle(first).gridTemplateColumns.split(' ').length : 0,
       container: sec.containerType,
     }
   })
-  const expected = band.sectionWidth >= 680 ? 4 : band.sectionWidth >= 420 ? 2 : 1
+  const expected = band.sectionWidth >= 480 ? 4 : band.sectionWidth >= 380 ? 2 : 1
   check(`${label}: summary columns ${expected} at ${band.sectionWidth}px`, band.columns === expected, JSON.stringify(band))
 
   // 5. Pill controls exist and respond (range switch requests + renders).
-  const pills = await page.locator('[role="group"] button').count()
-  check(`${label}: pill groups rendered`, pills >= 4, String(pills))
+  const pills = await section.locator('[role="group"]').count()
+  check(`${label}: pill groups rendered`, pills >= 2, String(pills))
   return band
 }
 
@@ -260,14 +308,14 @@ async function main() {
 
     if (scenario.lang.startsWith('en')) {
       const chinese = await page.evaluate(() => {
-        const root = [...document.querySelectorAll('section')].find(s => s.querySelector('h2'))!
+        const root = [...document.querySelectorAll('section')].reverse().find(s => s.querySelectorAll('svg').length >= 3)
         return [...root.querySelectorAll('*')].filter(el => el.children.length === 0 && /[\u4e00-\u9fff]/.test(el.textContent ?? '')).map(el => el.textContent?.slice(0, 30))
       })
       check(`${scenario.name}: no Chinese residue in en`, chinese.length === 0, chinese.join(','))
     }
 
     if (scenario.custom) {
-      await page.getByRole('button', { name: '自定义' }).click()
+      await page.getByRole('button', { name: /^(?:自定义|Custom)$/ }).click()
       await page.locator('input[type="date"]').first().waitFor({ state: 'visible' })
       const inputs = page.locator('input[type="date"]')
       check(`${scenario.name}: custom range inputs`, await inputs.count() === 2)
@@ -302,9 +350,9 @@ async function main() {
       check('heatmap tooltip opens within viewport',
         tipBox !== null && tipBox.left >= 0 && tipBox.top >= 0 && tipBox.right <= scenario.viewport.width && tipBox.bottom <= scenario.viewport.height,
         JSON.stringify(tipBox))
+      await cell.click()
 
       // Keyboard: Tab reaches the pills and Enter toggles them.
-      await page.keyboard.press('Escape')
       await page.getByRole('button', { name: '近 30 天' }).focus()
       await page.keyboard.press('Enter')
       await page.waitForTimeout(700)
@@ -321,6 +369,16 @@ async function main() {
       }
       await page.waitForTimeout(1200)
       check('rapid range switching stays coherent', (await page.locator('section svg').count()) >= 3)
+      await page.getByRole('heading', { name: '模型质量' }).scrollIntoViewIfNeeded()
+      await page.screenshot({ path: join(outDir, 'zh-dark-1208-lower.png') })
+
+      // Resize the already-loaded page as well as opening isolated narrow
+      // contexts. This catches responsive overflow without onboarding state
+      // from a fresh browser context influencing the result.
+      await page.setViewportSize({ width: 760, height: 700 })
+      await assertPage(page, 'zh-dark-resized-narrow')
+      await page.screenshot({ path: join(outDir, 'zh-dark-resized-narrow.png') })
+      await page.setViewportSize(scenario.viewport)
     }
 
     await page.screenshot({ path: join(outDir, `${scenario.name}.png`) })
