@@ -36,9 +36,11 @@ function isHarnessPage() {
  * region on the row background, and the columns starting exactly at the
  * toolbar's bottom edge. Throws on the first violated invariant.
  */
-function assertDesktopToolbar() {
+async function assertDesktopToolbar(toolbar) {
   if (platform !== 'macos') return
-  const toolbar = document.querySelector('[data-desktop-toolbar]')
+  if (!toolbar || typeof toolbar.querySelectorAll !== 'function') {
+    throw new Error(`toolbar probe: matched node is ${String(toolbar && toolbar.constructor && toolbar.constructor.name || toolbar)}`)
+  }
   if (!toolbar) throw new Error('toolbar DOM missing (desktop-toolbar not mounted)')
   const bar = toolbar.getBoundingClientRect()
   if (bar.height < 36 || bar.height > 40) throw new Error(`toolbar height ${bar.height} != 38`)
@@ -69,6 +71,40 @@ function assertDesktopToolbar() {
   }
 }
 
+/**
+ * Collapse/expand cycle driven through the toolbar's own sidebar toggle
+ * (a real click, so the whole ctx.layout → inline-grid reconciliation chain
+ * runs). Asserts the sidebar actually collapses, the collapsed first track
+ * is reconciled to 0px by the rail hider, and the toolbar's own geometry
+ * does not drift while collapsed — then expands back.
+ */
+async function assertCollapsedCycle(toolbar) {
+  const toggle = [...toolbar.querySelectorAll('button')].find((button) =>
+    /侧边栏|sidebar/i.test(button.getAttribute('aria-label') || ''))
+  if (!toggle) return // unknown dictionary: skip the cycle rather than fail it
+  const frame = document.querySelector('div:has(> [data-shell-overlay])')
+  if (!frame) return
+  const waitFor = async (predicate) => {
+    const deadline = Date.now() + 2000
+    while (Date.now() < deadline) {
+      if (predicate()) return true
+      await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    return false
+  }
+  const collapsed = () => frame.hasAttribute('data-sidebar-collapsed')
+  toggle.click()
+  if (!(await waitFor(collapsed))) throw new Error('sidebar did not collapse after toolbar toggle click')
+  const firstTrack = (frame.style.gridTemplateColumns.match(/^\S+/) || [''])[0]
+  if (firstTrack !== '0px') {
+    throw new Error(`collapsed first track "${firstTrack}" != 0px (rail hider not reconciling)`)
+  }
+  const bar = toolbar.getBoundingClientRect()
+  if (bar.height < 36 || bar.height > 40) throw new Error(`toolbar height drifted to ${bar.height} while collapsed`)
+  toggle.click()
+  if (!(await waitFor(() => !collapsed()))) throw new Error('sidebar did not expand back after second toggle click')
+}
+
 function startE2eProbe() {
   if (process.env.DSH_DESKTOP_E2E_PROBE !== '1') return
   if (!isHarnessPage()) return
@@ -81,7 +117,7 @@ function startE2eProbe() {
   // flow's active-surface check makes the second run a harmless no-op.
   const surface = process.env.DSH_DESKTOP_E2E_SURFACE
   const started = Date.now()
-  const timer = setInterval(() => {
+  const timer = setInterval(async () => {
     const root = document.getElementById('root') || document.querySelector('[data-app-root], #app')
     const badge = document.querySelector('[data-desktop-badge]')
     if (root && badge) {
@@ -96,7 +132,9 @@ function startE2eProbe() {
         return
       }
       try {
-        assertDesktopToolbar()
+        const toolbar = document.querySelector('[data-desktop-toolbar]')
+        await assertDesktopToolbar(toolbar)
+        await assertCollapsedCycle(toolbar)
       } catch (error) {
         ipcRenderer
           .invoke('dsh_desktop_e2e_report', { verdict: `fail:${error.message}` })
