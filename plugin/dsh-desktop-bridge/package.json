@@ -33,8 +33,7 @@
         "@deepseek-ai/dsh-client-ui-renderer",
         "@deepseek-ai/dsh-client-locale"
       ],
-      "platform": "web",
-      "immediately": true
+      "platform": "web"
     },
     "bundle": {
       "patch": "./cordis.patch.yml"
@@ -84,6 +83,7 @@
     "@deepseek-ai/dsh-client-ui-layout": "0.1.5-alpha.1",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.5-alpha.1",
     "@deepseek-ai/dsh-client-ui-renderer": "0.1.5-alpha.1",
+    "@deepseek-ai/dsh-client-ui-session": "0.1.5-rc.1",
     "@deepseek-ai/dsh-client-ui-slots": "0.1.5-alpha.1",
     "@deepseek-ai/dsh-client-ui-workspace": "0.1.5-alpha.1",
     "@testing-library/dom": "^10.4.1",

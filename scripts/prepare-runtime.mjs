@@ -24,7 +24,7 @@ import { execNpm, execPnpm } from './cli-bins.mjs'
 
 // Bump when the ASSEMBLY changes (deps, layout) so the SHA-keyed caches
 // invalidate themselves instead of shipping a stale tree.
-const SCRIPT_REV = 12
+const SCRIPT_REV = 14
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 function electronAbiToken() {
   try {
@@ -282,6 +282,21 @@ const overrideLines = []
 for (const [name, spec] of Object.entries(finalOverrides)) {
   overrideLines.push(`  '${name}': ${spec}`)
 }
+// pnpm 11 keys build approvals for non-registry deps by the QUALIFIED
+// `name@spec` form — a bare-name entry never matches a file: tarball, and
+// the install hard-fails on the unresolved decision. Every packed tarball
+// is our own artifact, so its build scripts are allowed wholesale.
+const buildApprovalLines = []
+for (const [name, spec] of Object.entries(overrides)) {
+  if (spec.startsWith('file:')) {
+    // dsh-root's postinstall wires husky into the checkout — meaningless and
+    // unresolvable inside the runtime tree (its lefthook devDep is not
+    // installed), so it is explicitly denied while every other packed
+    // artifact's scripts run as they would in the fork repo.
+    const allow = name !== '@deepseek-ai/dsh-root'
+    buildApprovalLines.push(`  '${name}@${relSpec(spec)}': ${allow}`)
+  }
+}
 const forkDirectDeps = {}
 for (const name of FORK_MODIFIED) {
   const forkName = `${FORK_NPM_SCOPE}/${name.slice('@deepseek-ai/'.length)}`
@@ -329,12 +344,12 @@ writeFileSync(resolve(runtimeDir, 'pnpm-workspace.yaml'), [
   ...overrideLines,
   'allowBuilds:',
   '  node-pty: true',
-  "  '@deepseek-ai/dsh-subprocess-local': true",
   '  koffi: true',
   '  esbuild: true',
   '  protobufjs: false',
   "  '@google/genai': false",
   '  node-addon-require-builtin: false',
+  ...buildApprovalLines,
   '',
 ].join('\n'))
 // Windows bsdtar follows NTFS junctions into copies, which breaks pnpm's
