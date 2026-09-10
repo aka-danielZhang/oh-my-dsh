@@ -14,7 +14,8 @@ import { UsageStatsSection } from './UsageStatsSection.tsx'
 import type { UsageStatsFace } from './UsageStatsSection.tsx'
 import { en, zh } from './locales.ts'
 import type { UsageStatsLocaleKey } from './locales.ts'
-import type { Translate } from './format.ts'
+import { resolveLang } from './format.ts'
+import type { UsageStatsLang } from './format.ts'
 
 /** Dictionary namespace owned by this plugin. */
 const NS = 'usage-stats'
@@ -64,8 +65,11 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-usage-stats: dictionaries')
 
     // Registration-time text (the nav label thunk) and the page share one
-    // bound translate; copy freshness rides the locale revision.
-    const t = ctx.locale.bind(NS) as Translate
+    // bound translate; copy freshness rides the locale revision. The
+    // formatter profile resolves the active locale at render time — the
+    // component itself never touches ctx or subscribes to locale.
+    const t = ctx.locale.bind(NS) as (key: UsageStatsLocaleKey, params?: Record<string, string | number>) => string
+    const lang = (): UsageStatsLang => resolveLang(ctx.locale.getLocale().active)
 
     const unwrap = <Value>(outcome: RemoteOutcome<Value>): Value => {
       if (!outcome.ok) throw new Error(`${outcome.error.code}: ${outcome.error.message}`)
@@ -84,7 +88,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       id: 'usage-stats',
       order: 11,
       label: () => t('nav'),
-      inject: (): { face: UsageStatsFace, t: Translate } => ({ face, t }),
+      inject: (): { face: UsageStatsFace, t: (key: UsageStatsLocaleKey, params?: Record<string, string | number>) => string, lang: () => UsageStatsLang } => ({ face, t, lang }),
     }, UsageStatsSection))
     return disposeRemote
   } catch (error) {

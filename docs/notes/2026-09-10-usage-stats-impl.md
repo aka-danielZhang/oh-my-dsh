@@ -48,3 +48,15 @@ scratch home 复制 4 个真实会话（含 v3 与迁移态目录），起 `dsh 
 - **交互定稿**：时间范围=独立裸过滤行（无卡片背景，紧贴趋势图上方），仅驱动趋势+模型用量两看板（四卡全时段口径）；支持近 7 天/近 30 天/自定义起止（≤120 天）；「使用统计」order 11 紧随「模型」；环图固定按模型；刷新为图标钮；三图悬浮数据卡（热力图 position:fixed 防滚动裁剪，格子弹出「日期+tokens+轮数」）。
 - React 教训：子组件必须 `el(Component, props)` 挂 hooks——直接函数调用会把子组件 useState 记到父组件 hook 表，条件渲染切换即 React #310。
 - Inspect 工具带参调用报 "input must be an object"（空对象/带参皆如此，无参正常）——疑似传输层问题，待上游查。
+
+## 0.1.1 视觉重构落地（2026-09-10，方案见 2026-09-10-usage-stats-visual-redesign.md）
+
+按定稿方案一次完成 P0/P1 修复与结构重构，Client 表现层全部重写，Host 采集/records/Remote 五查询/wire 格式零改动：
+
+- **P0 修复**：`charts.tsx` 57 处原始 `usage*` 类名全部改走 CSS Module 映射（构建产物断言 bundle 不含 `usage(Heat|Trend|Donut|...)` 原始串）；筛选只变外观不刷新的根因（`load()` 捕获 mode/range 但 effect 只依赖 face）改为三组请求状态 + 每 group 独立 effect + generation guard（快速切换旧响应丢弃）；`formatTokens` 10^8/10^9 边界修复（500M→5亿/500M、1B→10亿/1B，含 rounded `10000万`→`1亿` 进位）。
+- **页面结构**：四卡合并为一张摘要带（唯一带边框容器；容器查询 680/520/420px → 4 列/2×2/单列），图表区改无框 section + 顶部细分隔线；热力图 8px cell + 2px gap（~544px 在默认 564px 内容宽完整显示），月份仅新月份首列、星期仅一/三/五，图例 flex 置于网格下方右侧；「累计」模式从 UI 移除（Remote `cumulative` 保留兼容）。
+- **趋势改按日堆叠柱**：柱总高=当日总 Token，模型分层着色，Top 5 + 其他（`chart-data.ts` 纯 helper 单测覆盖）；Catmull-Rom 平滑折线与双轴「模型质量」图删除（`QualityBars` 整块移除，`quality` Remote 仍在 range 组拉取、不上 UI）。
+- **模型用量**：圆环 + 排行同源数据（共享 `NamedCut` + `normalizedShares` 把舍入残差并给最大片，恒合计 100%）；>6 模型前 5 独立 + 其他聚合，超长名省略、title 显全名。
+- **i18n/a11y**：charts 硬编码中文/单位全部清除；formatter 拆 zh/en 双 profile（`万/亿` vs `K/M/B`、`M月D日` vs `Sep 6`），axis 独立 compact formatter；日期初值走本地日历（修 `toISOString()` UTC 跨日）；locale profile 经 inject 传 `lang()` 解析器（组件不触 ctx）；筛选改 `Pill` aria-pressed 组；热力图 roving-tabindex 键盘游标（方向键/Home/End）+ 触摸/点击钉住；Tooltip 卡视口夹紧；SVG 均带 `<title>/<desc>`；`prefers-reduced-motion` 关刷新图标旋转。
+- **测试基建**：新增 Vitest（jsdom + Testing Library，沿用 bridge/MCP 配置）与 `tests/format.test.ts`（边界数字/本地日期）、`tests/chart-data.test.ts`（堆叠总高/Top5+其他/圆环 100%/轴域）、`tests/components.client.spec.tsx`（14 例：加载/空态/局部失败重试/模式与范围即时请求/无效日期不发请求/乱序响应丢弃/手动刷新 announce/focus 重拉/英文无中文残留/CSS Module 类名非原始串）、`tests/browser-plugin.client.spec.tsx`（真实 SlotRegistry 注册与 fiber 卸载、Remote 自挂载、RemoteOutcome 解包、built client.js 装载 + 插件样式表注入 + 每个 local class 有哈希规则）。`test` script 改为 node 套件 + vitest 双跑。
+- **已知偏差**：方案阶段 B 的「仅修故障基线截图」未单独出图——P0 根因已由失败测试固定（类名/请求/数字三例），修复与重构合入同一版 0.1.1，根因与重构效果由测试与 GUI 验收分别评估。

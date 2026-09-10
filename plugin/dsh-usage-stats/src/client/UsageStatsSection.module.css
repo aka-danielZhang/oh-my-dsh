@@ -1,15 +1,39 @@
-/* Usage-stats settings page, in the settings-panel design language:
- * 14/22 body, 12/18 captions, 12px card radius, `border-l2` hairlines —
- * the vocabulary ModelsSection uses. Every color resolves through a
- * `--dsw-*` token. */
+/* Usage-stats settings page — a quiet, single-column stats panel.
+ *
+ * Design language: 16/24 title, 14/22 body, 12/18 captions, 12px rhythm.
+ * The ONLY bordered container is the summary band; chart sections are open
+ * blocks separated by hairlines. Everything colors through `--dsw-alias-*`
+ * surfaces and the component-level `--us-*` data palette below (mapped to
+ * the static scale, never bare hex). Layout decisions ride container
+ * queries on `.section` — the settings modal's real content width is ~564px,
+ * with 720px as the ceiling, not the default. */
 
 .section {
+  /* Data palette: series colors live here once, not scattered in JSX. */
+  --us-s1: var(--dsw-static-deepseek-500);
+  --us-s2: var(--dsw-static-blue-500);
+  --us-s3: var(--dsw-static-green-500);
+  --us-s4: var(--dsw-static-amber-500);
+  --us-s5: var(--dsw-static-red-400);
+  --us-so: var(--dsw-static-neutral-400);
+  --us-heat-0: var(--dsw-alias-bg-module-platform);
+  --us-heat-1: var(--dsw-static-blue-100);
+  --us-heat-2: var(--dsw-static-blue-300);
+  --us-heat-3: var(--dsw-static-blue-450);
+  --us-heat-4: var(--dsw-static-blue-600);
+
   display: flex;
   flex-direction: column;
   gap: 12px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  container-type: inline-size;
   max-width: 720px;
   color: var(--dsw-alias-label-primary);
 }
+
+/* ── Header ─────────────────────────────────────────────────────────── */
 
 .header {
   display: flex;
@@ -32,265 +56,275 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
+.meta {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .state {
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   font-size: 14px;
   line-height: 22px;
   color: var(--dsw-alias-label-tertiary);
 }
 
 .error {
-  margin: 8px 0 0;
+  margin: 4px 0 0;
   font-size: 14px;
   line-height: 22px;
   color: var(--dsw-alias-state-error-primary);
 }
 
-.generated {
-  margin: 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-tertiary);
+/* Politely announced refresh result; visually quiet on purpose. */
+.announce {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-.cards {
+.spin {
+  animation: us-spin 0.9s linear infinite;
+}
+
+@keyframes us-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
+
+/* ── Summary band (the one bordered container) ──────────────────────── */
+
+.summaryBand {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  gap: 0;
+  border: 0.5px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-1);
+  padding: 2px 0;
 }
 
-.statCard {
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 12px;
-  padding: 12px 14px;
+.summaryCell {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  background: var(--dsw-alias-bg-layer-1);
+  gap: 2px;
   min-width: 0;
+  padding: 10px 14px;
 }
 
-.statLabel {
+.summaryLabel {
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Two lines allowed — labels never ellipsize into mystery meat. */
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
-.statValue {
-  font-size: 20px;
-  line-height: 26px;
+.summaryValue {
+  font-size: 18px;
+  line-height: 24px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
 
-.statHint {
+.summaryHint {
   font-size: 11px;
   line-height: 16px;
-  color: var(--dsw-alias-label-tertiary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-quaternary);
 }
 
-.card {
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 12px;
-  padding: 12px 14px;
+/* ── Open chart sections (hairline-separated, no card chrome) ───────── */
+
+.block {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: var(--dsw-alias-bg-layer-1);
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  padding-top: 12px;
+  min-width: 0;
 }
 
-/* The range filter is a NAKED row (no border, no fill): visually it reads as
- * governing the two boards below it, not as another board of its own. */
-.filterRow {
+.blockHead {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  min-height: 28px;
+  min-height: 24px;
   flex-wrap: wrap;
 }
 
-.filterLabel {
-  margin: 0;
-  font-size: 13px;
-  line-height: 20px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.filterControls {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.cardHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 28px;
-  flex-wrap: wrap;
-}
-
-.cardTitle {
+.blockTitle {
   margin: 0;
   font-size: 14px;
   line-height: 22px;
   font-weight: 500;
 }
 
-.tabs {
+.blockState {
+  margin: 0;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.blockError {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-state-error-primary);
+}
+
+.blockErrorRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ── Filter groups ──────────────────────────────────────────────────── */
+
+.pillGroup {
   display: inline-flex;
-  border: 1px solid var(--dsw-alias-border-l2);
-  border-radius: 14px;
-  padding: 2px;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
 }
 
-.tab {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  border-radius: 11px;
-  padding: 3px 10px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-secondary);
-  cursor: pointer;
+.rangeRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
-.tab:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+.rangeControls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.tabActive {
-  background: var(--dsw-alias-button-primary-fill);
-  color: var(--dsw-alias-label-primary-foreground);
-}
-
-.filterDates {
+.rangeDates {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
+  flex-wrap: wrap;
 }
 
 .dateInput {
+  box-sizing: border-box;
+  height: 32px;
   background: transparent;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
   color: var(--dsw-alias-label-primary);
-  padding: 2px 6px;
+  padding: 0 8px;
   font-size: 12px;
+  line-height: 18px;
+  font-variant-numeric: tabular-nums;
 }
 
-.iconButton {
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  width: 26px;
-  height: 26px;
-  border-radius: 13px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  flex: none;
+.dateInput:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
 }
 
-.iconButton:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
+.rangeError {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary);
 }
 
-.heatWrap {
-  overflow-x: auto;
-  position: relative;
-}
+/* ── Charts ─────────────────────────────────────────────────────────── */
 
-.heatWrap svg {
+.chartSvg {
   display: block;
 }
 
-.usageHeatAxis {
+/* The heatmap keeps its true pixel size (8px cells read as cells); below the
+ * breakpoint only THIS wrapper scrolls — the page never grows a horizontal
+ * scrollbar. */
+.heatWrap {
+  position: relative;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
+.heatAxis {
   font-size: 9px;
+  line-height: 12px;
   fill: var(--dsw-alias-label-tertiary);
 }
 
-.usageHeatAxisText {
+.heatCell {
+  cursor: pointer;
+}
+
+.heatCell:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+.heatLegendRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.heatLegendText {
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-tertiary);
-}
-
-.heatWrapGlobal :global(.usageHeatAxis) {
-  font-size: 9px;
-  fill: var(--dsw-alias-label-tertiary);
-}
-
-.usageHeatWrap :global(.usageHeatAxis) {
-  font-size: 9px;
-  fill: var(--dsw-alias-label-tertiary);
-}
-
-.usageHeatLegend {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-top: 4px;
-  float: right;
-}
-
-.usageHeatSwatchLg {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-}
-
-.usageTrendGrid {
-  stroke: var(--dsw-alias-border-subtle);
-  stroke-width: 1;
-}
-
-.usageTrendAxis {
-  font-size: 10px;
-  fill: var(--dsw-alias-label-tertiary);
-}
-
-.usageTrendLine {
-  fill: none;
-  stroke-width: 2;
-  stroke-linecap: round;
 }
 
 .trendWrap {
   position: relative;
 }
 
-.trendWrap svg {
-  display: block;
+.trendWrap .chartSvg {
   width: 100%;
   height: auto;
 }
 
-.legend {
-  list-style: none;
+.axisText {
+  font-size: 10px;
+  line-height: 14px;
+  fill: var(--dsw-alias-label-tertiary);
+}
+
+.gridLine {
+  stroke: var(--dsw-alias-border-l1);
+  stroke-width: 1;
+}
+
+.trendHit {
+  fill: transparent;
+}
+
+.legendRow {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 14px;
   margin: 0;
   padding: 0;
+  list-style: none;
 }
 
 .legendItem {
@@ -299,6 +333,110 @@
   gap: 6px;
   font-size: 12px;
   line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  min-width: 0;
+}
+
+.donutRow {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-width: 0;
+}
+
+.donutWrap {
+  position: relative;
+  width: 128px;
+  height: 128px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.donutWrap .chartSvg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.donutCenter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  pointer-events: none;
+}
+
+.donutCenterValue {
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.donutCenterLabel {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.donutArc {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.donutArc:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 2px;
+}
+
+.donutDim {
+  opacity: 0.35;
+}
+
+.donutList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 200px;
+}
+
+.donutItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 20px;
+  min-width: 0;
+  border-radius: 6px;
+  padding: 1px 4px;
+  margin: -1px -4px;
+}
+
+.donutItem:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: 1px;
+}
+
+.donutLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--dsw-alias-label-primary);
+  text-align: left;
+}
+
+.donutValue {
+  flex: none;
+  font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-label-secondary);
 }
 
@@ -310,82 +448,13 @@
   flex: none;
 }
 
-.usageDonutRow {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  flex-wrap: wrap;
-}
+/* ── Data cards (tooltips) ──────────────────────────────────────────── */
 
-.usageDonutWrap {
-  position: relative;
-  width: 148px;
-  height: 148px;
-  flex: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.usageDonutWrap svg {
-  position: absolute;
-  inset: 0;
-}
-
-.usageDonutTotal {
-  font-size: 15px;
-  line-height: 22px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.usageDonutSlice {
-  transition: stroke-dashoffset 0.4s ease;
-}
-
-.usageSliceList {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  flex: 1 1 220px;
-}
-
-.usageSliceItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  line-height: 20px;
-  min-width: 0;
-}
-
-.usageSliceLabel {
-  flex: 1 1 auto;
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--dsw-alias-label-primary);
-}
-
-.usageSliceValue {
-  flex: none;
-  font-variant-numeric: tabular-nums;
-  color: var(--dsw-alias-label-secondary);
-}
-
-/* Hover data cards. Absolute ones position inside their plot wrapper; the
- * heatmap's is position:fixed (viewport space) because its scroll container
- * would clip an absolutely positioned child. */
-
-.usageTipCard {
-  position: absolute;
+.tipCard {
+  position: fixed;
   pointer-events: none;
-  z-index: 10;
+  z-index: 50;
+  max-width: 240px;
   background: var(--dsw-alias-bg-layer-2);
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
@@ -394,57 +463,77 @@
   line-height: 18px;
   color: var(--dsw-alias-label-primary);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
-  white-space: nowrap;
 }
 
-.usageTipFixed {
-  position: fixed;
-  z-index: 50;
-}
-
-.usageDonutTip {
-  left: 50%;
-  top: 18%;
-  transform: translateX(-50%);
-}
-
-.usageTipTitle {
+.tipTitle {
   font-weight: 600;
   margin-bottom: 4px;
 }
 
-.usageTipRow {
+.tipRow {
   display: flex;
   align-items: center;
   gap: 6px;
   color: var(--dsw-alias-label-secondary);
 }
 
-.usageTipValue {
+.tipValue {
   font-variant-numeric: tabular-nums;
   margin-left: auto;
   padding-left: 12px;
+  color: var(--dsw-alias-label-primary);
 }
 
-.usageTipSwatch {
-  width: 8px;
-  height: 8px;
-  border-radius: 2px;
-  display: inline-block;
-  flex: none;
+/* ── Container-driven layout decisions ──────────────────────────────── */
+
+/* Settings modal default (~564px): summary reads best as 2×2. */
+@container (max-width: 679px) {
+  .summaryBand {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .summaryCell:nth-child(2n) {
+    border-left: 0.5px solid var(--dsw-alias-border-l1);
+  }
+
+  .summaryCell:nth-child(n + 3) {
+    border-top: 0.5px solid var(--dsw-alias-border-l1);
+  }
 }
 
-.qualityWrap {
-  position: relative;
+/* Narrow: the donut centers and the ranking moves below it. */
+@container (max-width: 519px) {
+  .donutRow {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .donutWrap {
+    align-self: center;
+  }
 }
 
-.qualityWrap svg {
-  display: block;
-  width: 100%;
-  height: auto;
-}
+/* Very narrow: single-column summary with hairline separators. */
+@container (max-width: 419px) {
+  .summaryBand {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-:global(.usageQualityHover) {
-  fill: transparent;
-  cursor: pointer;
+  .summaryCell {
+    border-left: none;
+  }
+
+  .summaryCell + .summaryCell {
+    border-top: 0.5px solid var(--dsw-alias-border-l1);
+  }
+
+  .rangeDates {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dateInput {
+    width: 100%;
+  }
 }
