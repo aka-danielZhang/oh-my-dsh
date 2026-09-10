@@ -37,26 +37,19 @@ P0 Fork 基座已完成，提交序列（基于合并提交 `c7da3280b9`）：
 
 验证：`plugins:check` 14 插件 typecheck+test+build EXIT:0（registry 姿态，transitional 节点态）；desktop:typecheck + desktop:test 141/141；harness root typecheck、client aggregate、`test:gui` 5337、`test:web` replay 353 均绿。
 
-## 0.3. 发布阻塞与用户侧 runbook（唯一剩余步骤）
+## 0.3. 发布执行记录（2026-09-10）
 
-npm 无凭据（`npm whoami` → ENEEDAUTH），以下步骤必须由持有 `@crazx` 发布权的用户执行：
+1. **Fork npm 层已发布**：tag `v0.1.5-rc.1+zw.1`（commit `2126a563bb`，分支 `feat/rc1-toolbar-port`）触发 `npm-release.yml`，14 个包 `@crazx/*@0.1.5-rc.1.zw.1` 全部上线并经 `npm view` 逐一核验。
+2. **runtime pin 已切换**：`runtime/revision.json` → `v0.1.5-rc.1+zw.1` / `2126a563bba1…`；`prepare-runtime.mjs`（SCRIPT_REV 15）本地组装成功，内置漂移/重复/基线扫描全过，14 fork 包全部解析到 @crazx 层。
+3. **插件锁全部以 pnpm 11.7 冻结姿态重建**：root packageManager 钉 11.7.0；overrides 移入各插件 `pnpm-workspace.yaml` 并 `autoInstallPeers: false`（@crazx 包的 peer 用原名+精确 zw，自动装 peer 会打穿到 registry 404）；补齐冻结安装暴露的 rc.1 传递外部（store 的 zustand/immer、primitives 的 clsx/shiki/micromark 族、session 的 scope、compaction、tool-fs 链的 attachment 等）。
+4. **桌面版 `v0.3.0-rc.49` 已推 tag**：`plugins:check` 14 插件 + `check` 门 + `desktop:smoke`（14 插件对 4 preset 双次启动）全绿后发布；首跑因 Windows 下 `allowBuilds` 键需正斜杠规范形失败一次，`relSpec` 规范化后（SCRIPT_REV 15）重推。
 
-```sh
-# 1. 发布 fork 层（deepseek-harness，分支 feat/rc1-toolbar-port，HEAD 2126a563bb）
-npm login            # 或配置 NPM_TOKEN
-node scripts/publish-fork.mjs 1            # 14 包 @crazx/*@0.1.5-rc.1.zw.1
-npm view @crazx/dsh@0.1.5-rc.1.zw.1 version # 逐包核验
-# 2. 全部包可解析后打 tag 并推送（tag 承诺所有包已发布）
-git tag v0.1.5-rc.1+zw.1 2126a563bb && git push origin feat/rc1-toolbar-port --tags
-# 3. 切 runtime pin（oh-my-dsh）
-#    runtime/revision.json: ref=v0.1.5-rc.1+zw.1, sha=2126a563bb...
-# 4. 组装与冒烟
-node scripts/prepare-runtime.mjs && pnpm run desktop:smoke && pnpm run check
-# 5. 插件锁重生成并提交（5 个带别名插件执行 pnpm install 后提交 lock）
-pnpm run unlink:source && for d in plugin/dsh-*/; do (cd $d && pnpm install --no-frozen-lockfile); done
-```
+CI Release（`release.yml`）正在构建公证 DMG 与 Windows NSIS：https://github.com/aka-danielZhang/oh-my-dsh/actions/runs/34511715422 。完成后 Releases 页 `v0.3.0-rc.49` 应为 latest，`spctl -a -vv` 应答 Notarized Developer ID。
 
-过渡态说明：当前工作区 5 个带别名插件（thread/send/mcp-settings/ohmymemo/bridge）的 node_modules 仍为源链接树（可开发调试）；其 manifest 已提交为 registry 别名形态，发布完成后一次 `pnpm install` 即切换。
+## 0.4. 残留与跟进
+
+- 旧 Home 升级冒烟（复制真实数据目录跑 rc.49）与升级/回滚演练建议在安装首个正式包后执行一次。
+- `provider-balance` 迁移到 `settings.models.provider-card` Slot 属 UX 变更，与 OhMyMemo preset 所有权、Thread sessionListView 一样列为后续独立项。
 
 ## 1. 目标与边界
 
