@@ -326,7 +326,9 @@ describe('atomic update integration', () => {
     assert.deepEqual(fs.readFileSync(dest), fs.readFileSync(firstPart))
     const assembled = path.join(home, 'rejoined.tar.gz')
     concatChunkFiles(
-      fs.readdirSync(path.join(home, 'parts')).sort().map((name) => path.join(home, 'parts', name)),
+      fs.readdirSync(path.join(home, 'parts'))
+        .sort((left, right) => left.localeCompare(right, 'en', { numeric: true }))
+        .map((name) => path.join(home, 'parts', name)),
       assembled,
     )
     assert.deepEqual(fs.readFileSync(assembled), fs.readFileSync(runtimeTar))
