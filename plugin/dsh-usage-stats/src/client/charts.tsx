@@ -3,13 +3,16 @@
  * heatmap, a multi-series daily trend, and a share donut. No chart library —
  * the client bundle purity gate forbids third-party deps; each chart is a
  * hundred-line component over plain coordinates. Colors resolve exclusively
- * through `--dsw-*` tokens.
+ * through `--dsw-*` tokens; every chart carries a hover data card (absolute
+ * inside its plot for the trend/donut, `position: fixed` for the heatmap so
+ * the scroll container cannot clip it).
  *
  * @module dsh-usage-stats/client/charts
  */
 
+import * as React from 'react'
 import type { ReactNode } from 'react'
-import type { UsageStatsActivity, UsageStatsBreakdown, UsageStatsDaily } from '../types.ts'
+import type { UsageStatsActivity, UsageStatsActivityCell, UsageStatsBreakdown, UsageStatsDaily } from '../types.ts'
 import type { Translate } from './format.ts'
 
 /** Series palette (model/provider lines and donut slices), all token-based. */
@@ -46,9 +49,21 @@ function weekdayOf(dateKey: string): number {
   return (dayIndexOf(dateKey) + 3) % 7
 }
 
-/** Short month label (“9月” / “Sep”) derived from the key, locale-agnostic digits. */
+/** Short month label derived from the key, locale-agnostic digits. */
 function monthOf(dateKey: string): number {
   return Number(dateKey.slice(5, 7))
+}
+
+/** “9月6日” from a `yyyy-mm-dd` key. */
+function cnDate(dateKey: string): string {
+  const parts = dateKey.split('-')
+  return Number(parts[1]) + '月' + Number(parts[2]) + '日'
+}
+
+/** “2026年9月6日” from a `yyyy-mm-dd` key. */
+function cnDateFull(dateKey: string): string {
+  const parts = dateKey.split('-')
+  return parts[0] + '年' + Number(parts[1]) + '月' + Number(parts[2]) + '日'
 }
 
 interface HeatmapProps {
@@ -57,25 +72,33 @@ interface HeatmapProps {
   format: (value: number) => string
 }
 
+interface HeatHover {
+  cell: UsageStatsActivityCell
+  /** Viewport coordinates — the card is position:fixed. */
+  x: number
+  y: number
+  flip: boolean
+}
+
 /** GitHub-style activity grid: 7 weekday rows × ~52 week columns (weekly mode: one row). */
 export function ActivityHeatmap({ activity, t, format }: HeatmapProps): ReactNode {
+  const [hover, setHover] = React.useState<HeatHover | null>(null)
+  const weekly = activity.mode === 'weekly'
+  const cells = activity.cells
   const cell = 10
   const gap = 2
   const step = cell + gap
-  const weekly = activity.mode === 'weekly'
-  const rows = weekly ? 1 : 7
-  const columns = weekly
-    ? activity.cells.length
-    : Math.ceil(activity.cells.length / 7)
   const left = 20
   const top = 16
+  const columns = weekly ? cells.length : Math.ceil(cells.length / 7)
+  const rows = weekly ? 1 : 7
   const width = left + columns * step
   const height = top + rows * step
   const weekdayLabels = ['', '一', '二', '三', '四', '五', '']
   const monthMarks: Array<{ x: number, label: string }> = []
   let lastMonth = -1
   for (let column = 0; column < columns; column += 1) {
-    const anchor = weekly ? activity.cells[column] : activity.cells[column * 7]
+    const anchor = weekly ? cells[column] : cells[column * 7]
     if (anchor === undefined) continue
     const month = monthOf(anchor.date)
     if (month !== lastMonth) {
@@ -83,61 +106,97 @@ export function ActivityHeatmap({ activity, t, format }: HeatmapProps): ReactNod
       lastMonth = month
     }
   }
-  return (
-    <svg className="usageHeatmap" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('heatmap.title')}>
-      {monthMarks.map(mark => (
-        <text key={mark.x} x={mark.x} y={10} className="usageHeatAxis">
-          {mark.label}
-        </text>
-      ))}
-      {!weekly && weekdayLabels.map((label, index) => (
-        label === ''
-          ? null
-          : (
-            <text key={index} x={left - 4} y={top + index * step + cell - 1} textAnchor="end" className="usageHeatAxis">
-              {label}
-            </text>
-          )
-      ))}
-      {activity.cells.map((cellData, index) => {
-        const column = weekly ? index : Math.floor(index / 7)
-        const row = weekly ? 0 : weekdayOf(cellData.date)
-        const x = left + column * step
-        const y = top + row * step
-        const label = weekly
-          ? t('heatmap.cell.week', { date: cellData.date, tokens: format(cellData.total) })
-          : t('heatmap.cell.day', { date: cellData.date, tokens: format(cellData.total) })
-        return (
-          <rect
-            key={cellData.date}
-            x={x}
-            y={y}
-            width={cell}
-            height={cell}
-            rx={2}
-            className="usageHeatCell"
-            fill={HEAT_FILLS[Math.min(4, Math.max(0, cellData.level))]}
-          >
-            <title>{label}</title>
-          </rect>
-        )
-      })}
-    </svg>
+  const kids: ReactNode[] = monthMarks.map(mark => (
+    <text key={`m${mark.x}`} x={mark.x} y={10} className="usageHeatAxis">
+      {mark.label}
+    </text>
+  ))
+  if (!weekly) {
+    weekdayLabels.forEach((label, index) => {
+      if (label === '') return
+      kids.push(
+        <text
+          key={`w${index}`}
+          x={left - 4}
+          y={top + index * step + cell - 1}
+          textAnchor="end"
+          className="usageHeatAxis"
+        >
+          {label}
+        </text>,
+      )
+    })
+  }
+  cells.forEach((entry, index) => {
+    const column = weekly ? index : Math.floor(index / 7)
+    const row = weekly ? 0 : weekdayOf(entry.date)
+    kids.push(
+      <rect
+        key={entry.date}
+        x={left + column * step}
+        y={top + row * step}
+        width={cell}
+        height={cell}
+        rx={2}
+        fill={HEAT_FILLS[Math.min(4, Math.max(0, entry.level))]}
+      />,
+    )
+  })
+  const tip = hover === null ? null : (
+    <div
+      className="usageTipCard usageTipFixed"
+      style={{ left: (hover.flip ? hover.x - 190 : hover.x + 14), top: hover.y + 16 }}
+    >
+      <div className="usageTipTitle">
+        {t(weekly ? 'heatmap.cell.week' : 'heatmap.cell.day', { date: cnDateFull(hover.cell.date) })}
+      </div>
+      <div className="usageTipRow">
+        <span className="usageTipSwatch" style={{ background: HEAT_FILLS[Math.min(4, Math.max(0, hover.cell.level))] }} />
+        {format(hover.cell.total) + ' tokens'}
+        <span className="usageTipValue">{hover.cell.calls + ' 轮'}</span>
+      </div>
+    </div>
   )
-}
-
-/** Heat legend swatches rendered beside the heatmap. */
-export function HeatLegend({ activity, t, format }: HeatmapProps): ReactNode {
-  void activity
-  void format
   return (
-    <span className="usageHeatLegend">
-      <span className="usageHeatLegendLabel">{t('heatmap.legend.less')}</span>
-      {HEAT_FILLS.map(fill => (
-        <span key={fill} className="usageHeatSwatch" style={{ background: fill }} />
-      ))}
-      <span className="usageHeatLegendLabel">{t('heatmap.legend.more')}</span>
-    </span>
+    <div className="usageHeatWrap">
+      <svg
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        role="img"
+        aria-label={t('heatmap.title')}
+        onMouseMove={(event) => {
+          const rect = event.currentTarget.getBoundingClientRect()
+          const x = event.clientX - rect.left
+          const y = event.clientY - rect.top
+          const column = Math.floor((x - left) / step)
+          const row = weekly ? 0 : Math.floor((y - top) / step)
+          const index = weekly ? column : column * 7 + row
+          const entry = column >= 0 && column < columns && row >= 0 && row < rows ? cells[index] : undefined
+          if (entry === undefined) {
+            setHover(null)
+            return
+          }
+          setHover({
+            cell: entry,
+            x: event.clientX,
+            y: event.clientY,
+            flip: column >= columns - 5,
+          })
+        }}
+        onMouseLeave={() => setHover(null)}
+      >
+        {kids}
+      </svg>
+      {tip}
+      <span className="usageHeatLegend">
+        <span className="usageHeatAxisText">{t('heatmap.legend.less')}</span>
+        {HEAT_FILLS.map(fill => (
+          <span key={fill} className="usageTipSwatch usageHeatSwatchLg" style={{ background: fill }} />
+        ))}
+        <span className="usageHeatAxisText">{t('heatmap.legend.more')}</span>
+      </span>
+    </div>
   )
 }
 
@@ -148,8 +207,16 @@ interface TrendProps {
   colors: ReadonlyMap<string, string>
 }
 
+interface TrendHover {
+  index: number
+  /** Pixels relative to the plot wrapper. */
+  x: number
+  y: number
+}
+
 /** Catmull-Rom-smoothed multi-series line chart of daily totals per model. */
 export function TrendChart({ daily, t, format, colors }: TrendProps): ReactNode {
+  const [hover, setHover] = React.useState<TrendHover | null>(null)
   const width = 640
   const height = 190
   const left = 46
@@ -186,44 +253,99 @@ export function TrendChart({ daily, t, format, colors }: TrendProps): ReactNode 
   const tickIndexes = points.length <= 1
     ? [0]
     : [0, Math.floor((points.length - 1) / 2), points.length - 1]
+  const kids: ReactNode[] = [0, 0.25, 0.5, 0.75, 1].map(ratio => (
+    <g key={ratio}>
+      <line x1={left} x2={width - right} y1={topChart + ratio * plotHeight} y2={topChart + ratio * plotHeight} className="usageTrendGrid" />
+      <text x={left - 6} y={topChart + ratio * plotHeight + 3.5} textAnchor="end" className="usageTrendAxis">
+        {format(gridMax * (1 - ratio))}
+      </text>
+    </g>
+  ))
+  tickIndexes.forEach(index => {
+    kids.push(
+      <text key={`t${index}`} x={xOf(index)} y={height - 8} textAnchor="middle" className="usageTrendAxis">
+        {dateLabel(index)}
+      </text>,
+    )
+  })
+  ;[...series.entries()].forEach(([model, line], seriesIndex) => {
+    kids.push(
+      <path
+        key={model}
+        className="usageTrendLine"
+        stroke={colors.get(model) ?? seriesColor(seriesIndex)}
+        d={smoothPath(line.map((value, index) => [xOf(index), yOf(value)]))}
+      />,
+    )
+  })
+  const hoverPoint = hover !== null ? points[hover.index] : undefined
+  if (hover !== null && hoverPoint !== undefined) {
+    kids.push(
+      <line key="hoverline" x1={xOf(hover.index)} x2={xOf(hover.index)} y1={topChart} y2={topChart + plotHeight} className="usageTrendGrid" />,
+    )
+  }
+  const tip = hover === null || hoverPoint === undefined ? null : (
+    <div className="usageTipCard" style={{ left: Math.min(hover.x + 14, 300), top: Math.max(4, hover.y - 30) }}>
+      <div className="usageTipTitle">{cnDate(hoverPoint.date) + ' · ' + format(hoverPoint.total) + ' tokens'}</div>
+      {hoverPoint.byModel.length === 0
+        ? <div className="usageTipRow">无用量</div>
+        : hoverPoint.byModel.map(m => (
+          <div key={m.model} className="usageTipRow">
+            <span className="usageTipSwatch" style={{ background: colors.get(m.model) ?? seriesColor(0) }} />
+            {m.model.slice(m.model.indexOf('/') + 1)}
+            <span className="usageTipValue">{format(m.tokens)}</span>
+          </div>
+        ))}
+    </div>
+  )
+  void t
   return (
-    <svg className="usageTrend" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('trend.title')}>
-      {[0, 0.25, 0.5, 0.75, 1].map(ratio => {
-        const value = gridMax * (1 - ratio)
-        const y = topChart + ratio * plotHeight
-        return (
-          <g key={ratio}>
-            <line x1={left} x2={width - right} y1={y} y2={y} className="usageTrendGrid" />
-            <text x={left - 6} y={y + 3.5} textAnchor="end" className="usageTrendAxis">
-              {format(value)}
-            </text>
-          </g>
-        )
-      })}
-      {tickIndexes.map(index => (
-        <text key={index} x={xOf(index)} y={height - 8} textAnchor="middle" className="usageTrendAxis">
-          {dateLabel(index)}
-        </text>
-      ))}
-      {[...series.entries()].map(([model, line]) => (
-        <path
-          key={model}
-          className="usageTrendLine"
-          stroke={colors.get(model) ?? seriesColor([...series.keys()].indexOf(model))}
-          d={smoothPath(line.map((value, index) => [xOf(index), yOf(value)]))}
-        />
-      ))}
-    </svg>
+    <div
+      className="usageTrendWrap"
+      onMouseMove={(event) => {
+        const svg = event.currentTarget.firstElementChild as SVGSVGElement | null
+        if (svg === null) return
+        const rect = svg.getBoundingClientRect()
+        const scale = rect.width / width
+        const x = (event.clientX - rect.left) / scale
+        const index = Math.round(((x - left) / plotWidth) * (points.length - 1))
+        if (index < 0 || index >= points.length) {
+          setHover(null)
+          return
+        }
+        const wrapRect = event.currentTarget.getBoundingClientRect()
+        setHover({
+          index,
+          x: event.clientX - wrapRect.left,
+          y: event.clientY - wrapRect.top,
+        })
+      }}
+      onMouseLeave={() => setHover(null)}
+    >
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={t('trend.title')}>
+        {kids}
+      </svg>
+      {tip}
+    </div>
   )
 }
 
 interface DonutProps {
   breakdown: UsageStatsBreakdown
   colors: ReadonlyMap<string, string>
+  format: (value: number) => string
 }
 
-/** Donut of share slices around a centered total (foreign-free, plain SVG). */
-export function DonutChart({ breakdown, colors }: DonutProps): ReactNode {
+interface DonutHover {
+  key: string
+  label: string
+  tokens: number
+  share: number
+}
+
+/** Donut of share slices around a centered total, with a hover data card. */
+export function DonutChart({ breakdown, colors, format }: DonutProps): ReactNode {
+  const [hover, setHover] = React.useState<DonutHover | null>(null)
   const size = 148
   const center = size / 2
   const radius = 54
@@ -245,16 +367,45 @@ export function DonutChart({ breakdown, colors }: DonutProps): ReactNode {
         strokeDashoffset={-offset}
         transform={`rotate(-90 ${center} ${center})`}
         className="usageDonutSlice"
+        onMouseEnter={() => setHover(slice)}
+        onMouseLeave={() => setHover(null)}
       />
     )
     offset += dash
     return arc
   })
-  void breakdown.total
   return (
-    <svg className="usageDonut" viewBox={`0 0 ${size} ${size}`} role="img">
-      {arcs}
-    </svg>
+    <div className="usageDonutRow">
+      <div className="usageDonutWrap">
+        <svg viewBox={`0 0 ${size} ${size}`} role="img">
+          {arcs}
+        </svg>
+        <span className="usageDonutTotal">{format(breakdown.total)}</span>
+        {hover !== null && (
+          <div className="usageTipCard usageDonutTip">
+            <div className="usageTipRow">
+              <span className="usageTipSwatch" style={{ background: colors.get(hover.key) ?? seriesColor(0) }} />
+              {hover.label}
+            </div>
+            <div className="usageTipRow">
+              {format(hover.tokens) + ' tokens'}
+              <span className="usageTipValue">{Math.round(hover.share * 1000) / 10 + '%'}</span>
+            </div>
+          </div>
+        )}
+      </div>
+      <ul className="usageSliceList">
+        {breakdown.slices.map(slice => (
+          <li key={slice.key} className="usageSliceItem">
+            <span className="usageTipSwatch" style={{ background: colors.get(slice.key) ?? seriesColor(0) }} />
+            <span className="usageSliceLabel" title={slice.key}>{slice.label}</span>
+            <span className="usageSliceValue">
+              {Math.round(slice.share * 1000) / 10 + '% · ' + format(slice.tokens)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   )
 }
 

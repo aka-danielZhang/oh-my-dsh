@@ -55,7 +55,7 @@
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(124px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -67,6 +67,7 @@
   flex-direction: column;
   gap: 4px;
   background: var(--dsw-alias-bg-layer-1);
+  min-width: 0;
 }
 
 .statLabel {
@@ -79,17 +80,20 @@
 }
 
 .statValue {
-  font-size: 22px;
-  line-height: 28px;
+  font-size: 20px;
+  line-height: 26px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
 
 .statHint {
-  font-size: 12px;
-  line-height: 18px;
+  font-size: 11px;
+  line-height: 16px;
   color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .card {
@@ -102,12 +106,39 @@
   background: var(--dsw-alias-bg-layer-1);
 }
 
+/* The range filter is a NAKED row (no border, no fill): visually it reads as
+ * governing the two boards below it, not as another board of its own. */
+.filterRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 28px;
+  flex-wrap: wrap;
+}
+
+.filterLabel {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.filterControls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .cardHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
   min-height: 28px;
+  flex-wrap: wrap;
 }
 
 .cardTitle {
@@ -146,36 +177,111 @@
   color: var(--dsw-alias-label-primary-foreground);
 }
 
-.heatmapScroll {
-  overflow-x: auto;
-  padding-bottom: 2px;
-}
-
-.heatmapScroll svg {
-  display: block;
-  width: 100%;
-  min-width: 560px;
-  height: auto;
-}
-
-.heatCell {
-  shape-rendering: crispEdges;
-}
-
-.heatLegend {
+.filterDates {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.dateInput {
+  background: transparent;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  color: var(--dsw-alias-label-primary);
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.iconButton {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  width: 26px;
+  height: 26px;
+  border-radius: 13px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+}
+
+.iconButton:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.heatWrap {
+  overflow-x: auto;
+  position: relative;
+}
+
+.heatWrap svg {
+  display: block;
+}
+
+.usageHeatAxis {
+  font-size: 9px;
+  fill: var(--dsw-alias-label-tertiary);
+}
+
+.usageHeatAxisText {
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-tertiary);
 }
 
-.heatSwatch {
+.heatWrapGlobal :global(.usageHeatAxis) {
+  font-size: 9px;
+  fill: var(--dsw-alias-label-tertiary);
+}
+
+.usageHeatWrap :global(.usageHeatAxis) {
+  font-size: 9px;
+  fill: var(--dsw-alias-label-tertiary);
+}
+
+.usageHeatLegend {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  float: right;
+}
+
+.usageHeatSwatchLg {
   width: 10px;
   height: 10px;
   border-radius: 2px;
-  display: inline-block;
+}
+
+.usageTrendGrid {
+  stroke: var(--dsw-alias-border-subtle);
+  stroke-width: 1;
+}
+
+.usageTrendAxis {
+  font-size: 10px;
+  fill: var(--dsw-alias-label-tertiary);
+}
+
+.usageTrendLine {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.trendWrap {
+  position: relative;
+}
+
+.trendWrap svg {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 .legend {
@@ -204,19 +310,14 @@
   flex: none;
 }
 
-.trendSvg {
-  width: 100%;
-  height: auto;
-}
-
-.donutRow {
+.usageDonutRow {
   display: flex;
   align-items: center;
   gap: 18px;
   flex-wrap: wrap;
 }
 
-.donutWrap {
+.usageDonutWrap {
   position: relative;
   width: 148px;
   height: 148px;
@@ -226,19 +327,23 @@
   justify-content: center;
 }
 
-.donutWrap svg {
+.usageDonutWrap svg {
   position: absolute;
   inset: 0;
 }
 
-.donutTotal {
-  font-size: 16px;
+.usageDonutTotal {
+  font-size: 15px;
   line-height: 22px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.slices {
+.usageDonutSlice {
+  transition: stroke-dashoffset 0.4s ease;
+}
+
+.usageSliceList {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -249,7 +354,7 @@
   flex: 1 1 220px;
 }
 
-.slice {
+.usageSliceItem {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -258,7 +363,7 @@
   min-width: 0;
 }
 
-.sliceLabel {
+.usageSliceLabel {
   flex: 1 1 auto;
   min-width: 0;
   white-space: nowrap;
@@ -267,38 +372,64 @@
   color: var(--dsw-alias-label-primary);
 }
 
-.sliceValue {
+.usageSliceValue {
   flex: none;
   font-variant-numeric: tabular-nums;
   color: var(--dsw-alias-label-secondary);
 }
 
-/* SVG internals (not CSS-module-scoped — plain classes inside the charts). */
-:global(.usageHeatCell) {
-  stroke: none;
+/* Hover data cards. Absolute ones position inside their plot wrapper; the
+ * heatmap's is position:fixed (viewport space) because its scroll container
+ * would clip an absolutely positioned child. */
+
+.usageTipCard {
+  position: absolute;
+  pointer-events: none;
+  z-index: 10;
+  background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-primary);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  white-space: nowrap;
 }
 
-:global(.usageHeatAxis) {
-  font-size: 9px;
-  fill: var(--dsw-alias-label-tertiary);
+.usageTipFixed {
+  position: fixed;
+  z-index: 50;
 }
 
-:global(.usageTrendGrid) {
-  stroke: var(--dsw-alias-border-subtle);
-  stroke-width: 1;
+.usageDonutTip {
+  left: 50%;
+  top: 18%;
+  transform: translateX(-50%);
 }
 
-:global(.usageTrendAxis) {
-  font-size: 10px;
-  fill: var(--dsw-alias-label-tertiary);
+.usageTipTitle {
+  font-weight: 600;
+  margin-bottom: 4px;
 }
 
-:global(.usageTrendLine) {
-  fill: none;
-  stroke-width: 2;
-  stroke-linecap: round;
+.usageTipRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dsw-alias-label-secondary);
 }
 
-:global(.usageDonutSlice) {
-  transition: stroke-dashoffset 0.4s ease;
+.usageTipValue {
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+.usageTipSwatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  display: inline-block;
+  flex: none;
 }

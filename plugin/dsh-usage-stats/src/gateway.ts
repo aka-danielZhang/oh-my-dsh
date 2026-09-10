@@ -18,6 +18,7 @@ import {
   dailySeries,
   localUtcOffsetMinutes,
   summarize,
+  type UsageStatsRangeSpec,
 } from './fold.ts'
 import { awaitStore } from './shared-store.ts'
 import type {
@@ -30,6 +31,21 @@ import type {
 /** Structural view of the llm runtime's provider directory (instance-agnostic). */
 interface LlmDirectory {
   listProviders(): Array<{ id: string, name: string }>
+}
+
+/** Range selector arriving over the wire (trailing days or explicit dates). */
+interface WireRange {
+  range?: 7 | 30
+  from?: string
+  to?: string
+}
+
+/** Normalize a wire range into a fold spec (explicit dates win when valid). */
+function rangeSpec(args: WireRange): UsageStatsRangeSpec {
+  if (typeof args.from === 'string' && typeof args.to === 'string' && args.from !== '' && args.to !== '') {
+    return { from: args.from, to: args.to }
+  }
+  return { days: args.range === 30 ? 30 : 7 }
 }
 
 /** Remote gateway over the usage-stats store. */
@@ -46,18 +62,21 @@ export class UsageStatsGateway extends TypertRemoteService {
   async summary(): Promise<UsageStatsSummary> {
     const store = await awaitStore()
     await store.rescan()
-    return summarize(store.aggregates, Date.now(), localUtcOffsetMinutes())
+    return {
+      ...summarize(store.aggregates, Date.now(), localUtcOffsetMinutes()),
+      ...store.metrics,
+    }
   }
 
   /**
-   * Trend series: one entry per day over the trailing range.
-   * @param params - `{ range: 7 | 30 }`.
+   * Trend series: one entry per day over the requested range.
+   * @param params - `{ range?: 7 | 30 }` or `{ from, to }` local dates.
    */
   @Remote('daily')
-  async daily(params: { range: 7 | 30 }): Promise<UsageStatsDaily> {
+  async daily(params: WireRange): Promise<UsageStatsDaily> {
     const store = await awaitStore()
     await store.rescan()
-    return dailySeries(store.aggregates, Date.now(), localUtcOffsetMinutes(), params.range)
+    return dailySeries(store.aggregates, Date.now(), localUtcOffsetMinutes(), rangeSpec(params))
   }
 
   /**
@@ -72,21 +91,19 @@ export class UsageStatsGateway extends TypertRemoteService {
   }
 
   /**
-   * Share slices grouped by provider or model over the trailing range.
-   * @param params - `{ dim: 'model' | 'provider', range?: 7 | 30 }` (range
-   *   defaults to 30).
+   * Share slices grouped by provider or model over the requested range.
+   * @param params - `{ dim?: 'model' | 'provider' }` plus a range as in daily.
    */
   @Remote('breakdown')
-  async breakdown(params: { dim: 'model' | 'provider', range?: 7 | 30 }): Promise<UsageStatsBreakdown> {
+  async breakdown(params: WireRange & { dim?: 'model' | 'provider' }): Promise<UsageStatsBreakdown> {
     const store = await awaitStore()
     await store.rescan()
-    const range = params.range ?? 30
     return breakdownOf(
       store.aggregates,
-      params.dim,
+      params.dim === 'provider' ? 'provider' : 'model',
       Date.now(),
       localUtcOffsetMinutes(),
-      range,
+      rangeSpec(params),
       this.providerLabels(),
     )
   }

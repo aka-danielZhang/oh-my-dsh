@@ -87,6 +87,12 @@ export class UsageStatsStore {
   private flushTimer: ReturnType<typeof setTimeout> | undefined
   private consecutiveWriteFailures = 0
   private writeDisabled = false
+  /** Apparent-rate samples: Σ output tokens ÷ Σ (reply time − step start). */
+  private readonly speed = { tokens: 0, ms: 0, count: 0 }
+  /** Call-duration samples (step start → reply). */
+  private readonly callDur = { ms: 0, count: 0 }
+  /** Cache-hit samples over billed input. */
+  private readonly cache = { hit: 0, billed: 0 }
 
   constructor(config: UsageStatsConfig, dir: string, utcOffsetMinutes: number = localUtcOffsetMinutes()) {
     this.config = config
@@ -228,8 +234,33 @@ export class UsageStatsStore {
   private foldRecord(record: UsageRecord): boolean {
     if (this.seen.has(record.mid)) return false
     this.seen.add(record.mid)
+    this.cache.hit += record.cr ?? 0
+    this.cache.billed += record.in + record.out + (record.cr ?? 0) + (record.cw ?? 0)
+    if (record.sd !== undefined) {
+      const duration = record.t - record.sd
+      if (duration > 0) {
+        this.callDur.ms += duration
+        this.callDur.count += 1
+        this.speed.tokens += record.out
+        this.speed.ms += duration
+        this.speed.count += 1
+      }
+    }
     applyRecord(this.days, record, dateKeyOf(record.t, this.utcOffsetMinutes))
     return true
+  }
+
+  /** Derived call-quality metrics over every retained record. */
+  get metrics(): {
+    speedTokensPerSec: number | null
+    avgCallMs: number | null
+    cacheHitRate: number | null
+  } {
+    return {
+      speedTokensPerSec: this.speed.ms > 0 ? this.speed.tokens / (this.speed.ms / 1000) : null,
+      avgCallMs: this.callDur.count > 0 ? this.callDur.ms / this.callDur.count : null,
+      cacheHitRate: this.cache.billed > 0 ? this.cache.hit / this.cache.billed : null,
+    }
   }
 
   /**

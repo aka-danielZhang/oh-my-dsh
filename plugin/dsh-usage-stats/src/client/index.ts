@@ -6,6 +6,7 @@
  */
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { UsageStatsRange } from './UsageStatsSection.tsx'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import TYPERT_REMOTE from '../typert.remote-client.ts'
 import { UsageStatsSection } from './UsageStatsSection.tsx'
@@ -27,9 +28,9 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 /** Structural view of the mounted Remote namespace (instance-agnostic). */
 interface UsageStatsRemote {
   summary(): Promise<RemoteOutcome<import('../types.ts').UsageStatsSummary>>
-  daily(params: { range: 7 | 30 }): Promise<RemoteOutcome<import('../types.ts').UsageStatsDaily>>
+  daily(params: UsageStatsRange): Promise<RemoteOutcome<import('../types.ts').UsageStatsDaily>>
   activity(params: { mode: 'daily' | 'weekly' | 'cumulative' }): Promise<RemoteOutcome<import('../types.ts').UsageStatsActivity>>
-  breakdown(params: { dim: 'model' | 'provider', range?: 7 | 30 }): Promise<RemoteOutcome<import('../types.ts').UsageStatsBreakdown>>
+  breakdown(params: UsageStatsRange): Promise<RemoteOutcome<import('../types.ts').UsageStatsBreakdown>>
 }
 
 /** RemoteResult flattened to the two shapes the face needs. */
@@ -70,15 +71,15 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     }
     const face: UsageStatsFace = {
       summary: async () => unwrap(await remote.summary()),
-      daily: async range => unwrap(await remote.daily({ range })),
+      daily: async range => unwrap(await remote.daily(range)),
       activity: async mode => unwrap(await remote.activity({ mode })),
-      breakdown: async (dim, range) => unwrap(await remote.breakdown({ dim, range })),
+      breakdown: async range => unwrap(await remote.breakdown(range)),
     }
 
     ctx.slots.inject('settings.section', () => ctx.slots.register({
       name: 'settings.section',
       id: 'usage-stats',
-      order: 30,
+      order: 11,
       label: () => t('nav'),
       inject: (): { face: UsageStatsFace, t: Translate } => ({ face, t }),
     }, UsageStatsSection))

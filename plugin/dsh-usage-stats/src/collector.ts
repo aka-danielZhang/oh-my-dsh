@@ -23,7 +23,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-session'
 import { homedir } from 'node:os'
 import { usageStatsDir, validateConfig } from './config.ts'
-import { usageRecordFromEvent, type SessionEventView } from './fold.ts'
+import { SessionUsageFolder, type SessionEventView } from './fold.ts'
 import { UsageStatsStore } from './store.ts'
 import { publishStore, retractStore } from './shared-store.ts'
 
@@ -57,7 +57,7 @@ function sessionIdOf(session: unknown): string | undefined {
  * settled. Failures are per-session and logged: statistics are advisory and
  * one broken log must not stop the walk.
  */
-async function runBackfill(query: SessionQueryView, ctx: Context, store: UsageStatsStore, isDisposed: () => boolean): Promise<void> {
+async function runBackfill(query: SessionQueryView, folder: SessionUsageFolder, ctx: Context, store: UsageStatsStore, isDisposed: () => boolean): Promise<void> {
   let sessions: Awaited<ReturnType<SessionQueryView['listSessions']>>
   try {
     sessions = await query.listSessions()
@@ -76,7 +76,7 @@ async function runBackfill(query: SessionQueryView, ctx: Context, store: UsageSt
     try {
       const log = await query.readSession(sid)
       for (const event of log.events) {
-        const usage = usageRecordFromEvent(sid, event)
+        const usage = folder.fold(sid, event)
         if (usage !== undefined) store.record(usage)
         store.setSessionWatermark(sid, event.seq)
       }
@@ -102,18 +102,18 @@ async function runBackfill(query: SessionQueryView, ctx: Context, store: UsageSt
 export function apply(ctx: Context, rawConfig: unknown): () => void {
   const config = validateConfig(rawConfig)
   const store = new UsageStatsStore(config, usageStatsDir(process.env.DSH_HOME, homedir()))
+  const folder = new SessionUsageFolder()
   const disposers: Array<() => void> = []
   let disposed = false
 
   const onEvent = (session: unknown, event: unknown): void => {
     const sid = sessionIdOf(session)
     if (sid === undefined || event === null || typeof event !== 'object') return
-    // The runtime owns the real SessionEvent union; the fold re-validates
+    // The runtime owns the real SessionEvent union; the folder re-validates
     // every field it reads, so this structural cast is the whole bridge.
-    const view = event as SessionEventView
-    const usage = usageRecordFromEvent(sid, view)
+    const usage = folder.fold(sid, event as SessionEventView)
     if (usage !== undefined) store.record(usage)
-    const seq = view.seq
+    const seq = (event as { seq?: unknown } | null | undefined)?.seq
     if (typeof seq === 'number' && Number.isFinite(seq)) store.setSessionWatermark(sid, seq)
   }
 
@@ -132,7 +132,7 @@ export function apply(ctx: Context, rawConfig: unknown): () => void {
     // meantime stay in the session logs and enter through the backfill walk.
     disposers.push(ctx.on('session/event', onEvent))
     const query = (ctx as unknown as { sessionQuery: SessionQueryView }).sessionQuery
-    await runBackfill(query, ctx, store, () => disposed)
+    await runBackfill(query, folder, ctx, store, () => disposed)
   })()
 
   return () => {

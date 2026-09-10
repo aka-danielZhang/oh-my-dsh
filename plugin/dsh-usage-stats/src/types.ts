@@ -30,6 +30,8 @@ export interface UsageRecord {
   cw?: number
   /** Reasoning tokens, when reported (recorded, not counted in totals for v1). */
   rt?: number
+  /** The owning step's start time (epoch ms), when seen — enables call-duration metrics. */
+  sd?: number
 }
 
 /** Billed total of one record: in + cr + cw + out (disjoint accounting). */
@@ -55,6 +57,14 @@ export interface UsageStatsSummary {
   firstDate: string | null
   /** Latest retained local date, `yyyy-mm-dd`; null when empty. */
   lastDate: string | null
+  /** Apparent output rate: Σ output tokens ÷ Σ call duration (step start → reply), tokens/s. */
+  speedTokensPerSec: number | null
+  /** Mean call duration (step start → reply), milliseconds. */
+  avgCallMs: number | null
+  /** Mean billed-input cache-hit share (cr ÷ (in+cr+cw)), 0..1. */
+  cacheHitRate: number | null
+  /** Counted calls over all retained records. */
+  calls: number
   /** Snapshot generation time, epoch milliseconds. */
   generatedAt: number
 }
@@ -85,6 +95,8 @@ export interface UsageStatsActivityCell {
   date: string
   /** Cell value: day total, week total, or running cumulative total. */
   total: number
+  /** Counted calls behind the cell (0 for cumulative). */
+  calls: number
   /** Color bucket 0..4 (0 = no data); derived from the range max. */
   level: number
 }

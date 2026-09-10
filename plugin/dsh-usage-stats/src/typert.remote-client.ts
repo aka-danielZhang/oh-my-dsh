@@ -24,6 +24,10 @@ const summarySchema = z.object({
   activeDays: z.number(),
   firstDate: z.string().nullable(),
   lastDate: z.string().nullable(),
+  calls: z.number(),
+  speedTokensPerSec: z.number().nullable(),
+  avgCallMs: z.number().nullable(),
+  cacheHitRate: z.number().nullable(),
   generatedAt: z.number(),
 })
 
@@ -43,6 +47,7 @@ const activitySchema = z.object({
   cells: z.array(z.object({
     date: z.string(),
     total: z.number(),
+    calls: z.number(),
     level: z.number(),
   })),
   maxTotal: z.number(),
@@ -59,31 +64,32 @@ const breakdownSchema = z.object({
   })),
 })
 
-const dailyParamsSchema = z.object({
-  range: z.union([z.literal(7), z.literal(30)]),
+const rangeParamsSchema = z.object({
+  range: z.union([z.literal(7), z.literal(30)]).optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
 })
 
 const activityParamsSchema = z.object({
   mode: z.enum(['daily', 'weekly', 'cumulative']),
 })
 
-const breakdownParamsSchema = z.object({
-  dim: z.enum(['model', 'provider']),
-  range: z.union([z.literal(7), z.literal(30)]).optional(),
+const breakdownParamsSchema = rangeParamsSchema.extend({
+  dim: z.enum(['model', 'provider']).optional(),
 })
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$75736167655374617473 {
     summary: () => Promise<RemoteResult<UsageStatsSummary>>
-    daily: (params: { range: 7 | 30 }) => Promise<RemoteResult<UsageStatsDaily>>
+    daily: (params: { range?: 7 | 30, from?: string, to?: string }) => Promise<RemoteResult<UsageStatsDaily>>
     activity: (params: { mode: 'daily' | 'weekly' | 'cumulative' }) => Promise<RemoteResult<UsageStatsActivity>>
-    breakdown: (params: { dim: 'model' | 'provider', range?: 7 | 30 }) => Promise<RemoteResult<UsageStatsBreakdown>>
+    breakdown: (params: { dim?: 'model' | 'provider', range?: 7 | 30, from?: string, to?: string }) => Promise<RemoteResult<UsageStatsBreakdown>>
   }
   interface TypertRemoteMap {
     'usageStats/summary': () => Promise<RemoteResult<UsageStatsSummary>>
-    'usageStats/daily': (params: { range: 7 | 30 }) => Promise<RemoteResult<UsageStatsDaily>>
+    'usageStats/daily': (params: { range?: 7 | 30, from?: string, to?: string }) => Promise<RemoteResult<UsageStatsDaily>>
     'usageStats/activity': (params: { mode: 'daily' | 'weekly' | 'cumulative' }) => Promise<RemoteResult<UsageStatsActivity>>
-    'usageStats/breakdown': (params: { dim: 'model' | 'provider', range?: 7 | 30 }) => Promise<RemoteResult<UsageStatsBreakdown>>
+    'usageStats/breakdown': (params: { dim?: 'model' | 'provider', range?: 7 | 30, from?: string, to?: string }) => Promise<RemoteResult<UsageStatsBreakdown>>
   }
   interface TypertRemoteNamespaceMap {
     usageStats: TypertRemoteNamespace$75736167655374617473
@@ -120,8 +126,8 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         source: 'json',
         codec: {
           mode: 'strict',
-          typeSymbol: 'dsh-usage-stats/types#UsageStatsDailyParams',
-          schema: dailyParamsSchema,
+          typeSymbol: 'dsh-usage-stats/types#UsageStatsRangeParams',
+          schema: rangeParamsSchema,
         },
       }],
       result: {

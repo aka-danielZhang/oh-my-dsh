@@ -29,6 +29,8 @@ export interface SessionEventView {
   seq: number
   time: number
   data: {
+    turn?: unknown
+    step?: unknown
     message?: { id?: unknown, source?: { provider?: unknown, model?: unknown } } | null
     usage?: {
       inputTokens?: unknown
@@ -38,6 +40,13 @@ export interface SessionEventView {
       reasoningTokens?: unknown
     } | null
   }
+}
+
+/** Turn/step pair key when the event carries one, else null. */
+function turnStepOf(data: SessionEventView['data']): string | null {
+  if (typeof data.turn !== 'number' || !Number.isFinite(data.turn)) return null
+  if (typeof data.step !== 'number' || !Number.isFinite(data.step)) return null
+  return `${data.turn}:${data.step}`
 }
 
 /** Read a non-negative finite number, defaulting to 0. */
@@ -87,6 +96,34 @@ export function usageRecordFromEvent(sid: string, event: SessionEventView): Usag
   if (cacheWrite > 0) record.cw = cacheWrite
   if (reasoning > 0) record.rt = reasoning
   return record
+}
+
+/**
+ * Stateful event folder: pairs `assistant/message` events with their step's
+ * start time (the `step/start` event) so each record carries the call's start
+ * timestamp (`sd`) — the basis of the apparent-rate and call-duration metrics.
+ * One instance per collector; keys are namespaced by session id, so subagent
+ * sessions with overlapping turn numbers never collide.
+ */
+export class SessionUsageFolder {
+  private readonly steps = new Map<string, number>()
+
+  /** Fold one event; returns a record when the event is a counted message. */
+  fold(sid: string, event: SessionEventView): UsageRecord | undefined {
+    if (event.type === 'step/start') {
+      const key = turnStepOf(event.data)
+      if (key !== null && !this.steps.has(sid + ':' + key)) this.steps.set(sid + ':' + key, event.time)
+      return undefined
+    }
+    const record = usageRecordFromEvent(sid, event)
+    if (record === undefined) return undefined
+    const key = turnStepOf(event.data)
+    if (key !== null) {
+      const stepStart = this.steps.get(sid + ':' + key)
+      if (stepStart !== undefined && stepStart < record.t) record.sd = stepStart
+    }
+    return record
+  }
 }
 
 /** Local UTC offset in minutes for `new Date()` (e.g. CET winter = -60). */
@@ -204,6 +241,7 @@ export function parseRecordLine(line: string): UsageRecord | undefined {
     ...typeof record.cr === 'number' && record.cr > 0 ? { cr: record.cr } : {},
     ...typeof record.cw === 'number' && record.cw > 0 ? { cw: record.cw } : {},
     ...typeof record.rt === 'number' && record.rt > 0 ? { rt: record.rt } : {},
+    ...typeof record.sd === 'number' && record.sd > 0 && record.sd <= record.t ? { sd: record.sd } : {},
   }
 }
 
@@ -278,40 +316,68 @@ export function summarize(days: DayAggregates, now: number, utcOffsetMinutes: nu
   const keys = Object.keys(days)
   let totalTokens = 0
   let peakTokens = 0
+  let calls = 0
   for (const day of Object.values(days)) {
     totalTokens += day.total
     if (day.peak > peakTokens) peakTokens = day.peak
+    calls += day.calls
   }
   const sorted = [...keys].sort()
   const streaks = streaksOf(keys, now, utcOffsetMinutes)
   return {
     totalTokens,
     peakTokens,
+    calls,
     longestChatMs: longestSessionMs(days),
     currentStreakDays: streaks.current,
     longestStreakDays: streaks.longest,
     activeDays: keys.length,
     firstDate: sorted[0] ?? null,
     lastDate: sorted[sorted.length - 1] ?? null,
+    speedTokensPerSec: null,
+    avgCallMs: null,
+    cacheHitRate: null,
     generatedAt: now,
   }
 }
 
-/** Local date keys of the trailing `rangeDays` days ending today (oldest first). */
-function rangeDateKeys(now: number, utcOffsetMinutes: number, rangeDays: number): string[] {
+/** Range selector for the trend and donut payloads. */
+export type UsageStatsRangeSpec = { days: number } | { from: string; to: string }
+
+/** Local date keys covered by one range spec, oldest first (bounded at 120 days). */
+export function rangeDateKeysOf(
+  now: number,
+  utcOffsetMinutes: number,
+  spec: UsageStatsRangeSpec,
+): string[] {
+  if ('from' in spec && 'to' in spec) {
+    const startIndex = dayIndexOf(spec.from)
+    const endIndex = dayIndexOf(spec.to)
+    if (Number.isFinite(startIndex) && Number.isFinite(endIndex) && startIndex <= endIndex && endIndex - startIndex <= 120) {
+      const keys: string[] = []
+      for (let i = startIndex; i <= endIndex; i += 1) keys.push(dateKeyOfIndex(i))
+      return keys
+    }
+  }
+  const days = 'days' in spec && Number.isFinite(spec.days) && spec.days > 0 ? Math.floor(spec.days) : 7
   const todayIndex = dayIndexOf(dateKeyOf(now, utcOffsetMinutes))
   const keys: string[] = []
-  for (let i = rangeDays - 1; i >= 0; i -= 1) keys.push(dateKeyOfIndex(todayIndex - i))
+  for (let i = days - 1; i >= 0; i -= 1) keys.push(dateKeyOfIndex(todayIndex - i))
   return keys
 }
 
 /**
- * Build the trend series: one entry per day in the trailing range, oldest
+ * Build the trend series: one entry per day in the requested range, oldest
  * first, zero-filled, per-model detail sorted by tokens.
  */
-export function dailySeries(days: DayAggregates, now: number, utcOffsetMinutes: number, rangeDays: number): UsageStatsDaily {
+export function dailySeries(
+  days: DayAggregates,
+  now: number,
+  utcOffsetMinutes: number,
+  range: UsageStatsRangeSpec,
+): UsageStatsDaily {
   const entries: UsageStatsDailyEntry[] = []
-  for (const date of rangeDateKeys(now, utcOffsetMinutes, rangeDays)) {
+  for (const date of rangeDateKeysOf(now, utcOffsetMinutes, range)) {
     const day = days[date]
     if (day === undefined) {
       entries.push({ date, total: 0, byModel: [] })
@@ -368,27 +434,32 @@ export function activityCells(
   const cells: UsageStatsActivityCell[] = []
   let cumulative = 0
   if (mode === 'weekly') {
-    const weekTotals = new Map<string, number>()
+    const weekTotals = new Map<string, { total: number; calls: number }>()
     for (const key of windowKeys) {
       const week = weekStartOf(key)
-      weekTotals.set(week, (weekTotals.get(week) ?? 0) + (days[key]?.total ?? 0))
+      const day = days[key]
+      const acc = weekTotals.get(week) ?? { total: 0, calls: 0 }
+      acc.total += day?.total ?? 0
+      acc.calls += day?.calls ?? 0
+      weekTotals.set(week, acc)
     }
     let maxTotal = 0
-    for (const total of weekTotals.values()) if (total > maxTotal) maxTotal = total
-    for (const [date, total] of weekTotals) {
-      cells.push({ date, total, level: levelOf(total, maxTotal) })
+    for (const v of weekTotals.values()) if (v.total > maxTotal) maxTotal = v.total
+    for (const [date, v] of weekTotals) {
+      cells.push({ date, total: v.total, calls: v.calls, level: levelOf(v.total, maxTotal) })
     }
     return { mode, cells, maxTotal }
   }
   let maxTotal = 0
   for (const key of windowKeys) {
-    const total = days[key]?.total ?? 0
+    const day = days[key]
+    const total = day?.total ?? 0
     if (mode === 'cumulative') {
       cumulative += total
-      cells.push({ date: key, total: cumulative, level: 0 })
+      cells.push({ date: key, total: cumulative, calls: 0, level: 0 })
       if (cumulative > maxTotal) maxTotal = cumulative
     } else {
-      cells.push({ date: key, total, level: 0 })
+      cells.push({ date: key, total, calls: day?.calls ?? 0, level: 0 })
       if (total > maxTotal) maxTotal = total
     }
   }
@@ -398,7 +469,7 @@ export function activityCells(
 }
 
 /**
- * Build the donut payload grouped by provider or model over the trailing
+ * Build the donut payload grouped by provider or model over the requested
  * range, shares against the range total.
  * @param providerLabels - provider id → display name (gateway resolves these
  *   via `ctx.llm.listProviders()`; unknown ids fall back to the raw id).
@@ -408,12 +479,12 @@ export function breakdownOf(
   dim: UsageStatsBreakdown['dim'],
   now: number,
   utcOffsetMinutes: number,
-  rangeDays: number,
+  range: UsageStatsRangeSpec,
   providerLabels: ReadonlyMap<string, string>,
 ): UsageStatsBreakdown {
   const totals = new Map<string, number>()
   let total = 0
-  for (const date of rangeDateKeys(now, utcOffsetMinutes, rangeDays)) {
+  for (const date of rangeDateKeysOf(now, utcOffsetMinutes, range)) {
     const day = days[date]
     if (day === undefined) continue
     const source = dim === 'provider' ? day.byProvider : day.byModel

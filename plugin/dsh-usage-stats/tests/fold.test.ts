@@ -30,12 +30,16 @@ function messageEvent(overrides: {
   model?: string
   usage?: Record<string, number> | null
   interrupted?: boolean
+  turn?: number
+  step?: number
 }): SessionEventView {
   return {
     type: 'assistant/message',
     seq: overrides.seq ?? 1,
     time: overrides.time ?? Date.now(),
     data: {
+      turn: overrides.turn ?? 1,
+      step: overrides.step ?? 1,
       message: {
         id: overrides.id ?? 'msg-1',
         source: { provider: overrides.provider ?? 'deepseek', model: overrides.model ?? 'deepseek-chat' },
@@ -58,6 +62,7 @@ function record(overrides: Partial<UsageRecord> = {}): UsageRecord {
     ...overrides.cr !== undefined ? { cr: overrides.cr } : {},
     ...overrides.cw !== undefined ? { cw: overrides.cw } : {},
     ...overrides.rt !== undefined ? { rt: overrides.rt } : {},
+    ...overrides.sd !== undefined ? { sd: overrides.sd } : {},
   }
 }
 
@@ -170,7 +175,7 @@ test('dailySeries zero-fills missing days and sorts model detail', () => {
   const days: DayAggregates = {}
   applyRecord(days, record({ t: 1, mid: 'm1', model: 'b-model', in: 10, out: 0 }), '2026-09-09')
   applyRecord(days, record({ t: 2, mid: 'm2', model: 'a-model', in: 30, out: 0 }), '2026-09-09')
-  const series = dailySeries(days, now, UTC, 3)
+  const series = dailySeries(days, now, UTC, { days: 3 })
   assert.equal(series.days.length, 3)
   assert.deepEqual(series.days.map(entry => entry.date), ['2026-09-07', '2026-09-08', '2026-09-09'])
   assert.equal(series.days[0]!.total, 0)
@@ -236,12 +241,58 @@ test('breakdownOf groups and shares with provider display-name fallback', () => 
   applyRecord(days, record({ t: 2, mid: 'm2', provider: 'zai', model: 'glm-4.7', in: 25, out: 0 }), '2026-09-09')
   applyRecord(days, record({ t: 3, mid: 'm3', in: 999, out: 0 }), '2026-08-01') // outside range
   const labels = new Map([['deepseek', 'DeepSeek Official']])
-  const byProvider = breakdownOf(days, 'provider', now, UTC, 7, labels)
+  const byProvider = breakdownOf(days, 'provider', now, UTC, { days: 7 }, labels)
   assert.equal(byProvider.total, 100)
   assert.deepEqual(byProvider.slices, [
     { key: 'deepseek', label: 'DeepSeek Official', tokens: 75, share: 0.75 },
     { key: 'zai', label: 'zai', tokens: 25, share: 0.25 },
   ])
-  const byModel = breakdownOf(days, 'model', now, UTC, 7, new Map())
+  const byModel = breakdownOf(days, 'model', now, UTC, { days: 7 }, new Map())
   assert.deepEqual(byModel.slices.map(slice => slice.label), ['deepseek-chat', 'glm-4.7'])
+})
+
+test('rangeDateKeysOf supports explicit from/to windows', async () => {
+  const { rangeDateKeysOf } = await import('../src/fold.ts')
+  const now = Date.parse('2026-09-09T12:00:00.000Z')
+  const keys = rangeDateKeysOf(now, UTC, { from: '2026-09-01', to: '2026-09-03' })
+  assert.deepEqual(keys, ['2026-09-01', '2026-09-02', '2026-09-03'])
+  // Invalid or inverted spans fall back to the trailing 7 days.
+  assert.equal(rangeDateKeysOf(now, UTC, { from: '2026-09-03', to: '2026-09-01' }).length, 7)
+})
+
+test('SessionUsageFolder pairs step/start with messages into record.sd', async () => {
+  const { SessionUsageFolder } = await import('../src/fold.ts')
+  const folder = new SessionUsageFolder()
+  const stepStart: SessionEventView = { type: 'step/start', seq: 1, time: 1_000, data: { turn: 1, step: 1 } }
+  const message = messageEvent({ seq: 2, time: 4_000, id: 'm9' })
+  assert.equal(folder.fold('s1', stepStart), undefined)
+  const rec = folder.fold('s1', message)
+  assert.ok(rec !== undefined)
+  assert.equal(rec.sd, 1_000)
+  // A message whose step never started carries no sd (different turn/step).
+  const orphan = folder.fold('s1', messageEvent({ seq: 3, time: 9_000, id: 'm10', turn: 9, step: 9 }))
+  assert.ok(orphan !== undefined)
+  assert.equal(orphan.sd, undefined)
+  // A same-step follow-up message inherits the step's start time.
+  const follow = folder.fold('s1', messageEvent({ seq: 4, time: 8_000, id: 'm11' }))
+  assert.ok(follow !== undefined)
+  assert.equal(follow.sd, 1_000)
+})
+
+test('parseRecordLine round-trips sd and rejects out-of-order values', async () => {
+  const { parseRecordLine, serializeRecordLine } = await import('../src/fold.ts')
+  const withSd = record({ mid: 'mx', t: 1_000, sd: 500 })
+  assert.equal(parseRecordLine(serializeRecordLine(withSd).trimEnd())?.sd, 500)
+  const bad = JSON.stringify({ ...record({ mid: 'mb' }), sd: 9_999_999 })
+  assert.equal(parseRecordLine(bad)?.sd, undefined)
+})
+
+test('activityCells daily cells carry per-day call counts', () => {
+  const now = Date.parse('2026-09-09T12:00:00.000Z')
+  const days: DayAggregates = {}
+  applyRecord(days, record({ mid: 'm1' }), '2026-09-09')
+  applyRecord(days, record({ mid: 'm2' }), '2026-09-09')
+  const activity = activityCells(days, 'daily', now, UTC)
+  assert.equal(activity.cells.find(c => c.date === '2026-09-09')?.calls, 2)
+  assert.equal(activity.cells.find(c => c.date === '2026-09-08')?.calls, 0)
 })
