@@ -1,6 +1,6 @@
 {
   "name": "dsh-desktop-bridge",
-  "version": "0.2.0-rc.14",
+  "version": "0.2.0-rc.15",
   "description": "Desktop bridge for DeepSeek Harness: shell-gated OS integration, native titlebar controls and updates, plus a host JSONL log sink",
   "type": "module",
   "main": "lib/index.js",
@@ -79,7 +79,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/dsh-api-session-controller": "npm:@crazx/dsh-api-session-controller@0.1.5-alpha.1.zw.2",
+    "@deepseek-ai/dsh-api-session-controller": "npm:@crazx/dsh-api-session-controller@0.1.5-alpha.1.zw.1",
     "@deepseek-ai/dsh-client-locale": "0.1.5-alpha.1",
     "@deepseek-ai/dsh-client-ui-layout": "0.1.5-alpha.1",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.5-alpha.1",

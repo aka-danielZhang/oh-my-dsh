@@ -150,12 +150,6 @@ export function apply(ctx: ClientContext): void {
       publisher ??= new ToolbarHostPublisher(toolbarRegistry())
       return publisher
     }
-    // While the toolbar is mounted the frame's first grid row IS the band;
-    // the fallback rules in titlebarCss scope themselves off this marker.
-    ctx.effect(() => {
-      document.documentElement.setAttribute('data-shell-toolbar-on', '')
-      return () => { document.documentElement.removeAttribute('data-shell-toolbar-on') }
-    }, 'desktop-bridge: toolbar marker')
     const toolbarInjected = (): DesktopToolbarInjected => ({
       ...updater,
       ...notifyInjected(),
@@ -181,10 +175,32 @@ export function apply(ctx: ClientContext): void {
     })
     // The slot key and component face exist in the fork's SlotMap first; the
     // pinned registry lags behind, so the registration casts through — same
-    // structural posture as the toolbar's runtime shares.
-    const disposeToolbar = (ctx.slots.register as Function)({ name: 'shell.toolbar', id: 'desktop-toolbar', locale: NS, inject: toolbarInjected }, DesktopToolbar) as () => void
+    // structural posture as the toolbar's runtime shares. The registration
+    // itself MUST stay guarded: `shell.toolbar` is declared by the fork
+    // revision that carries the unified toolbar, and on an older runtime
+    // cordis rejects the entry loudly ("slot not declared") — without the
+    // guard that failure takes the WHOLE bridge fiber down (links, downloads,
+    // notifications, updates — the 0.2.0-rc.14-in-0.3.0-rc.45 incident).
+    // Degraded posture on an old runtime: no toolbar, and the legacy band
+    // rules in titlebar.ts stay active because the marker below is only set
+    // by a successfully mounted toolbar.
+    let disposeToolbar: (() => void) | undefined
+    try {
+      disposeToolbar = (ctx.slots.register as Function)({ name: 'shell.toolbar', id: 'desktop-toolbar', locale: NS, inject: toolbarInjected }, DesktopToolbar) as () => void
+    } catch (error) {
+      logger.warn(`dsh-desktop-bridge: shell.toolbar is not declared by this runtime (fork revision predates the unified toolbar); toolbar disabled, legacy band rules stay active: ${String(error)}`)
+      return () => { disposeBadge() }
+    }
+    // While the toolbar is mounted the frame's first grid row IS the band;
+    // the fallback rules in titlebarCss scope themselves off this marker.
+    // Registered only AFTER a successful slot registration — a toolbar that
+    // never mounts must never suppress the fallback.
+    ctx.effect(() => {
+      document.documentElement.setAttribute('data-shell-toolbar-on', '')
+      return () => { document.documentElement.removeAttribute('data-shell-toolbar-on') }
+    }, 'desktop-bridge: toolbar marker')
     return () => {
-      disposeToolbar()
+      disposeToolbar?.()
       publisher?.release()
       disposeBadge()
     }

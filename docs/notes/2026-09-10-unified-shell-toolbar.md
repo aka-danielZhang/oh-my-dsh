@@ -65,6 +65,20 @@ rc.12「内容顶到窗口上沿」把 session header、右栏页签条塞进 28
 - fork 改动住 `bump/0.1.5-alpha.1-adapt`；发布时升下一版 fork revision（`+zw.3`），dsh-desktop 各包 devDeps 随之 bump 后，bridge 的结构化声明（`ToolbarRuntimeShares`/host registry/history duck）收紧为真类型。
 - `v0.3.0-rc.45` 桌面 tag 继续挂起，随其余改动合并发版。
 
+## 发布事故与修复（rc.45 → rc.46）
+
+**rc.45 事故**：rc.45 发版携带 toolbar 版 bridge 0.2.0-rc.14，但 `runtime/revision.json` 仍钉 `v0.1.5-alpha.1+zw.1`——旧 runtime 的 ui-layout 未声明 `shell.toolbar`，桥的 `slots.register` fail loud，**整个桥 client fiber 加载失败**（外链路由/下载/通知/更新入口全灭；更新入口在桥里，事故无法经更新自愈，用户只能手动下载）。
+
+**三个叠加缺口**：
+1. 实现缺口——hosts/history 都做了结构化 duck-check，但 slot 注册本身没防御（`(ctx.slots.register as Function)` 只绕过类型，cordis 运行时校验照炸）；且 `data-shell-toolbar-on` 标记 effect 挂在注册之前，注册失败标记仍会设置、错误关闭 fallback 规则。
+2. 发版缺口——发 rc.45 时未把 revision.json 同步指向含 `shell.toolbar` 基座的 fork。
+3. 验收盲区——dev 验收的 sidecar 跑 fork 新源码（slot 存在），「新插件+旧 runtime」组合从未被测过。
+
+**修复（rc.46）**：
+- bridge 0.2.0-rc.15：`shell.toolbar` 注册包 try/catch——旧 runtime 上注册失败仅 warn 降级（无工具栏、标记不设置、rc.13 fallback 保持、桥其余能力全部存活）；标记 effect 移到注册成功之后。新增回归 spec `toolbar-degradation.client.spec.tsx`（模拟 slot 未声明的 cordis 环境：桥存活、badge 照常、无标记、降级 warn；新 runtime 用例：toolbar 注册+标记设置）。
+- revision.json → `v0.1.5-alpha.1+zw.3`（fork tag，含完整基座）。**插曲**：fork 首提交 `dfe18674e8` 因 stash 栈跨 worktree 与并行会话交错只提交了 3 个新文件（既有文件修改全部滞留工作树），`98bcf0c6e9` 补全——zw.3 tag 钉在补全提交上。
+- 纪律沉淀（AGENTS 发版节）：随包插件消费 fork 新 Slot 时同版 revision 必须指向声明它的 fork；新 Slot 注册必须 try/catch 降级；验证矩阵必须含旧 runtime 组合。
+
 ## 验收矩阵（desktop:dev 实机）
 
 宽度 1400/1100/767/600 × sidebar 展开/收起 × 无 Session/普通 Session/Subagent × 长中英文标题 × 多 tabs × 更新可用 × 通知未读 × rightbar closed/push/fullscreen。自动断言：toolbar 单行、灯区不相交、Center/Trailing 不重叠、正文起点=toolbar 底边、无重复标题、无 tabs 时 header 零高、按钮可点、空白可拖窗、fullscreen 不露 toolbar。Portal 生命周期 `null → host A → host B → null`、旧 disposer 不清新节点、bridge/ui-layout/ui-conversation 乱序 HMR。
