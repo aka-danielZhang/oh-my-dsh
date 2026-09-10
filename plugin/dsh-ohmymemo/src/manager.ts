@@ -131,7 +131,8 @@ interface RunRequest {
   startedAt: number
 }
 
-interface RunProgress {
+/** Body-free in-process accumulation of one run's observable outcomes. */
+export interface RunProgress {
   provider: string | null
   model: string | null
   agentSessionId: string | null
@@ -174,14 +175,14 @@ interface MaintenanceAgentHandle {
  * Only these accrue the dead-letter streak — timeouts, aborts, and provider
  * errors are infrastructure luck and must keep retrying.
  */
-class DreamOutputError extends Error {
+export class DreamOutputError extends Error {
   constructor(message: string, options?: { cause?: unknown }) {
     super(message, options)
     this.name = 'DreamOutputError'
   }
 }
 
-class DreamRunFailure extends Error {
+export class DreamRunFailure extends Error {
   readonly progress: RunProgress
   readonly sourceMessages: number
   readonly poison: boolean

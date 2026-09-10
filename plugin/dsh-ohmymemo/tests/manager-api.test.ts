@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { OhMyMemoManager, type Config } from '../src/manager.ts'
+import { DreamOutputError, DreamRunFailure, OhMyMemoManager, type Config, type RunProgress } from '../src/manager.ts'
 import { dreamRuntimeStateSchema, updateDreamSettingsRequestSchema } from '../src/manager-contract.ts'
 import TYPERT_HOST from '../src/typert.host.ts'
 import TYPERT_REMOTE from '../src/typert.remote-client.ts'
@@ -340,4 +340,158 @@ test('dream setting wire input is strict and requires at least one change', () =
     effort: '',
   })
   assert.throws(() => updateDreamSettingsRequestSchema.parse({ ifRevision: 'sha256:x', enabled: true, extra: 1 }))
+})
+
+// ---------------------------------------------------------------- stage 0b:
+// Regression freezes for the dead-letter ledger, infrastructure
+// non-accounting, partial writes under failure, and the audit→state write
+// order. These pin CURRENT behavior before the tool-driven migration reworks
+// the ledger identity (promptHash → evidenceWindowHash) and the terminal
+// commit protocol (fenced commitIntent).
+
+interface FailHarnessState {
+  status: string
+  activeRunId: string | null
+  activeJobId: string | null
+  activeTrigger: string | null
+  failureStreak: { promptHash: string; count: number } | null
+  cursors: Record<string, number>
+  lastScheduledFor: number | null
+  lastResult: unknown
+  [key: string]: unknown
+}
+
+interface FailHarness {
+  state: FailHarnessState
+  config: { deadLetterThreshold: number; auditRetentionRuns: number }
+  persistAudit(audit: Record<string, unknown>): Promise<void>
+  commitState(next: Record<string, unknown>): Promise<void>
+  logFailure(action: string, error: unknown): void
+  ctx: { logger: { warn(): void } }
+  failRun(request: unknown, error: unknown, signal: AbortSignal): Promise<{ status: string; detail?: string }>
+}
+
+function failHarness(overrides: Partial<FailHarness> = {}): { harness: FailHarness; audits: Record<string, unknown>[]; committed: Record<string, unknown>[]; order: string[] } {
+  const audits: Record<string, unknown>[] = []
+  const committed: Record<string, unknown>[] = []
+  const order: string[] = []
+  const harness = Object.create(OhMyMemoManager.prototype) as unknown as FailHarness
+  harness.state = {
+    status: 'running',
+    activeRunId: 'dream-x',
+    activeJobId: 'job-x',
+    activeTrigger: 'scheduled',
+    failureStreak: null,
+    cursors: { 's-old': 7 },
+    lastScheduledFor: 1_000,
+    lastResult: null,
+  }
+  harness.config = { deadLetterThreshold: 3, auditRetentionRuns: 10 }
+  harness.ctx = { logger: { warn() {} } }
+  harness.persistAudit = async (audit) => {
+    order.push('audit')
+    audits.push(audit)
+  }
+  harness.commitState = async (next) => {
+    order.push('state')
+    committed.push(next)
+    // Mirror the real commitState: the in-memory state adopts the commit.
+    harness.state = next as FailHarnessState
+  }
+  harness.logFailure = () => {}
+  Object.assign(harness, overrides)
+  return { harness, audits, committed, order }
+}
+
+function poisonedFailure(promptHash: string, cursors: Record<string, number> = { 's1': 5 }): DreamRunFailure {
+  const progress = {
+    provider: 'p', model: 'm', agentSessionId: 'ohmymemo-maintenance-x', promptHash,
+    sourceSessions: [{ sessionId: 's1', capturedThroughSeq: 5, messageCount: 2 }],
+    memoriesCreated: [], memoriesRejected: 0, items: [], cursors, truncated: false,
+    expiredMemories: 0, expiredCandidates: 0, maintenanceError: null,
+    curatorRefreshed: 0, curatorMerged: 0, curatorRejected: 0, curatorError: null,
+  } as RunProgress
+  return new DreamRunFailure('deterministic output failure', progress, 2, new DreamOutputError('no complete'), true)
+}
+
+const REQUEST = { runId: 'dream-x', trigger: 'scheduled', scheduledFor: 2_000, startedAt: 1_500 }
+
+test('dead-letter: deterministic failures on the same window accrue and advance cursors at the threshold', async () => {
+  const { harness, committed } = failHarness()
+  const signal = new AbortController().signal
+
+  // Failure 1: streak starts at 1, cursors unchanged.
+  await harness.failRun(REQUEST, poisonedFailure('sha256:win'), signal)
+  let next = committed[0] as FailHarnessState
+  assert.deepEqual(next.failureStreak, { promptHash: 'sha256:win', count: 1 })
+  assert.deepEqual(next.cursors, { 's-old': 7 }, 'below threshold no cursor may advance')
+
+  // Failure 2 on the same window: count 2, still no advance.
+  await harness.failRun(REQUEST, poisonedFailure('sha256:win'), signal)
+  next = committed[1] as FailHarnessState
+  assert.deepEqual(next.failureStreak, { promptHash: 'sha256:win', count: 2 })
+
+  // Failure 3 reaches the threshold: dead-letter advances this run's cursors.
+  const outcome = await harness.failRun(REQUEST, poisonedFailure('sha256:win', { 's1': 9 }), signal)
+  assert.equal(outcome.status, 'failed')
+  assert.match(outcome.detail ?? '', /dead-lettered/)
+  next = committed[2] as FailHarnessState
+  assert.equal(next.failureStreak, null, 'the streak resets after dead-lettering')
+  assert.deepEqual(next.cursors, { 's-old': 7, 's1': 9 }, 'dead-letter advances the poisoned window')
+})
+
+test('dead-letter: a different evidence window resets the streak instead of inheriting it', async () => {
+  const { harness, committed } = failHarness()
+  const signal = new AbortController().signal
+  await harness.failRun(REQUEST, poisonedFailure('sha256:window-a'), signal)
+  await harness.failRun(REQUEST, poisonedFailure('sha256:window-b'), signal)
+  const next = committed[1] as FailHarnessState
+  assert.deepEqual(next.failureStreak, { promptHash: 'sha256:window-b', count: 1 }, 'a new window starts its own count')
+  assert.deepEqual(next.cursors, { 's-old': 7 })
+})
+
+test('infrastructure failures never accrue the dead-letter streak or advance cursors', async () => {
+  const { harness, committed } = failHarness()
+  const signal = new AbortController().signal
+  // Store busy / provider errors: not a DreamRunFailure poison case.
+  await harness.failRun(REQUEST, new Error('OHMYMEMO_BUSY: writer lock held'), signal)
+  const next = committed[0] as FailHarnessState
+  assert.equal(next.failureStreak, null)
+  assert.deepEqual(next.cursors, { 's-old': 7 })
+  assert.equal(next.status, 'error')
+  // A poison=false DreamRunFailure (timeout wrapped as non-poison) is the same.
+  const progress = poisonedFailure('sha256:win').progress
+  await harness.failRun(REQUEST, new DreamRunFailure('timeout', progress, 2, new Error('timeout'), false), signal)
+  const next2 = committed[1] as FailHarnessState
+  assert.equal(next2.failureStreak, null)
+})
+
+test('cancellation during a failing run keeps cursors, boundary, and streak frozen', async () => {
+  const { harness, committed } = failHarness()
+  const controller = new AbortController()
+  controller.abort(new Error('cancelled'))
+  await harness.failRun(REQUEST, poisonedFailure('sha256:win'), controller.signal)
+  const next = committed[0] as FailHarnessState
+  assert.equal(next.status, 'cancelled')
+  assert.equal(next.failureStreak, null, 'cancelled deterministic failures do not poison the ledger')
+  assert.deepEqual(next.cursors, { 's-old': 7 })
+  assert.equal(next.lastScheduledFor, 1_000)
+})
+
+test('a failing run reports committed memories without advancing cursors', async () => {
+  const { harness, committed } = failHarness()
+  const failure = poisonedFailure('sha256:win')
+  // Simulate two committed writes before the infrastructure blew up.
+  ;(failure.progress as RunProgress).memoriesCreated = ['mem_1', 'mem_2']
+  const outcome = await harness.failRun(REQUEST, new DreamRunFailure('store busy after two writes', failure.progress, 2, new Error('busy'), false), new AbortController().signal)
+  assert.equal(outcome.status, 'failed')
+  const next = committed[0] as { lastResult: { memoriesCreated: number } }
+  assert.equal(next.lastResult.memoriesCreated, 2, 'committed items stay visible in the failure summary')
+  assert.deepEqual(harness.state.cursors, { 's-old': 7 }, 'failed runs never advance cursors')
+})
+
+test('terminal writes order audit before state (pinning the fork window stage 3 closes)', async () => {
+  const { harness, order } = failHarness()
+  await harness.failRun(REQUEST, poisonedFailure('sha256:win'), new AbortController().signal)
+  assert.deepEqual(order, ['audit', 'state'], 'the audit lands first; recovery must fence this window')
 })
