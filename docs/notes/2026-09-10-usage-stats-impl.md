@@ -38,3 +38,13 @@ scratch home 复制 4 个真实会话（含 v3 与迁移态目录），起 `dsh 
 
 - retention 默认 400 天是否调整、回填进度展示、`dsh.desktop.ship` 是否随包（先走 git tag 分发）。
 - 长驻进程的跨天 retention 追加清理（当前仅启动时清）。
+
+## 动态预览反馈同步（2026-09-10 深夜，10 轮）
+
+用动态 Cordis 插件（ustat-1，纯内存 host+client）在真实 GUI 上做了 10 轮可用性预览，定稿形态全部回移编译版（6714038d）：
+
+- **四卡定稿**：累计 Token / 平均缓存命中（cr÷计费输入）/ 平均输出速度 / 平均调用时长。峰值、最长聊天、连续天数从卡片撤下（字段保留在 wire 兼容）。
+- **关键发现（速度/首 token 无值的根因）**：0.1.5 会话日志**不落盘流式增量**——`assistant/chunk` 在新 SessionEventMap 中已移除，旧 packed 行（text-chunks 等）仅存在于 v0 旧日志且读取时走 v0→v3 转换；`assistant/attempt` 稀疏（1340 消息仅 1 条）不可依赖。结论：**纯生成速度与首 token 时间在新架构下无数据源**。替代口径：`step/start → assistant/message` 端到端窗口，表观速率 = output÷该窗口（含网络，21~34 tok/s 量级），样本 100% 覆盖（两份真实日志验证）。record 增加 `sd`（step 起点时间）使 records 仍是唯一事实源。
+- **交互定稿**：时间范围=独立裸过滤行（无卡片背景，紧贴趋势图上方），仅驱动趋势+模型用量两看板（四卡全时段口径）；支持近 7 天/近 30 天/自定义起止（≤120 天）；「使用统计」order 11 紧随「模型」；环图固定按模型；刷新为图标钮；三图悬浮数据卡（热力图 position:fixed 防滚动裁剪，格子弹出「日期+tokens+轮数」）。
+- React 教训：子组件必须 `el(Component, props)` 挂 hooks——直接函数调用会把子组件 useState 记到父组件 hook 表，条件渲染切换即 React #310。
+- Inspect 工具带参调用报 "input must be an object"（空对象/带参皆如此，无参正常）——疑似传输层问题，待上游查。
