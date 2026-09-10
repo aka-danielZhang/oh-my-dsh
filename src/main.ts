@@ -1,4 +1,5 @@
 import { app, autoUpdater as nativeAutoUpdater } from 'electron'
+import { join } from 'node:path'
 
 import { bootSequence } from './boot.ts'
 import { APP_ID, PRODUCT_NAME } from './constants.ts'
@@ -10,6 +11,13 @@ import { revealMainWindow, setAppQuitting } from './window.ts'
 
 function electronPath(): string {
   return process.execPath
+}
+
+// dev 与已安装的正式版并存：单实例锁按 userData 目录比较，unpackaged dev
+// 若沿用正式版的 userData 会争不到锁而静默退出（2026-09-10 实机验收踩中）。
+// dev 实例一律用独立的 -dev userData，正式版不受影响。
+if (!app.isPackaged) {
+  app.setPath('userData', join(app.getPath('appData'), `${APP_ID}-dev`))
 }
 
 const gotLock = app.requestSingleInstanceLock()
