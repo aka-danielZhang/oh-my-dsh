@@ -54,29 +54,68 @@ describe('railCss', () => {
     const css = railCss()
     assert.ok(css.includes("div[data-slot='sidebar']>div>div:first-child>button:last-child{display:none;}"))
   })
-  it('styles the unified toolbar row: 38px, native drag background, leading light inset', () => {
+  it('subgrids the toolbar row and root onto the frame tracks', () => {
     const css = railCss()
-    assert.ok(css.includes('[data-desktop-toolbar]{position:relative;display:flex;align-items:stretch;height:38px;'))
+    assert.ok(css.includes('[data-shell-toolbar-row]{display:grid;grid-template-columns:subgrid;}'), 'the AppFrame toolbar row re-exposes the three frame tracks')
+    assert.ok(css.includes('[data-desktop-toolbar]{position:relative;display:grid;grid-template-columns:subgrid;grid-column:1/-1;height:38px;'), 'the toolbar root spans all tracks as a nested subgrid')
     assert.ok(css.includes('[data-desktop-toolbar]{') && css.includes('-webkit-app-region:drag;'), 'the row background is the drag region')
-    assert.ok(css.includes('[data-desktop-toolbar-leading]{display:flex;align-items:center;gap:2px;flex:none;padding-left:86px;}'), 'the traffic lights own the leading inset')
   })
-  it('lets every interactive child opt out of the drag region', () => {
+  it('paints the sidebar segment only over the first track', () => {
     const css = railCss()
-    assert.ok(css.includes('[data-desktop-toolbar] button,[data-desktop-toolbar] a[href],[data-desktop-toolbar] input,[data-desktop-toolbar] textarea,[data-desktop-toolbar] [role="button"],[data-desktop-toolbar] [role="tab"]{-webkit-app-region:no-drag;}'))
+    assert.ok(css.includes('[data-desktop-toolbar]::before{content:"";grid-column:1;grid-row:1;background:var(--dsw-specific-sidebar-fill);border-right:0.5px solid var(--dsw-alias-border-l3);}'), 'the sidebar fill is confined to grid column 1 and continues the column seam')
+    assert.ok(css.includes('background:var(--dsw-alias-bg-base)'), 'the row base is the conversation background, not a full-width sidebar band')
   })
-  it('keeps the flexible center host cell and the trailing cluster', () => {
+  it('keeps the controls cluster past the lights and the main lane in the conversation tracks', () => {
     const css = railCss()
-    assert.ok(css.includes('[data-desktop-toolbar-center]{flex:1 1 0;min-width:0;'))
-    assert.ok(css.includes('[data-desktop-toolbar-trailing]{display:flex;align-items:center;gap:2px;flex:none;padding-right:8px;}'))
+    assert.ok(css.includes('[data-desktop-toolbar-controls]{grid-column:1;grid-row:1;justify-self:start;z-index:1;display:flex;align-items:center;gap:2px;padding-left:86px;}'), 'the controls are an in-flow column-1 cluster after the light inset (never an overlay)')
+    assert.ok(!css.includes('[data-desktop-toolbar-controls]{position:absolute'), 'the cluster is never absolutely positioned (v1 hit-test regression)')
+    assert.ok(css.includes('[data-desktop-toolbar-main]{grid-column:2/-1;grid-row:1;'), 'the main lane starts at the conversation column edge')
+    assert.ok(css.includes('padding-left:12px;'), 'the expanded title insets 12px from the conversation column edge')
+    assert.ok(css.includes('pointer-events:none;transition:padding-left'), 'the main lane never wins the hit test over the collapsed cluster')
+    assert.ok(css.includes('[data-desktop-toolbar-center]{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:8px;pointer-events:auto;}'), 'the center host owns the flexible middle space while re-enabling pointer events')
   })
-  it('drops the collapsed-only New Session bubble (New Session lives in the toolbar)', () => {
+  it('reveals New Session only while the sidebar is collapsed (immune to the rail reset)', () => {
     const css = railCss()
+    assert.ok(css.includes('[data-desktop-toolbar] [data-desktop-toolbar-new]{display:none!important;}'), 'expanded keeps the sidebar primary button as the only new-session affordance; !important beats the later rail-button display reset')
+    assert.ok(css.includes('[data-sidebar-collapsed] [data-desktop-toolbar] [data-desktop-toolbar-new]{display:inline-flex!important;}'), 'collapsed reveals the toolbar New Session control')
+  })
+  it('splits title actions left and panel utilities right with matched control gaps', () => {
+    const css = railCss()
+    assert.ok(css.includes('[data-desktop-toolbar-center]>*{min-width:0;gap:8px;margin:0;}'), 'stock private margins cannot disturb the 8px session-content rhythm')
+    assert.ok(css.includes('[data-desktop-toolbar-center]>:first-child{flex:0 1 auto;}'), 'title and session actions stay compact at the conversation edge')
+    assert.ok(css.includes('[data-desktop-toolbar-center]>:last-child{flex:none;margin-left:auto;}'), 'Thread and future panel utilities form the far-right group')
+    assert.ok(css.includes('[data-desktop-toolbar-main]{grid-column:2/-1;grid-row:1;display:flex;align-items:center;gap:2px;'), 'Thread → rightbar corner matches the left chrome controls\' 2px gap')
+    assert.ok(css.includes('[data-desktop-toolbar-end] [data-conversation-header-corner]{margin:0;}'), 'the rightbar corner follows the utilities at the main lane gap')
+    assert.ok(!css.includes('space-between'), 'the middle space belongs to the host, not distributed between every control')
+  })
+  it('clears the actual collapsed control cluster without a phantom updater gap', () => {
+    const css = railCss()
+    assert.ok(css.includes('[data-sidebar-collapsed] [data-desktop-toolbar-main]{padding-left:176px;}'), 'idle clearance = 86px lights + three 26px controls + gaps + 8px')
+    assert.ok(css.includes('[data-sidebar-collapsed] [data-desktop-toolbar]:has([data-desktop-update-button]) [data-desktop-toolbar-main]{padding-left:204px;}'), 'the conditional updater expands clearance by exactly one 26px control plus its 2px gap')
+    assert.ok(css.includes('transition:padding-left var(--ds-transition-duration-slow) var(--ds-ease-in-out);'), 'the clearance rides the frame track curve')
+    assert.ok(css.includes('@media (prefers-reduced-motion:reduce){[data-desktop-toolbar-main]{transition:none;}}'), 'reduced motion disables the clearance transition')
+  })
+  it('lets every interactive child opt out of the drag region (immune to all:unset)', () => {
+    const css = railCss()
+    assert.ok(css.includes('[data-desktop-toolbar] button,[data-desktop-toolbar] a[href],[data-desktop-toolbar] input,[data-desktop-toolbar] textarea,[data-desktop-toolbar] [role="button"],[data-desktop-toolbar] [role="tab"]{-webkit-app-region:no-drag!important;}'), 'no-drag must survive the rail buttons\' all:unset reset')
+  })
+  it('lets the center host span while the trailing cluster stays non-shrinking', () => {
+    const css = railCss()
+    assert.ok(css.includes('[data-desktop-toolbar-center]{flex:1 1 0;min-width:0;'), 'center spans the middle without making its title cluster grow')
+    assert.ok(css.includes('[data-desktop-toolbar-trailing]{display:flex;align-items:center;gap:2px;flex:none;pointer-events:auto;}'))
+    assert.ok(css.includes('[data-desktop-toolbar-end] [data-conversation-header-corner]{margin:0;}'), 'the corner drops both in-header margins')
+  })
+  it('carries no removed affordance selectors or disabled styling', () => {
+    const css = railCss()
+    for (const gone of ['data-desktop-toolbar-leading', 'data-desktop-toolbar-workspace', 'data-desktop-toolbar-nav']) {
+      assert.ok(!css.includes(gone), `${gone} is removed`)
+    }
+    assert.ok(!css.includes('button:disabled'), 'no disabled chrome remains — every rendered control is live')
     assert.ok(!css.includes('data-desktop-new-session'), 'the bubble and its slide animation are superseded')
   })
   it('narrows responsively without shrinking type', () => {
     const css = railCss()
-    assert.ok(css.includes('@media (max-width: 1099px)'), 'below 1100px the center truncates')
-    assert.ok(css.includes('@media (max-width: 767px){[data-desktop-toolbar-nav],[data-desktop-toolbar-workspace]{display:none;}}'), 'below 768px navigation and workspace affordances drop')
+    assert.ok(css.includes('@media (max-width: 1099px){[data-desktop-toolbar-center]{overflow:hidden;}'), 'below 1100px the center truncates')
   })
   it('styles with semantic tokens only', () => {
     const css = railCss()

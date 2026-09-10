@@ -58,15 +58,52 @@ export function restoreRailTemplate(current: string, owned: string, original: st
  *   unified toolbar. Anchor: the slot system's stable `data-slot` wrapper
  *   (documented addressable seam), then SidebarRoot's first row, then its
  *   last button (the toggle; Tooltip adds no wrapper DOM);
- * - the `shell.toolbar` occupant (toolbar.tsx): a 38px single-row toolbar —
- *   the row's center line (y19) rides the traffic lights' dropped center —
- *   with a native drag background and interactive children opting out, a
- *   leading 86px light inset, a flexible center that receives the session
- *   header's portal, and a trailing cluster whose last cell receives the
- *   rightbar corner portal so it stays the trailing item;
- * - responsive tiers per the toolbar contract: below 1100px the center
- *   truncates with ellipsis; below 768px the navigation and workspace
- *   affordances drop instead of shrinking type.
+ * - the `shell.toolbar` occupant (toolbar.tsx) rides the frame's own three
+ *   tracks: `[data-shell-toolbar-row]` (AppFrame's first-row wrapper)
+ *   becomes a `subgrid`, the slot anchor is already `display: contents`
+ *   (inline, ui-renderer's ANCHOR_STYLE), and the toolbar root spans
+ *   `1 / -1` as a nested subgrid — so a `grid-column: 2 / -1` main lane
+ *   starts exactly at the conversation column's edge and follows sidebar
+ *   drags, the concession solve, and the collapse animation with zero JS
+ *   measurement. The 38px row's center line (y19) rides the traffic
+ *   lights' dropped center; the root is the drag background with every
+ *   interactive child opting out;
+ * - the sidebar-tinted segment is a `::before` pinned to grid column 1
+ *   only: expanded, the toolbar's first segment continues the sidebar's
+ *   fill; collapsed (first track already 0px) it vanishes instead of
+ *   painting a full-window dark band;
+ * - the controls cluster (toggle / updater / bell / New Session) is an
+ *   IN-FLOW grid item in column 1 after the 86px light inset — never
+ *   absolutely positioned: the v1 overlay cluster lost click hit-testing
+ *   against the main lane's box. Collapsed, the zero-width first track
+ *   lets the cluster's min-content box overflow rightward past the lights;
+ *   the main lane yields content-aware clearance: 176px for the normal
+ *   toggle / bell / New Session trio, promoted to 204px only while the
+ *   conditional updater button exists. Both leave 8px after the actual last
+ *   control, ride the frame's track curve, and disable under reduced motion.
+ *   New Session is revealed only while collapsed —
+ *   expanded, the sidebar's own primary button owns that action. Both state
+ *   rules carry `!important`: the rail-button reset later in this sheet
+ *   re-asserts `display:inline-flex` at equal specificity, and sheet order
+ *   would silently un-hide the button in the expanded state;
+ * - the center host restores the header's TWO semantic clusters. The fork
+ *   portals exactly [titleCluster, headerUtilities]: titleCluster contains
+ *   crumbs + session actions (Creator mode, model, Session log) and stays
+ *   compact at the conversation edge; headerUtilities (Thread and future
+ *   panel tools) uses margin-left:auto and joins the trailing rightbar corner
+ *   at the far edge. Stock private gaps/margins are flattened: session
+ *   content keeps an 8px rhythm, while Thread → rightbar corner uses the
+ *   same 2px chrome-control gap as toggle → bell on the left. The host grows
+ *   to own the flexible middle space, but neither cluster does; an empty center
+ *   therefore still leaves the non-shrinking corner at the trailing edge;
+ * - the main lane is `pointer-events: none` with the center/trailing hosts
+ *   re-enabling it, so the collapsed control cluster (z-index:1 grid item
+ *   above the lane) always wins the hit test in its zone while portalled
+ *   title/actions keep clicking;
+ * - every interactive child opts out of the drag region with `!important`:
+ *   the rail buttons' `all:unset` would otherwise wipe the no-drag hole
+ *   (the update-indicator precedent);
+ * - responsive tier: below 1100px the center truncates with ellipsis.
  * The frame anchor mirrors titlebar.ts: the div whose direct child carries
  * data-shell-overlay; its first element child is the sidebar column.
  * @returns the stylesheet text.
@@ -75,19 +112,26 @@ export function railCss(): string {
   return [
     'div[data-sidebar-collapsed]:has(> [data-shell-overlay])>div:nth-child(1){border-right:none;}',
     "div[data-slot='sidebar']>div>div:first-child>button:last-child{display:none;}",
-    '[data-desktop-toolbar]{position:relative;display:flex;align-items:stretch;height:38px;min-width:0;-webkit-app-region:drag;background:var(--dsw-specific-sidebar-fill);border-bottom:0.5px solid var(--dsw-alias-border-l3);color:var(--dsw-alias-label-primary);}',
-    '[data-desktop-toolbar] button,[data-desktop-toolbar] a[href],[data-desktop-toolbar] input,[data-desktop-toolbar] textarea,[data-desktop-toolbar] [role="button"],[data-desktop-toolbar] [role="tab"]{-webkit-app-region:no-drag;}',
-    '[data-desktop-toolbar-leading]{display:flex;align-items:center;gap:2px;flex:none;padding-left:86px;}',
-    '[data-desktop-toolbar-center]{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:8px;padding:0 12px;}',
-    '[data-desktop-toolbar-center]>*{min-width:0;}',
-    '[data-desktop-toolbar-workspace]{flex:none;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:2px 8px;border-radius:6px;background:var(--dsw-alias-interactive-bg-hover);font-size:12px;line-height:18px;}',
-    '[data-desktop-toolbar-trailing]{display:flex;align-items:center;gap:2px;flex:none;padding-right:8px;}',
+    '[data-shell-toolbar-row]{display:grid;grid-template-columns:subgrid;}',
+    '[data-desktop-toolbar]{position:relative;display:grid;grid-template-columns:subgrid;grid-column:1/-1;height:38px;min-width:0;-webkit-app-region:drag;background:var(--dsw-alias-bg-base);border-bottom:0.5px solid var(--dsw-alias-border-l3);color:var(--dsw-alias-label-primary);}',
+    '[data-desktop-toolbar]::before{content:"";grid-column:1;grid-row:1;background:var(--dsw-specific-sidebar-fill);border-right:0.5px solid var(--dsw-alias-border-l3);}',
+    '[data-desktop-toolbar-controls]{grid-column:1;grid-row:1;justify-self:start;z-index:1;display:flex;align-items:center;gap:2px;padding-left:86px;}',
+    '[data-desktop-toolbar] [data-desktop-toolbar-new]{display:none!important;}',
+    '[data-sidebar-collapsed] [data-desktop-toolbar] [data-desktop-toolbar-new]{display:inline-flex!important;}',
+    '[data-desktop-toolbar-main]{grid-column:2/-1;grid-row:1;display:flex;align-items:center;gap:2px;min-width:0;padding-left:12px;padding-right:8px;pointer-events:none;transition:padding-left var(--ds-transition-duration-slow) var(--ds-ease-in-out);}',
+    '[data-sidebar-collapsed] [data-desktop-toolbar-main]{padding-left:176px;}',
+    '[data-sidebar-collapsed] [data-desktop-toolbar]:has([data-desktop-update-button]) [data-desktop-toolbar-main]{padding-left:204px;}',
+    '[data-desktop-toolbar-center]{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:8px;pointer-events:auto;}',
+    '[data-desktop-toolbar-center]>*{min-width:0;gap:8px;margin:0;}',
+    '[data-desktop-toolbar-center]>:first-child{flex:0 1 auto;}',
+    '[data-desktop-toolbar-center]>:last-child{flex:none;margin-left:auto;}',
+    '[data-desktop-toolbar-trailing]{display:flex;align-items:center;gap:2px;flex:none;pointer-events:auto;}',
+    '[data-desktop-toolbar-end] [data-conversation-header-corner]{margin:0;}',
+    '[data-desktop-toolbar] button,[data-desktop-toolbar] a[href],[data-desktop-toolbar] input,[data-desktop-toolbar] textarea,[data-desktop-toolbar] [role="button"],[data-desktop-toolbar] [role="tab"]{-webkit-app-region:no-drag!important;}',
     '[data-desktop-toolbar] [data-desktop-rail-button]{all:unset;box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:6px;cursor:pointer;color:inherit;position:relative;}',
     '[data-desktop-toolbar] [data-desktop-rail-button]:hover{background:var(--dsw-alias-interactive-bg-hover);}',
-    '[data-desktop-toolbar] [data-desktop-rail-button]:disabled{opacity:0.35;cursor:default;}',
-    '[data-desktop-toolbar] [data-desktop-rail-button]:disabled:hover{background:none;}',
+    '@media (prefers-reduced-motion:reduce){[data-desktop-toolbar-main]{transition:none;}}',
     '@media (max-width: 1099px){[data-desktop-toolbar-center]{overflow:hidden;}[data-desktop-toolbar-center]>*{flex-shrink:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}}',
-    '@media (max-width: 767px){[data-desktop-toolbar-nav],[data-desktop-toolbar-workspace]{display:none;}}',
   ].join('')
 }
 

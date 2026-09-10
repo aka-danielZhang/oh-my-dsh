@@ -131,17 +131,6 @@ export function apply(ctx: ClientContext): void {
       const layout = ctx.get('layout') as unknown as ToolbarHostRegistry | undefined
       return layout !== undefined && typeof layout.setToolbarHosts === 'function' ? layout : undefined
     }
-    const historyApi = (): Partial<{
-      canBack(): boolean
-      canForward(): boolean
-      back(): void
-      forward(): void
-    }> => ctx.sessions as unknown as Partial<{
-      canBack(): boolean
-      canForward(): boolean
-      back(): void
-      forward(): void
-    }>
     // One publisher per fiber: identity-stable callback refs for the
     // toolbar's two host cells (old-HMR disposers release only their OWN
     // pair — see ToolbarHostPublisher).
@@ -162,14 +151,6 @@ export function apply(ctx: ClientContext): void {
         layout.toggleSidebar()
       },
       startSession: () => { ctx.uiWorkspace.startSession() },
-      switchSurface: () => { void invoke.invoke('dsh_desktop_switch_surface').catch((error: unknown) => { logger.warn(`dsh-desktop-bridge: surface switch failed: ${String(error)}`) }) },
-      // Transient selection history from the session controller — structural
-      // again: a runtime older than the fork revision shipping the history
-      // simply reports both buttons disabled and no-ops them.
-      canBack: () => historyApi().canBack?.() ?? false,
-      canForward: () => historyApi().canForward?.() ?? false,
-      back: () => { historyApi().back?.() },
-      forward: () => { historyApi().forward?.() },
       centerRef: (el) => { publisherOf().center(el) },
       endRef: (el) => { publisherOf().end(el) },
     })
