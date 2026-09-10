@@ -178,3 +178,36 @@ test('curatorCatalog lists only active, normal, unconfirmed entries', async () =
   assert.equal(catalog.horizons.semantic, 365)
   store.close()
 })
+
+test('rememberFromDream resolves the workspace scope read-only and rejects unregistered cwds', async () => {
+  const project = mkdtempSync(join(tmpdir(), 'ohmymemo-dream-svc-'))
+  const { service } = await openService()
+  const base = {
+    content: '本项目发布前跑全量测试。',
+    kind: 'procedural' as const,
+    scopeHint: 'workspace' as const,
+    keyHint: 'workflow.release',
+    importance: 0.6,
+    tags: ['release'],
+    confidence: 0.82,
+    source: { sessionId: 's', eventSeq: 1, messageId: 'm', time: '2026-09-09T22:10:00.000Z', cwd: project },
+    quote: '发布前跑全量测试',
+    quoteHash: 'sha256:q',
+  }
+  await assert.rejects(
+    () => service.rememberFromDream(base),
+    (error: unknown) => {
+      assert.equal((error as { code?: string }).code, 'OHMYMEMO_INVALID_SCOPE', 'an unregistered workspace never gets created by a dream write')
+      return true
+    },
+  )
+  // Register the scope via an explicit write, then the dream write resolves.
+  await service.remember({ content: '本项目用 pnpm。', kind: 'semantic', scope: 'workspace', cwd: project, key: 'workspace.pkg', pinned: true })
+  const result = await service.rememberFromDream(base)
+  assert.equal(result.outcome, 'created')
+  assert.match(result.scope, /^workspace:/)
+  // Exact replay through the same service seam.
+  const replay = await service.rememberFromDream(base)
+  assert.equal(replay.outcome, 'already-present')
+  assert.equal(replay.id, result.id)
+})

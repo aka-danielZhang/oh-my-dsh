@@ -15,6 +15,7 @@ import type { CuratorCatalogEntry } from './dream.ts'
 import type { CatalogEntry, Diagnostic, MemoryChange, MemoryKind, MemoryRecord, MemorySource, MemoryStatus } from './types.ts'
 import type { MemorySearchRequest, MemorySearchResult } from './search.ts'
 import { searchEntries, type SearchContext } from './search.ts'
+import { StoreError } from './errors.ts'
 import {
   listDisplayFiles,
   readDisplayFile,
@@ -25,6 +26,8 @@ import {
   OhMyMemoStore,
   type CreateCandidateInput,
   type CreateInput,
+  type DreamMemoryWriteRequest,
+  type DreamMemoryWriteResult,
   type ForgetResult,
   type LifecycleMaintenanceReport,
   type MutationResult,
@@ -66,6 +69,12 @@ export interface OhMyMemoService {
   search(request: MemorySearchRequest, caller?: { cwd?: string }): Promise<MemorySearchResult>
   get(ids: string[]): Promise<MemoryRecordView[]>
   remember(request: CreateInput & { cwd?: string }): Promise<MutationResult>
+  /**
+   * Host-internal dream-memory write seam (never a model tool). The service
+   * resolves the workspace scope read-only (a missing scope rejects) and the
+   * store fixes every product-metadata field under the writer lock.
+   */
+  rememberFromDream(request: DreamMemoryWriteRequest): Promise<DreamMemoryWriteResult>
   captureCandidate(request: CreateCandidateInput & { cwd?: string }): Promise<MutationResult>
   configSnapshot(): StoreConfigSnapshot
   updateConfig(request: UpdateConfigInput): Promise<StoreConfigSnapshot>
@@ -156,6 +165,16 @@ export function createOhMyMemoService(store: OhMyMemoStore, options: { now?: () 
     },
     async remember(request) {
       return store.create(request)
+    },
+    async rememberFromDream(request) {
+      if (request.scopeHint === 'workspace') {
+        const resolved = store.resolveWorkspaceScopeForRead(request.source.cwd)
+        if (resolved === undefined) {
+          throw new StoreError('OHMYMEMO_INVALID_SCOPE', 'the evidence workspace has no registered memory scope — the dream tool maps this to a correctable error')
+        }
+        return store.createDreamMemory({ ...request, resolvedScope: resolved })
+      }
+      return store.createDreamMemory(request)
     },
     async captureCandidate(request) {
       return store.createCandidate(request)

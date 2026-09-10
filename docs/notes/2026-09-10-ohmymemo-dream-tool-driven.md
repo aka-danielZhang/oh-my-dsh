@@ -138,6 +138,7 @@ flowchart LR
 ### 5.4 Runtime 与模型能力门
 
 - 实现必须确认 `@deepseek-ai/dsh-tools` 的 own-scope exemption、结构化 tool error 和 `ToolRunContext.concludeTurn()`，以及 `@deepseek-ai/dsh-agent` 对 concludes-turn 的消费版本；`package.json` 中两者 peer 下限抬到首次完整支持该契约且已经过 packaged smoke 的版本，当前验证候选为 `0.1.5-alpha.1`，最终以实现时源码/冒烟结论为准。
+- **实现核对结论（2026-09-10，源码级）：** `0.1.5-alpha.1` 的 registry JSON Schema 子集只接受 `type/oneOf/properties/required/additionalProperties/items/enum/const` 加注解；`minLength`/`maxLength`/`minimum`/`maximum`/`maxItems`/`uniqueItems` 一律 `UNSUPPORTED_SCHEMA` 拒绝，且 registry **不**按入参 `parameters` 校验模型实参（"tools validate their own schema"），仅对成功输出按 `output.schema` 校验。因此本文第 6 节 schema 中的长度/数值/条数约束落到工具 body 内的 Host 校验（在任何 Store 访问之前执行，语义等同"schema 在 body 前拒绝"），注册 schema 用受支持子集、由 `description` 向模型声明上限。`tests/dsh-contract.test.ts` 已把这些接缝钉成 source-linked 契约测试。
 - route 若有权威 native-tool capability 元数据，`models()` 应标记并在 tool-only claim 前拒绝明确 unsupported 的模型。不得按 provider 名称猜测能力。
 - 当前 runtime 若没有可查询的权威 capability，未知自定义 route 可进入 run，但首次“adapter 明确拒绝 tools/无法序列化 tool schema”必须分类为 `DREAM_MODEL_TOOL_UNSUPPORTED` 基础设施错误：fail loud、UI 提示改用支持工具的模型或 operator 显式 legacy mode，不累计 dead-letter、不自动降级。
 - 发布门必须实际执行组装/packaged Profile 中的 scoped register、restriction、error continuation、sibling calls 和 concludeTurn；typecheck 或静态 inject 检查不够。

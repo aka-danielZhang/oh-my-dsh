@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { LockBusyError } from '../src/errors.ts'
@@ -704,6 +705,258 @@ test('mergeMemories retires absorbed via supersede machinery; guards cross-kind 
     const actions = readJournal(root).map((entry) => entry.action)
     assert.ok(actions.includes('memory-merged'))
     assert.ok(store.readRecord(confirmed.id) !== undefined, 'the confirmed record is untouched')
+  } finally {
+    store.close()
+  }
+})
+
+// ---------------------------------------------------------------- stage 1:
+// Dream-memory writes: fixed product metadata, writer-lock exact replay,
+// tombstone priority, retired barriers, and the legacy-key upgrade window.
+
+import { createHash } from 'node:crypto'
+import { normalizeKey, normalizeText } from '../src/schema.ts'
+import type { DreamMemoryWriteRequest } from '../src/store.ts'
+
+function dreamRequest(overrides: Partial<DreamMemoryWriteRequest> = {}): DreamMemoryWriteRequest {
+  return {
+    content: '用户偏好使用 pnpm 作为包管理器。',
+    kind: 'semantic',
+    scopeHint: 'user',
+    keyHint: 'preference.package-manager',
+    importance: 0.6,
+    tags: ['package-manager'],
+    confidence: 0.82,
+    source: { sessionId: 'sess-1', eventSeq: 7, messageId: 'msg-7', time: '2026-09-09T22:10:00.000Z' },
+    quote: 'pnpm 作为包管理器',
+    quoteHash: 'sha256:quote-7',
+    ...overrides,
+  }
+}
+
+/** The pre-tool (legacy-json) write key: normalized content text in the hash. */
+function legacyDreamKey(request: DreamMemoryWriteRequest): string {
+  const hint = normalizeKey(request.keyHint) ?? 'fact'
+  const textHash = createHash('sha256')
+    .update(`${request.source.sessionId}\0${request.source.eventSeq}\0${normalizeText(request.content)}`)
+    .digest('hex')
+  return `dream.${hint.slice(0, 48)}.${textHash.slice(0, 12)}`
+}
+
+test('createDreamMemory writes the fixed dream product metadata', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  try {
+  const result = await store.createDreamMemory(dreamRequest())
+  assert.equal(result.outcome, 'created')
+  assert.match(result.key, /^dream\.preference\.package-manager\.[0-9a-f]{12}$/)
+  const record = store.readRecord(result.id)!.record
+  assert.equal(record.status, 'active')
+  assert.equal(record.privacy, 'normal')
+  assert.equal(record.pinned, true)
+  assert.equal(record.confirmed, false)
+  assert.equal(record.confidence, 0.82)
+  assert.equal(record.cardinality, 'single')
+  assert.equal(record.key, result.key)
+  assert.deepEqual(record.sources[0], {
+    type: 'cross_session_inference',
+    session_id: 'sess-1',
+    event_seq: 7,
+    message_id: 'msg-7',
+    quote_hash: 'sha256:quote-7',
+    quote_preview: 'pnpm 作为包管理器',
+    observed_at: '2026-09-09T22:10:00.000Z',
+  })
+  } finally {
+    store.close()
+  }
+})
+
+test('createDreamMemory exact replay returns the same id with zero new writes', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  try {
+  const first = await store.createDreamMemory(dreamRequest())
+  const journalBefore = readJournal(root).length
+  const statsBefore = store.catalogStats().active
+  const replay = await store.createDreamMemory(dreamRequest())
+  assert.equal(replay.outcome, 'already-present')
+  assert.equal(replay.id, first.id)
+  assert.equal(replay.key, first.key)
+  assert.equal(readJournal(root).length, journalBefore, 'replay is zero-journal')
+  assert.equal(store.catalogStats().active, statsBefore, 'replay is zero-write')
+  } finally {
+    store.close()
+  }
+})
+
+test('createDreamMemory replay is digest-sensitive: changed content or importance conflicts', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  try {
+  await store.createDreamMemory(dreamRequest())
+  await assert.rejects(
+    () => store.createDreamMemory(dreamRequest({ content: '用户偏好使用 npm 作为包管理器。' })),
+    (error: unknown) => {
+      assert.equal((error as { code?: string }).code, 'OHMYMEMO_DREAM_IDEMPOTENCY_CONFLICT')
+      return true
+    },
+  )
+  await assert.rejects(
+    () => store.createDreamMemory(dreamRequest({ importance: 0.9 })),
+    (error: unknown) => {
+      assert.equal((error as { code?: string }).code, 'OHMYMEMO_DREAM_IDEMPOTENCY_CONFLICT')
+      return true
+    },
+  )
+  } finally {
+    store.close()
+  }
+})
+
+test('createDreamMemory key follows the source fingerprint: other sources create separate records', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  try {
+  const first = await store.createDreamMemory(dreamRequest())
+  const other = await store.createDreamMemory(dreamRequest({
+    source: { sessionId: 'sess-2', eventSeq: 3, messageId: 'msg-3b', time: '2026-09-09T23:00:00.000Z' },
+  }))
+  assert.equal(other.outcome, 'created')
+  assert.notEqual(other.key, first.key, 'a different source fingerprint derives a new durable key')
+  } finally {
+    store.close()
+  }
+})
+
+test('createDreamMemory: episodic exact replay reuses the record despite multiple cardinality', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  try {
+  const first = await store.createDreamMemory(dreamRequest({ kind: 'episodic' }))
+  assert.equal(first.outcome, 'created')
+  const replay = await store.createDreamMemory(dreamRequest({ kind: 'episodic' }))
+  assert.equal(replay.outcome, 'already-present')
+  assert.equal(replay.id, first.id)
+  } finally {
+    store.close()
+  }
+})
+
+test('createDreamMemory: tombstone outranks replay — forgotten evidence never resurrects', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  try {
+  const created = await store.createDreamMemory(dreamRequest())
+  await store.forget({ id: created.id, reason: 'user asked' })
+  await assert.rejects(
+    () => store.createDreamMemory(dreamRequest()),
+    (error: unknown) => {
+      assert.equal((error as { code?: string }).code, 'OHMYMEMO_TOMBSTONE_BARRIER')
+      return true
+    },
+  )
+  } finally {
+    store.close()
+  }
+})
+
+test('createDreamMemory: superseded and expired records answer retired, never resurrect', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  try {
+  const created = await store.createDreamMemory(dreamRequest())
+  const read = store.readRecord(created.id)!
+  // Supersede WITH a new key: the successor takes the key away, leaving the
+  // old key held only by the archived (superseded) record. (A same-key
+  // supersede leaves the corrected successor on the key — old evidence
+  // replaying onto it is a conflict, which the digest test already covers.)
+  await store.supersede({
+    id: created.id,
+    ifRevision: read.record.revision,
+    ifHash: read.hash,
+    content: '用户偏好使用 bun 作为包管理器。',
+    key: 'preference.package-manager-v2',
+    reason: 'user corrected the fact',
+  })
+  await assert.rejects(
+    () => store.createDreamMemory(dreamRequest()),
+    (error: unknown) => {
+      assert.equal((error as { code?: string }).code, 'OHMYMEMO_DREAM_REPLAY_RETIRED')
+      return true
+    },
+  )
+  } finally {
+    store.close()
+  }
+})
+
+test('createDreamMemory recognizes the legacy v1 write key across the upgrade window', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  try {
+  const request = dreamRequest()
+  const legacyKey = legacyDreamKey(request)
+  // A record the pre-tool protocol would have written via store.create().
+  const legacy = await store.create({
+    content: request.content,
+    kind: request.kind,
+    scope: 'user',
+    key: legacyKey,
+    cardinality: 'single',
+    importance: request.importance,
+    pinned: true,
+    privacy: 'normal',
+    confirmed: false,
+    confidence: request.confidence,
+    tags: request.tags,
+    sources: [{
+      type: 'cross_session_inference',
+      session_id: request.source.sessionId,
+      event_seq: request.source.eventSeq,
+      message_id: request.source.messageId,
+      quote_hash: request.quoteHash,
+      quote_preview: request.quote,
+      observed_at: request.source.time,
+    }],
+  })
+  const replay = await store.createDreamMemory(request)
+  assert.equal(replay.outcome, 'already-present', 'the v2 tool path replays onto the v1 record instead of duplicating it')
+  assert.equal(replay.id, legacy.id)
+  assert.equal(replay.key, legacyKey)
+  } finally {
+    store.close()
+  }
+})
+
+test('createDreamMemory: workspace scope requires the resolved scope and enters the key', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  try {
+  await assert.rejects(
+    () => store.createDreamMemory(dreamRequest({ scopeHint: 'workspace' })),
+    (error: unknown) => {
+      assert.equal((error as { code?: string }).code, 'OHMYMEMO_INVALID_SCOPE')
+      return true
+    },
+  )
+  // Register a real workspace scope first: the dream write must target an
+  // existing scope (the service resolves it from the evidence cwd).
+  const project = mkdtempSync(join(tmpdir(), 'ohmymemo-dream-ws-'))
+  const seeded = await store.create({
+    content: '本仓库使用 pnpm 工作区。',
+    kind: 'semantic',
+    scope: 'workspace',
+    cwd: project,
+    key: 'workspace.package-manager',
+  })
+  const result = await store.createDreamMemory(dreamRequest({
+    scopeHint: 'workspace',
+    resolvedScope: seeded.scope,
+    source: { sessionId: 'sess-1', eventSeq: 7, messageId: 'msg-7', time: '2026-09-09T22:10:00.000Z', cwd: project },
+  }))
+  assert.match(result.key, /^dream\.preference\.package-manager\./)
+  assert.equal(store.readRecord(result.id)!.record.scope, seeded.scope)
   } finally {
     store.close()
   }

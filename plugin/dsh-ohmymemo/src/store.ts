@@ -19,6 +19,7 @@
  * @module dsh-ohmymemo/store
  */
 
+import { createHash } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
 import { ensureDir, hashFile, hashText, statFile, writeFileAtomic } from './atomic.ts'
@@ -42,6 +43,7 @@ import {
   detectSecretLike,
   normalizeKey,
   normalizeTag,
+  normalizeText,
   parseManifest,
   parseRecord,
   parseStoreConfig,
@@ -170,6 +172,40 @@ export interface ForgetResult {
   forgottenIds: string[]
   tombstoneId: string
   tombstonePath: string
+}
+
+/**
+ * Host-owned dream-memory write request (dream-tool-driven design §9.1).
+ * Carries the model's semantic fields plus the full resolved evidence; the
+ * fixed product metadata (active/normal/pinned/unconfirmed/
+ * cross_session_inference) is deliberately NOT part of the request — the
+ * store fixes it.
+ */
+export interface DreamMemoryWriteRequest {
+  content: string
+  kind: MemoryKind
+  /** `workspace` requires `resolvedScope` (resolved by the service). */
+  scopeHint: 'user' | 'workspace'
+  /** Resolved workspace scope id when `scopeHint === 'workspace'`. */
+  resolvedScope?: string
+  keyHint: string
+  importance: number
+  tags: string[]
+  validUntil?: string
+  /** Run-wide candidate confidence (config). */
+  confidence: number
+  /** Real evidence locator — opaque ids and runIds never enter here. */
+  source: { sessionId: string; eventSeq: number; messageId: string; time: string; cwd?: string }
+  quote: string
+  quoteHash: string
+}
+
+/** Dream write outcome; `already-present` is a zero-write exact replay. */
+export interface DreamMemoryWriteResult {
+  outcome: 'created' | 'already-present'
+  id: string
+  key: string
+  scope: string
 }
 
 /** Deterministic lifecycle maintenance outcome (nightly sweep, no LLM). */
@@ -501,6 +537,211 @@ export class OhMyMemoStore {
       reason: input.reason,
       expiresAt: input.expiresAt,
     }))
+  }
+
+  /**
+   * Dream-memory write with writer-lock exact-replay idempotency (design
+   * §9.1). Fixed product metadata, the stable `dream-write/v2` write key, and
+   * the canonical request digest are all derived HERE — under the lock, after
+   * transaction recovery and catalog reconciliation, so an explicit write
+   * racing the dream write resolves to replay/conflict deterministically.
+   * Tombstone checks run before any replay branch: forget always wins.
+   */
+  async createDreamMemory(request: DreamMemoryWriteRequest): Promise<DreamMemoryWriteResult> {
+    await this.ensureReady()
+    return this.withWriterLock(() => this.createDreamLocked(request))
+  }
+
+  private createDreamLocked(request: DreamMemoryWriteRequest): DreamMemoryWriteResult {
+    // Second fail-closed validation (design §9.1 step 2): the tool layer and
+    // the service already checked, but the store trusts no caller.
+    const content = request.content.replace(/\n+$/, '')
+    if (content.trim().length === 0) {
+      throw new StoreError('OHMYMEMO_EMPTY_CONTENT', 'record content must not be empty')
+    }
+    const secret = detectSecretLike(content) ?? detectSecretLike(request.quote)
+    if (secret !== undefined) {
+      throw new StoreError('OHMYMEMO_SECRET_REFUSED', `content matches a credential pattern (${secret}) — refusing to store (fail closed)`)
+    }
+    const keyHint = normalizeKey(request.keyHint)
+    if (keyHint === undefined) {
+      throw new StoreError('OHMYMEMO_INVALID_KEY', `key hint "${request.keyHint}" cannot be normalized`)
+    }
+    if (request.scopeHint === 'workspace' && request.resolvedScope === undefined) {
+      throw new StoreError('OHMYMEMO_INVALID_SCOPE', 'dream workspace write requires a resolved scope')
+    }
+    const scopeValue = request.scopeHint === 'user' ? 'user' : request.resolvedScope!
+    const kind = request.kind
+    const cardinality = kind === 'episodic' ? 'multiple' : 'single'
+    const at = this.now().toISOString()
+
+    // Stable durable identity (design §9.1 step 5): the source fingerprint is
+    // the REAL locator — never the run-local evidence id, runId, or slot.
+    // Raw hex digests only: the prefixed `sha256:` form is invalid in keys.
+    const hex = (text: string): string => createHash('sha256').update(text).digest('hex')
+    const fingerprint = `${request.source.sessionId}\0${request.source.eventSeq}\0${request.source.messageId}`
+    const hint48 = keyHint.slice(0, 48)
+    const v2Key = `dream.${hint48}.${hex(`${fingerprint}\0${scopeValue}\0${kind}\0${hint48}`).slice(0, 12)}`
+    // Upgrade-window identity: the pre-tool protocol derived its key from the
+    // normalized content text; replays of old runs must still hit replay.
+    const v1Key = `dream.${hint48}.${hex(`${request.source.sessionId}\0${request.source.eventSeq}\0${normalizeText(content)}`).slice(0, 12)}`
+
+    /**
+     * Canonical request digest (design §9.1 step 6): every durable semantic
+     * field enters; ids, timestamps, lifecycle status, and run-local handles
+     * do not (status legitimately changes via supersede/expire/dispute). The
+     * digest is recomputable from any record's own fields, so no receipt file
+     * exists.
+     */
+    const digestOf = (input: {
+      content: string
+      importance: number
+      tags: string[]
+      validUntil?: string
+      quoteHash: string
+      privacy: string
+      pinned: boolean
+      confirmed: boolean
+      confidence: number
+      cardinality: string
+      source: { sessionId?: string; eventSeq?: number; messageId?: string }
+    }): string => hashText(JSON.stringify({
+      protocol: 'dream-write/v2',
+      content: input.content,
+      importance: input.importance,
+      tags: input.tags,
+      validUntil: input.validUntil ?? null,
+      quoteHash: input.quoteHash,
+      policy: {
+        privacy: input.privacy,
+        pinned: input.pinned,
+        confirmed: input.confirmed,
+        confidence: input.confidence,
+        cardinality: input.cardinality,
+        sourceType: 'cross_session_inference',
+      },
+      source: {
+        sessionId: input.source.sessionId ?? null,
+        eventSeq: input.source.eventSeq ?? null,
+        messageId: input.source.messageId ?? null,
+      },
+    }))
+    const requestDigest = digestOf({
+      content,
+      importance: request.importance,
+      tags: normalizeTags(request.tags),
+      ...(request.validUntil !== undefined ? { validUntil: request.validUntil } : {}),
+      quoteHash: request.quoteHash,
+      privacy: 'normal',
+      pinned: true,
+      confirmed: false,
+      confidence: request.confidence,
+      cardinality,
+      source: request.source,
+    })
+
+    /** Recompute the canonical digest from any record's own durable fields. */
+    const recordDigest = (existing: MemoryRecord): string => digestOf({
+      content: existing.body,
+      importance: existing.importance,
+      tags: existing.tags,
+      ...(existing.valid_until !== undefined && existing.valid_until !== null ? { validUntil: existing.valid_until } : {}),
+      quoteHash: existing.sources[0]?.quote_hash ?? '',
+      privacy: existing.privacy,
+      pinned: existing.pinned,
+      confirmed: existing.confirmed,
+      confidence: existing.confidence,
+      cardinality: existing.cardinality,
+      source: {
+        sessionId: existing.sources[0]?.session_id,
+        eventSeq: existing.sources[0]?.event_seq,
+        messageId: existing.sources[0]?.message_id,
+      },
+    })
+
+    /** Replay/conflict/retired classification of one existing record. */
+    const classify = (existing: MemoryRecord): DreamMemoryWriteResult => {
+      if (recordDigest(existing) !== requestDigest) {
+        throw new StoreError('OHMYMEMO_DREAM_IDEMPOTENCY_CONFLICT', `dream write key ${scopeValue}/${kind}/${existing.key} already holds a different canonical request — refusing to overwrite (user/doctor must resolve)`)
+      }
+      if (existing.status !== 'active' && existing.status !== 'disputed') {
+        throw new StoreError('OHMYMEMO_DREAM_REPLAY_RETIRED', `dream write key ${scopeValue}/${kind}/${existing.key} points at a ${existing.status} record — old evidence never resurrects`)
+      }
+      return { outcome: 'already-present', id: existing.id, key: existing.key, scope: existing.scope }
+    }
+
+    // Tombstones first (design §9.1 step 7): the forget barrier outranks any
+    // idempotency branch, for both the v2 and the legacy v1 key.
+    for (const key of [v2Key, v1Key]) {
+      const barrier = this.catalogValue.tombstoneFor(scopeValue, key)
+      if (barrier !== undefined) {
+        throw new StoreError('OHMYMEMO_TOMBSTONE_BARRIER', `key ${scopeValue}/${key} has an active forget tombstone — refusing to re-create (explicit re-remember required)`, { tombstone: barrier.id })
+      }
+    }
+
+    // Exact replay / conflict / retired on the current write key (step 8).
+    const byKey = (key: string): MemoryRecord | undefined => {
+      const entry = this.catalogValue.allEntries().find((candidate) =>
+        candidate.record.scope === scopeValue && candidate.record.kind === kind && candidate.record.key === key && candidate.quarantine === undefined)
+      return entry?.record
+    }
+    const v2Record = byKey(v2Key)
+    if (v2Record !== undefined) return classify(v2Record)
+    const v1Record = byKey(v1Key)
+    if (v1Record !== undefined) return classify(v1Record)
+
+    // Fresh create (step 9): the existing single-record write transaction.
+    const id = newMemoryId(this.idNow())
+    const validUntil = request.validUntil !== undefined ? normalizeValidUntil(request.validUntil, at) : undefined
+    const record: MemoryRecord = {
+      schema: 'ohmymemo/v1',
+      id,
+      revision: 1,
+      scope: scopeValue,
+      kind,
+      key: v2Key,
+      cardinality,
+      status: 'active',
+      confidence: request.confidence,
+      importance: request.importance,
+      privacy: 'normal',
+      pinned: true,
+      confirmed: false,
+      created_at: at,
+      updated_at: at,
+      tags: normalizeTags(request.tags),
+      sources: [{
+        type: 'cross_session_inference',
+        session_id: request.source.sessionId,
+        event_seq: request.source.eventSeq,
+        message_id: request.source.messageId,
+        quote_hash: request.quoteHash,
+        quote_preview: request.quote,
+        observed_at: request.source.time,
+      }],
+      supersedes: [],
+      contradicts: [],
+      ...(validUntil !== undefined ? { valid_until: validUntil } : {}),
+      body: content,
+    }
+    const text = serializeRecord(record)
+    this.checkSize(text)
+    const rel = canonicalRecordPath(record)
+    if (rel === undefined) {
+      throw new StoreError('OHMYMEMO_INVALID_SCOPE', `scope ${scopeValue} has no canonical path`)
+    }
+    this.expectInternal(rel, hashText(text))
+    runTransaction(this.root, {
+      action: 'create',
+      ops: [
+        { op: 'write', path: rel, content: text, after_hash: hashText(text) },
+        { op: 'journal', entry: journalEntry(this.now(), 'created', record, hashText(text)) },
+      ],
+      validateWrite: validateRecordText,
+    })
+    this.refreshEntry(rel)
+    this.emit({ type: 'upserted', id, revision: record.revision, hash: hashText(text), external: false })
+    return { outcome: 'created', id, key: record.key, scope: record.scope }
   }
 
   private createLocked(input: CreateInput, candidate?: { reason: string; expiresAt?: string }): MutationResult {
