@@ -71,6 +71,7 @@
     "@deepseek-ai/cordis": "4.0.2",
     "@deepseek-ai/dsh-api-session-controller": "npm:@crazx/dsh-api-session-controller@0.1.5-alpha.1.zw.2",
     "@deepseek-ai/dsh-client-locale": "0.1.5-alpha.1",
+    "@deepseek-ai/dsh-client-store": "0.1.5-alpha.1",
     "@deepseek-ai/dsh-client-ui-conversation": "0.1.5-alpha.1",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.5-alpha.1",
     "@deepseek-ai/dsh-client-ui-renderer": "0.1.5-alpha.1",

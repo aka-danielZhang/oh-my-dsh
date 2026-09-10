@@ -923,7 +923,7 @@ export function apply(ctx: PluginContext, rawConfig: unknown): void {
    * account's numbers until the TTL expires. (The detection cache stays: it
    * remembers endpoint SHAPES, never key values.)
    */
-  ctx.on?.('credentials/updated', (ref: unknown) => {
+  ctx.on?.('credentials/reference-updated', (ref: unknown) => {
     if (typeof ref !== 'string') return
     for (const [id, state] of states) {
       const configured = config.sources.find(source => source.id === id)

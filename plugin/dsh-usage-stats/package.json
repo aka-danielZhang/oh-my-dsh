@@ -1,7 +1,7 @@
 {
   "name": "dsh-usage-stats",
   "version": "0.1.3",
-  "description": "设置·使用统计：Token 用量、活动热力图、Provider/模型分布与每日趋势",
+  "description": "\u8bbe\u7f6e\u00b7\u4f7f\u7528\u7edf\u8ba1\uff1aToken \u7528\u91cf\u3001\u6d3b\u52a8\u70ed\u529b\u56fe\u3001Provider/\u6a21\u578b\u5206\u5e03\u4e0e\u6bcf\u65e5\u8d8b\u52bf",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -40,7 +40,6 @@
     },
     "client": {
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
         "@deepseek-ai/dsh-client-ui-settings",
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-slots",
@@ -78,7 +77,6 @@
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0-rc.7 <5",
     "@deepseek-ai/dsh-client-locale": ">=0.0.1-rc.1 <1",
-    "@deepseek-ai/dsh-client-runtime": ">=0.0.1-rc.1 <1",
     "@deepseek-ai/dsh-client-ui-primitives": ">=0.0.1-rc.1 <1",
     "@deepseek-ai/dsh-client-ui-settings": ">=0.0.1-rc.1 <1",
     "@deepseek-ai/dsh-client-ui-slots": ">=0.0.1-rc.1 <1",
@@ -88,7 +86,6 @@
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.2",
     "@deepseek-ai/dsh-client-locale": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-client-runtime": "0.1.1-rc.2",
     "@deepseek-ai/dsh-client-store": "0.1.2-rc.1",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.1-rc.1",
     "@deepseek-ai/dsh-client-ui-renderer": "0.1.2-rc.1",

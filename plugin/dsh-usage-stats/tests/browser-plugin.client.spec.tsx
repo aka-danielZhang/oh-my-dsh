@@ -86,7 +86,7 @@ const SUMMARY: UsageStatsSummary = {
 /** Cordis bench: real SlotRegistry + LocaleRuntime + a remote namespace. */
 async function bench(withNamespace: boolean) {
   const ctx = new Context()
-  await ctx.plugin(SlotRegistry, []).await()
+  await ctx.plugin(SlotRegistry).await()
   const locale = new LocaleRuntime(ctx)
   ctx.provide('locale', locale)
   const summary = vi.fn(async (): Promise<ListResult> => ({ ok: true, value: SUMMARY }))

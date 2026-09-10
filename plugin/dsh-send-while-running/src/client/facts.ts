@@ -1,7 +1,7 @@
 /**
  * Pure visibility predicate for the stop-while-running button, over the
- * minimal structural facts the InputZone owner share exposes. Kept DOM-free
- * so it unit-tests directly.
+ * minimal structural facts the framework session-standard hooks expose. Kept
+ * DOM-free so it unit-tests directly.
  *
  * 0.2.0 pivot: the 0.1.2-alpha composer keeps the primary as SEND while a
  * running ordinary session has draft content (`primaryStops` gained the
@@ -12,8 +12,9 @@
  */
 
 /**
- * The session facts this feature reads off the ConversationSnapshot owner
- * share (structural subset; the real snapshot satisfies it).
+ * The session facts this feature reads off the SessionSnapshot the
+ * `useSession` standard hook serves (structural subset; the real snapshot
+ * satisfies it).
  */
 export interface SessionFacts {
   /** Whether the session's turn is currently running. */
@@ -25,14 +26,15 @@ export interface SessionFacts {
 }
 
 /**
- * The input facts this feature reads off the InputState owner share
- * (structural subset; the real machine state satisfies it).
+ * The input facts this feature reads off the InputState the `useInput`
+ * standard hook serves (structural subset; the real machine state satisfies
+ * it).
  */
 export interface InputFacts {
   /** Current draft text. */
   readonly draft: string
-  /** Ordered runtime-only draft image ids; bytes stay in the controller. */
-  readonly imageIds: readonly unknown[]
+  /** Ordered draft attachment ids; bytes stay in the controller. */
+  readonly attachmentIds: readonly unknown[]
 }
 
 /**
@@ -54,5 +56,5 @@ export function stopButtonVisible(session: SessionFacts, input: InputFacts): boo
   if (!session.running) return false
   if (session.subagent !== null && session.subagent !== undefined) return false
   if (session.removed) return false
-  return input.draft.trim() !== '' || input.imageIds.length > 0
+  return input.draft.trim() !== '' || input.attachmentIds.length > 0
 }

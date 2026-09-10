@@ -31,7 +31,6 @@ const CLIENT_EXTERNALS = [
   '@deepseek-ai/dsh-client-ui-primitives',
   // Documented runtime exemption (preloaded by the parser before the shell
   // starts) — the table answers it natively.
-  '@deepseek-ai/dsh-client-runtime/client',
 ] as const
 const DECORATOR_SYNTAX = /^\s*@[A-Za-z_$][\w$]*/m
 

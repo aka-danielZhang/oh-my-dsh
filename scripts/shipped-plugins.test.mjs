@@ -58,6 +58,7 @@ test('lists every ship:true plugin once, including thread', () => {
     'dsh-reasoning-efforts',
     'dsh-send-while-running',
     'dsh-thread',
+    'dsh-usage-stats',
     'dsh-web-search-toggle',
   ])
   const thread = specs.find((spec) => spec.package === 'dsh-thread')

@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 import { WebSearchRow } from '../src/client/WebSearchRow.tsx'
-import type { WebSearchRowState } from '../src/client/WebSearchRow.tsx'
+import type { WebSearchRowComponentProps, WebSearchRowState } from '../src/client/WebSearchRow.tsx'
 import { en, type WebSearchLocaleKey } from '../src/client/locales.ts'
 
 afterEach(() => {
@@ -10,15 +10,15 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-const t = (key: WebSearchLocaleKey, params?: Record<string, unknown>): string => {
-  let text = en[key]
+const t = ((key: WebSearchLocaleKey, params?: Record<string, unknown>) => {
+  let text: string = en[key]
   for (const [name, value] of Object.entries(params ?? {})) text = text.replaceAll(`{${name}}`, String(value))
   return text
-}
+}) as WebSearchRowComponentProps['t']
 
 const READY: WebSearchRowState = {
   status: 'ready',
-  snapshot: { enabled: true, keyConfigured: true },
+  snapshot: { enabled: true, keyConfigured: true, keyRef: 'env:DEEPSEEK_API_KEY' },
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve(value: T): void; reject(error: unknown): void } {

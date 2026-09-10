@@ -416,7 +416,7 @@ export class ThreadGateway extends TypertRemoteService {
       if (outcome.kind === 'accepted') {
         const agent = this.ctx.agents.get(SessionId(link.targetSessionId))
         if (agent !== undefined) {
-          const event = asPurityEvents(agent.session.events).find(item => item.seq === outcome.eventSeq)
+          const event = asPurityEvents(agent.session.snapshotEvents()).find(item => item.seq === outcome.eventSeq)
           if (event?.type !== 'session/title' || (event.data as { title?: unknown }).title !== outcome.title) {
             const unknown: ThreadLink = {
               ...link,
@@ -518,7 +518,7 @@ export class ThreadGateway extends TypertRemoteService {
         return { ok: false, error: 'target-identity-conflict', link: copyLink(diverged) }
       }
 
-      const events = asPurityEvents(agent.session.events)
+      const events = asPurityEvents(agent.session.snapshotEvents())
       // Title adoption: a rename response may have been lost (pending/unknown);
       // the target log's latest session/title is authoritative. Display-only,
       // so this never gates anything.
@@ -606,7 +606,7 @@ export class ThreadGateway extends TypertRemoteService {
       // first inbox mutation) and idempotent for an identical selection.
       if (submitting.model !== null) {
         const selection = submitting.model
-        const already = agent.session.events.some(event => (
+        const already = agent.session.snapshotEvents().some(event => (
           event.type === 'model/selection'
           && event.data.provider === selection.provider
           && event.data.model === selection.model
@@ -714,7 +714,7 @@ export class ThreadGateway extends TypertRemoteService {
       if (!request.draftId.startsWith(`header-${request.sourceSessionId}-`)) return 'draft-not-found'
       const agent = this.ctx.agents.get(SessionId(request.sourceSessionId))
       if (agent === undefined) return 'source-not-live'
-      const boundary = agent.session.events.findLast(event => (
+      const boundary = agent.session.snapshotEvents().findLast(event => (
         event.type === 'turn/end' && isFinalThreadDraftReason(event.data.reason.kind)
       ))
       if (boundary?.type !== 'turn/end') return 'source-has-no-complete-turn'
@@ -793,7 +793,7 @@ export class ThreadGateway extends TypertRemoteService {
    */
   private adoptTitleFromLog(link: ThreadLink, agent: Agent): ThreadLink {
     if (link.title.phase !== 'pending' && link.title.phase !== 'unknown') return link
-    const titles = asPurityEvents(agent.session.events)
+    const titles = asPurityEvents(agent.session.snapshotEvents())
       .filter(event => event.type === 'session/title') as Array<PurityEvent & { data: { title: string } }>
     const last = titles[titles.length - 1]
     if (last === undefined) return link
@@ -884,7 +884,7 @@ export class ThreadGateway extends TypertRemoteService {
     const sourceSessionId = String(session.id)
     for (const [draftId, draft] of table.entries()) {
       if (draft.sourceSessionId !== sourceSessionId || draft.status !== 'waiting-boundary') continue
-      const next = sealThreadDraftBoundary(draft, session.events, Date.now())
+      const next = sealThreadDraftBoundary(draft, session.snapshotEvents(), Date.now())
       if (next !== draft) await table.put(draftId, next)
     }
   }

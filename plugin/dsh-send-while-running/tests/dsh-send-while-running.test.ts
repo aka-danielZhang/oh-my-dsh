@@ -5,6 +5,9 @@ import { apply as clientApply, inject } from '../src/client/index.ts'
 import { stopButtonVisible } from '../src/client/facts.ts'
 import type { InputFacts, SessionFacts } from '../src/client/facts.ts'
 import { StopWhileRunningButton } from '../src/client/send-button.tsx'
+import type { StopWhileRunningProps } from '../src/client/send-button.tsx'
+import type { SessionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
+import type { InputState } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { installStopWhileRunningCss, stopWhileRunningCss } from '../src/client/stylesheet.ts'
 
 test('host half exports a loadable surface entry', () => {
@@ -23,10 +26,10 @@ const idleSession: SessionFacts = { running: false, subagent: null, removed: fal
 const runningSession: SessionFacts = { running: true, subagent: null, removed: false }
 const continuableSession: SessionFacts = { running: true, subagent: { address: { mode: 'continuable' } }, removed: false }
 const removedSession: SessionFacts = { running: true, subagent: null, removed: true }
-const emptyInput: InputFacts = { draft: '', imageIds: [] }
-const textInput: InputFacts = { draft: 'follow-up', imageIds: [] }
-const whitespaceInput: InputFacts = { draft: '   \n\t ', imageIds: [] }
-const imageOnlyInput: InputFacts = { draft: '', imageIds: ['img-1'] }
+const emptyInput: InputFacts = { draft: '', attachmentIds: [] }
+const textInput: InputFacts = { draft: 'follow-up', attachmentIds: [] }
+const whitespaceInput: InputFacts = { draft: '   \n\t ', attachmentIds: [] }
+const attachmentOnlyInput: InputFacts = { draft: '', attachmentIds: ['att-1'] }
 
 test('button is invisible while the session is not running (stock primary is the Stop)', () => {
   assert.equal(stopButtonVisible(idleSession, textInput), false)
@@ -37,9 +40,9 @@ test('button is invisible without draft content (stock primary is the Stop)', ()
   assert.equal(stopButtonVisible(runningSession, whitespaceInput), false)
 })
 
-test('button is visible for a running ordinary session with text or images (stock primary stays Send)', () => {
+test('button is visible for a running ordinary session with text or attachments (stock primary stays Send)', () => {
   assert.equal(stopButtonVisible(runningSession, textInput), true)
-  assert.equal(stopButtonVisible(runningSession, imageOnlyInput), true)
+  assert.equal(stopButtonVisible(runningSession, attachmentOnlyInput), true)
 })
 
 test('button stays off continuable child sessions (their independent Stop is stock)', () => {
@@ -50,25 +53,69 @@ test('button is invisible on removed sessions', () => {
   assert.equal(stopButtonVisible(removedSession, textInput), false)
 })
 
-test('component renders null when shares are absent', () => {
-  assert.equal(StopWhileRunningButton({}), null)
-})
+/** Hook stubs matching the framework seats the slot serves the component. */
+function snapshotOf(facts: SessionFacts): SessionSnapshot {
+  return {
+    sessionId: 's1' as SessionSnapshot['sessionId'],
+    queue: [],
+    pendingSubmissions: [],
+    openState: 'open',
+    openError: null,
+    hasMore: false,
+    loadingOlder: false,
+    promptError: null,
+    blank: false,
+    lastAgentError: null,
+    promptAttempted: true,
+    awaitingFirstTurn: false,
+    running: facts.running,
+    removed: facts.removed,
+    subagent: facts.subagent as SessionSnapshot['subagent'],
+  }
+}
+
+function inputOf(facts: InputFacts): InputState {
+  return {
+    draft: facts.draft,
+    attachmentIds: facts.attachmentIds as InputState['attachmentIds'],
+    draftRev: 0,
+    phase: 'plain',
+    occurrences: [],
+    queue: [],
+  }
+}
+
+function mountProps(session: SessionFacts, input: InputFacts): StopWhileRunningProps {
+  const snapshot = snapshotOf(session)
+  const state = inputOf(input)
+  // Seats this component never reads get trivial stubs; the two it does
+  // (useSession, useInput) serve the real snapshot/state objects.
+  const unused = (() => undefined) as never
+  return {
+    sessionId: snapshot.sessionId,
+    useSession: selector => selector(snapshot),
+    useInput: selector => selector(state),
+    useProjection: unused as StopWhileRunningProps['useProjection'],
+    useConversation: unused as StopWhileRunningProps['useConversation'],
+    inputActions: {} as StopWhileRunningProps['inputActions'],
+    useSessions: unused as StopWhileRunningProps['useSessions'],
+    useSessionPendingInteraction: unused as StopWhileRunningProps['useSessionPendingInteraction'],
+    useWorkspaces: unused as StopWhileRunningProps['useWorkspaces'],
+    interrupt: () => { /* the cancel path is exercised in the browser */ },
+    t: (key => `t:${key}`) as StopWhileRunningProps['t'],
+  }
+}
 
 test('component renders null when the visibility terms fail', () => {
-  assert.equal(StopWhileRunningButton({
-    session: idleSession,
-    input: textInput,
-    interrupt: () => { /* unreachable in this render test */ },
-  }), null)
+  assert.equal(StopWhileRunningButton(mountProps(idleSession, textInput)), null)
+  assert.equal(StopWhileRunningButton(mountProps(runningSession, emptyInput)), null)
 })
 
-test('component renders the stop affordance with the injected interrupt verb', () => {
-  const element = StopWhileRunningButton({
-    session: runningSession,
-    input: textInput,
-    interrupt: () => { /* the cancel path is exercised in the browser */ },
-  })
+test('component renders the stop affordance for the running ordinary draft state', () => {
+  const element = StopWhileRunningButton(mountProps(runningSession, textInput))
   assert.notEqual(element, null)
+  const button = element as { props: { 'aria-label'?: string } }
+  assert.equal(button.props['aria-label'], 't:stop.label')
 })
 
 test('stylesheet targets only documented seams and stays scoped', () => {
