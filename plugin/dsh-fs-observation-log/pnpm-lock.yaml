@@ -8,7 +8,7 @@ overrides:
   '@deepseek-ai/dsh-acp': 0.1.5-rc.1
   '@deepseek-ai/dsh-api-gateway': 0.1.5-rc.1
   '@deepseek-ai/dsh-api-remotes': 0.1.5-rc.1
-  '@deepseek-ai/dsh-api-session-controller': npm:@crazx/dsh-api-session-controller@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh-api-session-controller': npm:@crazx/dsh-api-session-controller@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-api-settings-controller': 0.1.5-rc.1
   '@deepseek-ai/dsh-api-workspace-controller': 0.1.5-rc.1
   '@deepseek-ai/dsh-api-workspace-files': 0.1.5-rc.1
@@ -26,7 +26,7 @@ overrides:
   '@deepseek-ai/dsh-client-file-upload': 0.1.5-rc.1
   '@deepseek-ai/dsh-client-hmr': 0.1.5-rc.1
   '@deepseek-ai/dsh-client-locale': 0.1.5-rc.1
-  '@deepseek-ai/dsh-client-modules': npm:@crazx/dsh-client-modules@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh-client-modules': npm:@crazx/dsh-client-modules@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-client-resources': 0.1.5-rc.1
   '@deepseek-ai/dsh-client-store': 0.1.5-rc.1
   '@deepseek-ai/dsh-client-ui-agent-preset': 0.1.5-rc.1
@@ -35,7 +35,7 @@ overrides:
   '@deepseek-ai/dsh-client-ui-brand-official': 0.1.5-rc.1
   '@deepseek-ai/dsh-client-ui-chat': 0.1.5-rc.1
   '@deepseek-ai/dsh-client-ui-commands': 0.1.5-rc.1
-  '@deepseek-ai/dsh-client-ui-conversation': npm:@crazx/dsh-client-ui-conversation@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh-client-ui-conversation': npm:@crazx/dsh-client-ui-conversation@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-client-ui-deliverables': 0.1.5-rc.1
   '@deepseek-ai/dsh-client-ui-directory-picker-browse': 0.1.5-rc.1
   '@deepseek-ai/dsh-client-ui-directory-picker-native': 0.1.5-rc.1
@@ -43,9 +43,9 @@ overrides:
   '@deepseek-ai/dsh-client-ui-goal': 0.1.5-rc.1
   '@deepseek-ai/dsh-client-ui-input-trigger': 0.1.5-rc.1
   '@deepseek-ai/dsh-client-ui-jobs': 0.1.5-rc.1
-  '@deepseek-ai/dsh-client-ui-layout': npm:@crazx/dsh-client-ui-layout@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh-client-ui-layout': npm:@crazx/dsh-client-ui-layout@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-client-ui-message-feedback': 0.1.5-rc.1
-  '@deepseek-ai/dsh-client-ui-model-selection': npm:@crazx/dsh-client-ui-model-selection@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh-client-ui-model-selection': npm:@crazx/dsh-client-ui-model-selection@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-client-ui-open-in-app': 0.1.5-rc.1
   '@deepseek-ai/dsh-client-ui-permission-presets': 0.1.5-rc.1
   '@deepseek-ai/dsh-client-ui-plan': 0.1.5-rc.1
@@ -77,7 +77,7 @@ overrides:
   '@deepseek-ai/dsh-code-runtime-worker-thread': 0.1.5-rc.1
   '@deepseek-ai/dsh-command-compact': 0.1.5-rc.1
   '@deepseek-ai/dsh-compaction': 0.1.5-rc.1
-  '@deepseek-ai/dsh-compaction-basic': npm:@crazx/dsh-compaction-basic@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh-compaction-basic': npm:@crazx/dsh-compaction-basic@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-compaction-tool-result-pruner': 0.1.5-rc.1
   '@deepseek-ai/dsh-agent-instructions': 0.1.5-rc.1
   '@deepseek-ai/dsh-file-reference': 0.1.5-rc.1
@@ -86,7 +86,7 @@ overrides:
   '@deepseek-ai/dsh-time-context': 0.1.5-rc.1
   '@deepseek-ai/dsh-tmux-context': 0.1.5-rc.1
   '@deepseek-ai/dsh-agent': 0.1.5-rc.1
-  '@deepseek-ai/dsh-agent-default-model': npm:@crazx/dsh-agent-default-model@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh-agent-default-model': npm:@crazx/dsh-agent-default-model@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-agent-loop': 0.1.5-rc.1
   '@deepseek-ai/dsh-agent-tool-presentation': 0.1.5-rc.1
   '@deepseek-ai/dsh-scope': 0.1.5-rc.1
@@ -110,7 +110,7 @@ overrides:
   '@deepseek-ai/dsh-experimental-webworker-runtime': 0.1.5-rc.1
   '@deepseek-ai/dsh-cordis-client-runner': 0.1.5-rc.1
   '@deepseek-ai/dsh-cordis-host-runner': 0.1.5-rc.1
-  '@deepseek-ai/dsh-tool-cordis': npm:@crazx/dsh-tool-cordis@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh-tool-cordis': npm:@crazx/dsh-tool-cordis@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-client-ui-cordis': 0.1.5-rc.1
   '@deepseek-ai/dsh-command-feedback': 0.1.5-rc.1
   '@deepseek-ai/dsh-message-feedback': 0.1.5-rc.1
@@ -128,7 +128,7 @@ overrides:
   '@deepseek-ai/dsh-tool-goal': 0.1.5-rc.1
   '@deepseek-ai/dsh-repeat-tool-reminder': 0.1.5-rc.1
   '@deepseek-ai/dsh-tool-call-timeout-policy': 0.1.5-rc.1
-  '@deepseek-ai/dsh-todo-completion-guard': npm:@crazx/dsh-todo-completion-guard@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh-todo-completion-guard': npm:@crazx/dsh-todo-completion-guard@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-hook-protocol': 0.1.5-rc.1
   '@deepseek-ai/dsh-hooks-claude-code': 0.1.5-rc.1
   '@deepseek-ai/dsh-hooks-codex': 0.1.5-rc.1
@@ -136,7 +136,7 @@ overrides:
   '@deepseek-ai/dsh-host-directory-picker-auto': 0.1.5-rc.1
   '@deepseek-ai/dsh-host-directory-picker-browse': 0.1.5-rc.1
   '@deepseek-ai/dsh-host-directory-picker-native': 0.1.5-rc.1
-  '@deepseek-ai/dsh-host-frontend-static': npm:@crazx/dsh-host-frontend-static@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh-host-frontend-static': npm:@crazx/dsh-host-frontend-static@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-host-open-in-app': 0.1.5-rc.1
   '@deepseek-ai/dsh-host-plugin-inventory': 0.1.5-rc.1
   '@deepseek-ai/dsh-host-webserver': 0.1.5-rc.1
@@ -152,14 +152,14 @@ overrides:
   '@deepseek-ai/dsh-deepseek-llm-api-extensions': 0.1.5-rc.1
   '@deepseek-ai/dsh-llm': 0.1.5-rc.1
   '@deepseek-ai/dsh-llm-deepseek': 0.1.5-rc.1
-  '@deepseek-ai/dsh-llm-pi-ai': npm:@crazx/dsh-llm-pi-ai@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh-llm-pi-ai': npm:@crazx/dsh-llm-pi-ai@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-llm-retry': 0.1.5-rc.1
   '@deepseek-ai/dsh-plugin-package-inventory-deepseek': 0.1.5-rc.1
   '@deepseek-ai/dsh-token-meter': 0.1.5-rc.1
   '@deepseek-ai/dsh-lsp': 0.1.5-rc.1
   '@deepseek-ai/dsh-lsp-stdio': 0.1.5-rc.1
   '@deepseek-ai/dsh-tool-lsp': 0.1.5-rc.1
-  '@deepseek-ai/dsh-mcp-client': npm:@crazx/dsh-mcp-client@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh-mcp-client': npm:@crazx/dsh-mcp-client@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-plan-mode': 0.1.5-rc.1
   '@deepseek-ai/dsh-agent-presets': 0.1.5-rc.1
   '@deepseek-ai/dsh-persona': 0.1.5-rc.1
@@ -235,7 +235,7 @@ overrides:
   '@deepseek-ai/dsh-terminal-bash': 0.1.5-rc.1
   '@deepseek-ai/dsh-tool-terminal': 0.1.5-rc.1
   '@deepseek-ai/dsh-agent-loop-testkit': 0.1.5-rc.1
-  '@deepseek-ai/dsh-client-test-runtime': npm:@crazx/dsh-client-test-runtime@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh-client-test-runtime': npm:@crazx/dsh-client-test-runtime@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-llm-mock-server': 0.1.5-rc.1
   '@deepseek-ai/dsh-llm-replay': 0.1.5-rc.1
   '@deepseek-ai/dsh-loader-smoke': 0.1.5-rc.1
@@ -273,7 +273,7 @@ overrides:
   '@deepseek-ai/dsh-workflow': 0.1.5-rc.1
   '@deepseek-ai/dsh-workflow-worker-thread': 0.1.5-rc.1
   '@deepseek-ai/dsh-workspace': 0.1.5-rc.1
-  '@deepseek-ai/dsh': npm:@crazx/dsh@0.1.5-rc.1.zw.1
+  '@deepseek-ai/dsh': npm:@crazx/dsh@0.1.5-rc.1.zw.2
   '@deepseek-ai/dsh-desktop': 0.1.5-rc.1
   '@deepseek-ai/dsh-desktop-host': 0.1.5-rc.1
   '@deepseek-ai/dsh-web-frontend': 0.1.5-rc.1
@@ -682,89 +682,105 @@ packages:
     resolution: {integrity: sha512-0DaL0A6Xu6sQSQFwe4iVCrKWU2cCTItnRsYsCdxAMm9NF6twAA9BKnoqy4hqz4+azQ0JHuA26qiUKsf1XJ/v5A==}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-libvips-linux-arm@1.3.3':
     resolution: {integrity: sha512-3rbU4vqXXc3hY/OiXdl52xZvT0F1yEngWfvqudtPJg/KkyiaQw2DRsFrNzpmLvfavbwOq3qXn36GP8obHRULQA==}
     cpu: [arm]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-libvips-linux-ppc64@1.3.3':
     resolution: {integrity: sha512-cdn1OvUBwsXhbC0zSzJnNzf5MZ/mTrobawDvNXBTxe8VtqKAm0sRuEY2Evzovb/w9JMk4TvRxqt1mekSuJz64w==}
     cpu: [ppc64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-libvips-linux-riscv64@1.3.3':
     resolution: {integrity: sha512-HjPVx7yKz+0lqdhDlTw1tt90wamBoxhiXpvl1XZpJLiHH4RCJ5yDTqH+VlYPv2fwFs89JFw4c1IexYOcQUi4IQ==}
     cpu: [riscv64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-libvips-linux-s390x@1.3.3':
     resolution: {integrity: sha512-neWLh+3yCNThxnfy3c4BbVBeGgt9aftno+XbT56iK28RgeDs3UOFWviLWlUu0bArYVYJaFDK+RRohbicUNCm8Q==}
     cpu: [s390x]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-libvips-linux-x64@1.3.3':
     resolution: {integrity: sha512-4vKmvAst9nrowcqquKFAyZJUDolUaIp8uRiN0mWFguJ1IplC9/pitXtlnnlU4aa/eJw3J7i67V+pwUL+wZGdsA==}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-libvips-linuxmusl-arm64@1.3.3':
     resolution: {integrity: sha512-Y9kQaLMuNoB0bPYOOdcZMaseNrFpPodIWWMrx+CZyydf2xn68j9WYc6sWWRrDwNkzCQjKYfc68L7jKjGlHMibw==}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@img/sharp-libvips-linuxmusl-x64@1.3.3':
     resolution: {integrity: sha512-fj8Mv0HHfD1Rr+4I68+3agJynxDWtBFgicTbSOb9Bke6pIwzGcJ+RX/yHjmiEGFMCavY/dxvem7MyNaJF+wDiw==}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@img/sharp-linux-arm64@0.35.4':
     resolution: {integrity: sha512-De4jpEnAU8Hd5oT0j1G3uL4ZvTuipVMn7YC6vPaJhy6/7EwEae0SVAoBrUMYQbkLGDm85taVWwuPc1a44LTzCQ==}
     engines: {node: '>=20.9.0'}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-linux-arm@0.35.4':
     resolution: {integrity: sha512-7OAS8gI0EReKGVN2HssHlM6umJgxF5VI3xN0p9FA91p/YO+ou5hiNghLdZ5BEHztwaaK5+bLKRf8x/o2L2nk9A==}
     engines: {node: '>=20.9.0'}
     cpu: [arm]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-linux-ppc64@0.35.4':
     resolution: {integrity: sha512-2oYZJeIl4kCcMGk4ouZVjnkCtFrpQFlNEtJ6GbxzhHQchwH0NH/qEb9ykmOl29dqwMq+JhFdZn+1ak2FKhI9fQ==}
     engines: {node: '>=20.9.0'}
     cpu: [ppc64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-linux-riscv64@0.35.4':
     resolution: {integrity: sha512-cPbNChoRURAWdebDIHSenxRpgEdy7JkPydSnUxRm9VvKD7m0/xVaR/8Fzlu81pk5nHEvHH87UZUA7cTtwnbJSA==}
     engines: {node: '>=20.9.0'}
     cpu: [riscv64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-linux-s390x@0.35.4':
     resolution: {integrity: sha512-RY0JFY8Fd6RonCBtHz+DvadaPkXDSI1AUn6yWL9TipqkZ1vY8w8evqdgyDFnkm4/K1ve1TvZiaePP5oSd4+WVQ==}
     engines: {node: '>=20.9.0'}
     cpu: [s390x]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-linux-x64@0.35.4':
     resolution: {integrity: sha512-9qvvEAuk8k89TfWUoX2htWjbAMX8p+NxCppjpcg5k6xMsjhBQPTsoIh36h9Qde4WRuGpJeYnOjdosDn/cnv+OA==}
     engines: {node: '>=20.9.0'}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@img/sharp-linuxmusl-arm64@0.35.4':
     resolution: {integrity: sha512-KB5jxpfWQTr0nc3xdHtWChdbifHrBGsd2SM62Eyxrl8afikm+f5qGBU75SJIZBT/S1MC8XyacdlXBMSWq6OURA==}
     engines: {node: '>=20.9.0'}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@img/sharp-linuxmusl-x64@0.35.4':
     resolution: {integrity: sha512-f+eZJZIQNEEd26RPSW+76chwOf1XtA2Y/O+5ocVyLliHkeih3e+jhLVBdNTd2rS3IbNXK8+ug93Vf5ZXtF5Lxg==}
     engines: {node: '>=20.9.0'}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@img/sharp-wasm32@0.35.4':
     resolution: {integrity: sha512-zQnl4Kwp7Q6NHsENtU2T/00Zi+w3AQNwz3+UaTyVBy2FpXrzXzGjndpK61onhZjRtRpQXxCTeqw19bVyXOh7jA==}
@@ -930,36 +946,42 @@ packages:
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@rolldown/binding-linux-arm64-musl@1.2.8':
     resolution: {integrity: sha512-jFJTifHnNPY+yzOoNZQfSIysrVyXzEQPhPnOUjmD1bcQGHH6s7c8cViKWar8YplQImE5N9JRqMCLrM2CdxOrZA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@rolldown/binding-linux-ppc64-gnu@1.2.8':
     resolution: {integrity: sha512-FhiOziBDWPBjbcmRzfLyIJnaP7AVMFXT7YCXPjXxj7wKU3vx24RjrCNN/zjvVa+N2vVoHJwCoUBvsrN/DG3zIA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [ppc64]
     os: [linux]
+    libc: [glibc]
 
   '@rolldown/binding-linux-s390x-gnu@1.2.8':
     resolution: {integrity: sha512-WnHfADMzOV2Y55wlx1hzzQnar/wDt/VdvWSD99r18Mz9ylNieIGOkRx3UV21h7m/eJvjySYJkO26VvGNFkwsIQ==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [s390x]
     os: [linux]
+    libc: [glibc]
 
   '@rolldown/binding-linux-x64-gnu@1.2.8':
     resolution: {integrity: sha512-H9tRr5ibfXFVLxbPOseVewewFpl28zcEdjRDt2FTUZU7odxP0gEv1ki4/kGmcGOh78oRwZuuQllGLZ9zTJp84g==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@rolldown/binding-linux-x64-musl@1.2.8':
     resolution: {integrity: sha512-UefiqfM3D6IVNlZ8tSGs9+Ejjud2T+oxO0IHADU45Y+lyEjD2dVFyZHbkfX0LUb5Zugo/oIv1eCO/KVYhgYJYA==}
     engines: {node: ^20.19.0 || >=22.12.0}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@rolldown/binding-openharmony-arm64@1.2.8':
     resolution: {integrity: sha512-637Ke4kWSy6rp9cxQ9gMOXlxPgIw/c1beASV4M//3+9I4uwBVOOl74G+e3zyU3u19U7RkRl/HuewixZ/Z6+Rjg==}
@@ -1012,31 +1034,37 @@ packages:
     resolution: {integrity: sha512-rr1srFLlPAmC1vtxfc9C1YLDe3iH09YjfSeeIidBqKhzx1MATjOAq4mjlRUOnhr/L27MotWIYOFKwVsd5JZFOg==}
     cpu: [arm]
     os: [linux]
+    libc: [glibc]
 
   '@yuku-codegen/binding-linux-arm-musl@0.8.7':
     resolution: {integrity: sha512-eAufXh8qBRpiSO6ueaMDL+yyoXIGLhpUce72YbcACtZU2qhExwBIJyEtQf5kH2Ki0X2aqkSjSfog4OPtKXan3Q==}
     cpu: [arm]
     os: [linux]
+    libc: [musl]
 
   '@yuku-codegen/binding-linux-arm64-gnu@0.8.7':
     resolution: {integrity: sha512-gw4w6wPoHObBrdIC4duVWLmJOvpdE25j5D7yrM5mACNlK4klRz/lv8hK+ssQk9EJHBgZjSaqZIJVFgqNYbfv7A==}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@yuku-codegen/binding-linux-arm64-musl@0.8.7':
     resolution: {integrity: sha512-L68N6Y4XkqcIaKo3Ra88JEvBEH4AHff44A4INcrxeVWZ8CZtu2tCpfVxe3hR8qQQMcvBSQlDn24KpkCKEhVvfA==}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@yuku-codegen/binding-linux-x64-gnu@0.8.7':
     resolution: {integrity: sha512-dzyAbltJmf3Cqlb8HcFuYIf5Yn0fl1vTr3XJ9HiVNNvOlhqPSArOqtw9vI1p6/VTXTjrMLXlU+s+/kNHiIy/Cw==}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@yuku-codegen/binding-linux-x64-musl@0.8.7':
     resolution: {integrity: sha512-Otw4MH3404q0Bbvl+YTdW9aoUV5vXmUw8260bWvt1XlaoIX/ceSgI4ygheRDMfBPoHt6FDayQaO9OLVUZAgkFA==}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@yuku-codegen/binding-win32-arm64@0.8.7':
     resolution: {integrity: sha512-qo/jyrzryiBuKEsFiuWaBCBe3tRMynQ0qFWFgOEjcCMQeZfBm+wKiVEUEFXXLc7bh8YezguAWp0Mtnhq4ARNyA==}
@@ -1072,31 +1100,37 @@ packages:
     resolution: {integrity: sha512-kTYwJQQgmZeAWdDIWabiReIZMpmfLueIj1tCmjStUtFGhR1Z0qwxonKVfUC4N7h/VhGGzLZ//7O1kgt1QKqgCg==}
     cpu: [arm]
     os: [linux]
+    libc: [glibc]
 
   '@yuku-parser/binding-linux-arm-musl@0.8.7':
     resolution: {integrity: sha512-uL4jE8HPT2BLlxAXyD10LqgPuXa9eDa0BKpCdSANmzIJghq/2eZo3/gQNtaxPZMupWoxjYzSad9IXrwu7aYPXQ==}
     cpu: [arm]
     os: [linux]
+    libc: [musl]
 
   '@yuku-parser/binding-linux-arm64-gnu@0.8.7':
     resolution: {integrity: sha512-3gVN4pWSKZmXiNX7cU164dR9MPvesCHnlH6nPfpK+yQsCuYphjKKplcb4SnZBrhiqmXbgb2HR0c2TS0IZUPhgA==}
     cpu: [arm64]
     os: [linux]
+    libc: [glibc]
 
   '@yuku-parser/binding-linux-arm64-musl@0.8.7':
     resolution: {integrity: sha512-S0mwfEjoLpxzXeZw802Wa4RaELsQiPtWqG6INcy8j4GtvNFtl4LCX3eGO1XLn9pyLAISLzTRyU3zUCBUPin8lg==}
     cpu: [arm64]
     os: [linux]
+    libc: [musl]
 
   '@yuku-parser/binding-linux-x64-gnu@0.8.7':
     resolution: {integrity: sha512-lnbWdPmerE5D1uH1G4IEZKnPzCrWCStRGrtgpSIe1RibAo5bZIjDbbbPYXmMHCEh4F+x/JaJpElh26a3r+BPbg==}
     cpu: [x64]
     os: [linux]
+    libc: [glibc]
 
   '@yuku-parser/binding-linux-x64-musl@0.8.7':
     resolution: {integrity: sha512-769uwndMvMzUvATWbAcEvyLHKA+DzhHSCl/obBUrRdYfRo26yxui6S8y3z7uJ+Naup7UKrDxrpK7OnQkxkl9KQ==}
     cpu: [x64]
     os: [linux]
+    libc: [musl]
 
   '@yuku-parser/binding-win32-arm64@0.8.7':
     resolution: {integrity: sha512-mEB/9PlaAkisJ6KWGz0zvywXoU6+80dTlR2LwS7s/jcXXoU6fm2+sitBZXtqu3+Q4DcDgPxM45uWMCzPs0TSRw==}
@@ -1306,8 +1340,8 @@ packages:
   yuku-parser@0.8.7:
     resolution: {integrity: sha512-vRD9nwt4L3aYpxNqeSC4WqLv58xrXef0Ong1Mc45CTXTIpvLafx7JO05sczmQZwdLEZvywrLOGdNC5+Rp5N1BQ==}
 
-  zod@4.6.1:
-    resolution: {integrity: sha512-341aRWQsve0rvronKNTqZpjmzdbUDlFuzHaI/XLg/Ej82qffDJRRfBTCuv7+9q/rMjB6LSLyEBnW4InJeMtt/Q==}
+  zod@4.6.2:
+    resolution: {integrity: sha512-lh5RCAGFa1Cm2hjtNwLQhSs/AsqdWnTQaBER9fEwN/88pSh7KOtJavtBx/0VlkN/uFd61SwYmljLMDAsHlvzBQ==}
 
 snapshots:
 
@@ -1370,7 +1404,7 @@ snapshots:
       '@deepseek-ai/dsh-util-crypto': 0.1.5-rc.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-util-values': 0.1.5-rc.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/schemastery': 3.18.2
-      zod: 4.6.1
+      zod: 4.6.2
 
   '@deepseek-ai/dsh-permission-presets@0.1.5-rc.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-invariants@0.1.5-rc.1(@deepseek-ai/cordis@4.0.2))(@deepseek-ai/dsh-sandbox@0.1.5-rc.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-llm@0.1.5-rc.1(@deepseek-ai/cordis@4.0.2)))':
     dependencies:
@@ -1378,7 +1412,7 @@ snapshots:
       '@deepseek-ai/dsh-invariants': 0.1.5-rc.1(@deepseek-ai/cordis@4.0.2)
       '@deepseek-ai/dsh-sandbox': 0.1.5-rc.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-llm@0.1.5-rc.1(@deepseek-ai/cordis@4.0.2))
       '@deepseek-ai/schemastery': 3.18.2
-      zod: 4.6.1
+      zod: 4.6.2
 
   '@deepseek-ai/dsh-sandbox@0.1.5-rc.1(@deepseek-ai/cordis@4.0.2)(@deepseek-ai/dsh-llm@0.1.5-rc.1(@deepseek-ai/cordis@4.0.2))':
     dependencies:
@@ -2070,4 +2104,4 @@ snapshots:
       '@yuku-parser/binding-win32-arm64': 0.8.7
       '@yuku-parser/binding-win32-x64': 0.8.7
 
-  zod@4.6.1: {}
+  zod@4.6.2: {}

@@ -215,7 +215,9 @@ for (const name of fixed) {
   // Overrides live in pnpm-workspace.yaml: pnpm 11+ no longer reads the
   // package.json `pnpm` field, and 10.x reads the yaml form as well.
   const workspacePath = resolve(pkgPath, '..', 'pnpm-workspace.yaml')
-  const overrideBlock = ['overrides:',
+  const overrideBlock = ['autoInstallPeers: false', 'minimumReleaseAge: 0', 'allowBuilds:',
+    '  esbuild: true', '  koffi: true', '  node-pty: true',
+    'overrides:',
     ...Object.entries(dshOverrides(sources ?? new Map(), name)).map(([dep, version]) => `  '${dep}': ${version}`),
   ].join('\n')
   if (existsSync(workspacePath)) {
