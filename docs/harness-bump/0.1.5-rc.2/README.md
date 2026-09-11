@@ -33,5 +33,5 @@
 
 - 版本钉全树 bump：35 个 manifest/pnpm-workspace/scripts 文件 `0.1.5-rc.1`→`0.1.5-rc.2`（official）、`0.1.5-rc.1.zw.2`→`0.1.5-rc.2.zw.1`（@crazx 面）；`source-deps.mjs` OFFICIAL/FORK 常量同步；17 个插件 lockfile 按 pnpm 11.7 再生。
 - 插件零代码改动（plugins:check 全绿确认）；无插件 tag。
-- 验证：`plugins:check` 15 插件 typecheck+test+build EXIT:0；`prepare-runtime.mjs` 本地组装成功（内置漂移/重复/基线扫描全过）；desktop:typecheck/test 通过。
-- 桌面发版：`v0.3.0-rc.52`。
+- 验证：`plugins:check` 17 插件 typecheck+test+build EXIT:0（dsh-usage-stats 的浏览器测试需先 `pnpm run build` 产出 `lib/client.js`，全新 worktree 首跑会因无产物 ENOENT——已记入 playbook 备忘）；`prepare-runtime.mjs` 本地组装成功（276 个未改包钉 rc.2、fork 集走 @crazx、漂移/重复/基线扫描全过）；desktop:typecheck 通过、desktop:test 141/141。
+- 桌面发版：`v0.3.0-rc.52`（CHANGELOG 增条目；`release.yml` 构建公证中）。
