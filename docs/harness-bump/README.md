@@ -7,7 +7,9 @@
 ## 0. worktree 纪律（硬性，fork 仓与本仓一致）
 
 - **一切修改不在主 checkout 直接进行**。在仓库同级目录建 worktree：`git worktree add -b feature/<topic> ../<repo>-<topic>`。目录名 `<repo>-<topic>`、分支名 `feature/<topic>`，两仓 topic 一致，建议 `upstream-<新基线去 v 前缀>`（如 `upstream-0.1.5-rc.2`）；同名分支已存在（重试场景）则去掉 `-b` 复用。禁止仓内嵌套 worktree；清理只走 `git worktree remove`，禁止 `rm -rf`。
-- **worktree 依赖独立**：进入后各自按包内流程 `pnpm install`（fork 仓在根装、本仓跑 `plugin:setup` + 各插件装），再构建与测试。
+- **worktree 依赖独立**：进入后各自按包内流程 `pnpm install`（fork 仓在根装、本仓跑 `plugin:setup` + 各插件装），再构建与测试。两个全新 worktree 已知坑：fork 仓的 `native/system` 需单独 `pnpm build:native`，否则 `llm-retry` persistence 测试报缺 `system.node`；本仓的 `dsh-usage-stats` 浏览器测试吃构建产物 `lib/client.js`，`plugins:check` 前先跑一次该插件 `pnpm run build`（主 checkout 靠 gitignore 的旧产物掩盖了这一步）。
+
+- **合并陈旧远端分支后必须立刻全树 typecheck + 受影响包测试**（0.1.5-rc.2 轮教训）：`git merge -X ours` 只裁决内容冲突，**可自动合并的旧代码 hunk 照样混入**——fork 旧 master 对齐时污染了 41+ 源文件，`publish-fork --list` 与文档配对检查均无法发现，最终靠 pre-push typecheck 拦截。
 - **worktree 内读写（含本目录的 `<基线>/README.md` 落地记录与 `docs/notes/` 决策记录）一律落在 worktree**，不把主仓 checkout 当事实源；跨 worktree 只经 git（分支/合并），不直接互拷文件。
 - **发布动作（npm publish、打 tag、push tag）一律在合并回 main 之后、在 main 上执行**；绝不从 worktree 分支直接发版。
 - **清理有门槛**：合并且发布全部成功后才 `git worktree remove ../<repo>-<topic>` + `git worktree prune`；任何失败保留 worktree 现场并报告其路径与分支名，便于人工接手。
@@ -23,7 +25,7 @@
 1. 在 fork 仓建 worktree（§0）。
 2. fetch upstream → 在 worktree 分支 merge 上游新 tag → 解决冲突时**保留全部 zw 补丁** → worktree 内装依赖、跑聚焦测试（根 typecheck、client 聚合、`test:gui`、`test:web` replay、compaction 等按 FORK.md 与上轮基线记录裁剪）。
 3. 测试全绿后把 worktree 分支合并回 fork main；在 fork main 上按 FORK.md「发布纪律」执行 publish-fork 流程：zw 层号在当前基础上 +1，修改包以 `@crazx/*` 的 `<新基线>.zw.<新层号>` 发 npm。
-4. 在 main 上打 tag `v<新基线>+zw.<新层号>` 并 push，触发 npm 发布；`npm view` 逐一核验新包在线。
+4. 打 tag 前核对发布面每个包的 manifest `version` 已等于新基线（上游 release 提交只 bump 改动过的包，fork 修改面里未被动到的包会停留在旧基线，`publish-fork --base` 会在 CI 上 fail fast——先在本地 `node scripts/publish-fork.mjs --dry-run` 暴露，避免空跑一轮 CI）。随后在 main 上打 tag `v<新基线>+zw.<新层号>` 并 push，触发 npm 发布；`npm view` 逐一核验新包在线（registry 传播有分钟级延迟，逐包确认再进下一阶段）。若 CI 断言失败：修 manifest 后**删除失败 tag 并在修复提交上重打**（fail fast 发生在任何 publish 之前，无半发布态）。
 5. npm 发布失败或测试不过 = 整体中止，不带病进入下一阶段。
 
 ## 3. 本仓：兼容适配
