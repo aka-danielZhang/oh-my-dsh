@@ -109,5 +109,5 @@
     "yaml": "^2.8.1",
     "zod": "4.4.3"
   },
-  "packageManager": "pnpm@10.28.0"
+  "packageManager": "pnpm@11.7.0"
 }

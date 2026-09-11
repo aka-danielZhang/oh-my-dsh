@@ -125,7 +125,7 @@
     "zod": "4.4.3",
     "zustand": "~4.4.7"
   },
-  "packageManager": "pnpm@10.28.0",
+  "packageManager": "pnpm@11.7.0",
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0-rc.7 <5",
     "@deepseek-ai/cordis-plugin-timer": ">=1.1.4 <2",

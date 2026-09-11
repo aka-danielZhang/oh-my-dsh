@@ -130,5 +130,5 @@
     "zod": "4.4.3",
     "zustand": "~4.4.7"
   },
-  "packageManager": "pnpm@10.28.0"
+  "packageManager": "pnpm@11.7.0"
 }
