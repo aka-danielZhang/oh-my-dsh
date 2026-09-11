@@ -1,0 +1,20 @@
+# dsh-scheduled-tasks bundle patch: three rows —
+#   core (id = package name, so the loader serves this bundle's client.js):
+#              the `scheduledTasks` service (user-task CRUD, global daily
+#              scheduler, per-task leases, managed-provider registry)
+#   ohmymemo:  the read-only dream-memory managed projection (reads
+#              dsh-ohmymemo opportunistically; absent there, the row stays
+#              idle and the core row keeps working)
+#   api:       strict Typert registration keeping /api/scheduledTasks/*
+#              routable under assembled runtimes
+# (three-host-rows + browser half shape: dsh-usage-stats / dsh-ohmymemo).
+# The core row accepts a config block, e.g.
+#     - id: dsh-scheduled-tasks
+#       config: { maxConcurrentRuns: 2, catchUpWindowMs: 43200000 }
+- insert:
+    - id: dsh-scheduled-tasks
+      name: dsh-scheduled-tasks
+    - id: scheduled-tasks-ohmymemo
+      name: dsh-scheduled-tasks/ohmymemo
+    - id: scheduled-tasks-api
+      name: dsh-scheduled-tasks/api
