@@ -4,6 +4,12 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 
 ## [Unreleased]
 
+## [0.3.0-rc.51] - 2026-09-11
+
+### Added
+
+- 新增随包插件 `dsh-copy-session-id`（0.1.0）：会话头部右上角「⋯」菜单里在「下载 Session 日志」之上增加「复制会话 ID」一项，点击即把当前会话 ID 写入剪贴板（异步剪贴板优先、textarea `execCommand` 回退，成功短暂显示「已复制会话 ID」，悬停可见完整 ID）；原「下载 Session 日志」项与下载状态弹层保留（下载中置灰、成功后 5 秒自动关闭），通过官方 `sessionLogDownload` 服务消费，官方 `/export` 命令触发的下载状态同样显示。随包插件清单由 14 个增至 15 个。
+
 ## [0.3.0-rc.50] - 2026-09-11
 
 ### Changed
