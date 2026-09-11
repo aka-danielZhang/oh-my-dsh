@@ -1,6 +1,6 @@
 {
   "name": "oh-my-dsh",
-  "version": "0.3.0-rc.49",
+  "version": "0.3.0-rc.50",
   "private": true,
   "type": "module",
   "main": "dist-electron/main.cjs",

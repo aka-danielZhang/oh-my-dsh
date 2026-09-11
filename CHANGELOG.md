@@ -4,6 +4,17 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 
 ## [Unreleased]
 
+## [0.3.0-rc.50] - 2026-09-11
+
+### Changed
+
+- runtime 基线升级到 fork `v0.1.5-rc.1+zw.2`。
+
+### Fixed
+
+- 修复 OpenCode Go（Console Go）报 `MissingSessionID` 400 的问题：`opencode-go` 目录路由及 opencode.ai 端点现在默认携带 `x-opencode-session` + `x-client-request-id` 会话亲和头，零配置生效；显式配置 `sessionAffinityHeaders` 仍可覆盖，空数组表示退出。
+- 工具链统一 pnpm 11.7.0，插件 overrides 迁移到 pnpm-workspace.yaml 并关闭 peer 自动安装，避免 @crazx peer 打穿到官方 registry。
+
 ## [0.3.0-rc.49] - 2026-09-10
 
 ### Changed
