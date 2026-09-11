@@ -105,7 +105,7 @@ const skipped = []
 // 「发布纪律」); the runtime consumes those published versions instead of
 // packing the clone — same bytes the world can install, one provenance.
 // Source of truth: fork repo FORK.md (`node scripts/publish-fork.mjs --list`).
-// The 0.1.5-rc.1 set restores the unified desktop toolbar dropped from the
+// The 0.1.5-rc.2 set restores the unified desktop toolbar dropped from the
 // old release-only lineage: `dsh-client-ui-layout` (shell.toolbar seat +
 // host registry), `dsh-client-ui-conversation` (session-header portal), and
 // `dsh-client-test-runtime` (its test support) join here, as does
