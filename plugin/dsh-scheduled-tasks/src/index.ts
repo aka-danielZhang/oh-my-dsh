@@ -50,6 +50,8 @@ import {
   type ManagedTaskRow,
   type ManagedTaskState,
   type RemoveTaskRequest,
+  type DeleteRunRequest,
+  type RunList,
   type ScheduleSpec,
   type SetEnabledRequest,
   type TaskIdRequest,
@@ -110,6 +112,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'TASK_BUSY': {}
     /** The user-task table is at its cap. */
     'TASK_LIMIT_REACHED': {}
+    'TASK_RUN_NOT_FOUND': {}
     /** Field-level validation refused the request. */
     'TASK_VALIDATION': {}
   }
@@ -152,6 +155,7 @@ function initialRuntime(taskId: string): TaskRuntimeRecord {
   return {
     version: 1,
     taskId,
+    sessionId: null,
     activeRunId: null,
     activeJobId: null,
     activeSessionId: null,
@@ -184,6 +188,7 @@ function userRowOf(task: TaskRecord, runtime: TaskRuntimeRecord, activity: TaskA
     lastSuccessAt: runtime.lastSuccessAt,
     lastResult: runtime.lastResult,
     runCount: runtime.runCount ?? 0,
+    sessionId: runtime.sessionId ?? null,
   }
 }
 
@@ -562,6 +567,9 @@ export class ScheduledTasksService extends TypertRemoteService {
       if (runtime.activeRunId !== null) {
         throw new RemoteError('TASK_BUSY', 'the task is executing; edit after the current run ends', {})
       }
+      if (request.workspacePath !== existing.execution.workspacePath) {
+        throw new RemoteError('TASK_VALIDATION', 'the workspace is bound to the task session and cannot change after creation', {})
+      }
       const validated = this.validateFields(request.title, request.instruction, request.schedule, request.timeZone ?? existing.schedule.timeZone, request.workspacePath)
       await this.verifyExecution(request.agentPreset, request.permissionPreset, request.model)
 
@@ -666,6 +674,55 @@ export class ScheduledTasksService extends TypertRemoteService {
       void this.claimAndRun({ task, boundary: Date.now(), trigger: 'manual' })
         .catch(error => this.ctx.logger.warn(`scheduled-tasks: manual run of task "${task.id}" failed: ${classify(error)}`))
       return userRowOf(task, runtime, this.userActivityOf(runtime))
+    })
+  }
+
+  /** Run history of one task, latest first and bounded (design §9 历史页). */
+  async listRuns(request: TaskIdRequest): Promise<RunList> {
+    return this.enqueue(async () => {
+      this.refuseManaged(request.id)
+      await this.refreshDomain()
+      if (this.requireTasks().get(request.id) === undefined) {
+        throw new RemoteError('TASK_NOT_FOUND', `no scheduled task "${request.id}"`, {})
+      }
+      const runs = [...this.requireRuns().entries()]
+        .filter(([, audit]) => audit.taskId === request.id)
+        .sort((left, right) => right[1].scheduledFor - left[1].scheduledFor
+          || right[1].startedAt - left[1].startedAt
+          || right[0].localeCompare(left[0]))
+        .slice(0, LIMITS.maxRunHistory)
+        .map(([, audit]) => ({
+          runId: audit.runId,
+          trigger: audit.trigger,
+          scheduledFor: audit.scheduledFor,
+          startedAt: audit.startedAt,
+          finishedAt: audit.finishedAt,
+          status: audit.status,
+          durationMs: audit.finishedAt === null ? null : Math.max(0, audit.finishedAt - audit.startedAt),
+        }))
+      return { runs }
+    })
+  }
+
+  /** Remove one history row; the active run's row cannot be removed. */
+  async deleteRun(request: DeleteRunRequest): Promise<{ removed: true }> {
+    return this.enqueue(async () => {
+      this.refuseManaged(request.id)
+      await this.refreshDomain()
+      if (this.requireTasks().get(request.id) === undefined) {
+        throw new RemoteError('TASK_NOT_FOUND', `no scheduled task "${request.id}"`, {})
+      }
+      const runtime = this.requireRuntime().get(request.id)
+      if (runtime?.activeRunId === request.runId) {
+        throw new RemoteError('TASK_BUSY', 'the run is executing; its record cannot be removed right now', {})
+      }
+      const runs = this.requireRuns()
+      const audit = runs.get(request.runId)
+      if (audit === undefined || audit.taskId !== request.id) {
+        throw new RemoteError('TASK_RUN_NOT_FOUND', `no run "${request.runId}" on task "${request.id}"`, {})
+      }
+      await runs.delete(request.runId)
+      return { removed: true as const }
     })
   }
 
@@ -840,6 +897,9 @@ export class ScheduledTasksService extends TypertRemoteService {
         }
 
         const ids = mintRunIds()
+        // One task owns ONE session: the id is bound at the first claim and
+        // every later run submits into the same session.
+        const sessionId = runtime.sessionId ?? ids.sessionId
         const fence = runtime.fence + 1
         const audit: TaskRunAudit = {
           version: 1,
@@ -848,7 +908,7 @@ export class ScheduledTasksService extends TypertRemoteService {
           definitionRevision: fresh.revision,
           trigger,
           scheduledFor: boundary,
-          sessionId: ids.sessionId,
+          sessionId,
           fence,
           commitIntent: 'claimed',
           startedAt: Date.now(),
@@ -859,14 +919,15 @@ export class ScheduledTasksService extends TypertRemoteService {
         await this.requireRuns().put(ids.runId, audit)
         await this.requireRuntime().put(task.id, {
           ...runtime,
+          sessionId,
           activeRunId: ids.runId,
-          activeSessionId: ids.sessionId,
+          activeSessionId: sessionId,
           lastScheduledFor: manual ? runtime.lastScheduledFor : boundary,
           lastAttemptAt: audit.startedAt,
           fence,
           runCount: (runtime.runCount ?? 0) + 1,
         })
-        await this.runLifecycle(fresh, ids.runId, ids.sessionId, fence)
+        await this.runLifecycle(fresh, ids.runId, sessionId, fence)
       })
     } catch (error) {
       if (error instanceof TaskLeaseBusyError) {
@@ -923,7 +984,8 @@ export class ScheduledTasksService extends TypertRemoteService {
 
   private readonly runAborts = new Map<string, AbortController>()
 
-  /** Launch the Agent Session and wait for the task turn to settle. */
+  /** Submit the run into the task's bound session and wait for it to settle.
+   *  First run creates the session; later runs reattach or resume it. */
   private async executeRun(
     task: TaskRecord,
     runId: string,
@@ -933,11 +995,13 @@ export class ScheduledTasksService extends TypertRemoteService {
   ): Promise<JobOutcome> {
     const runTimeout = AbortSignal.timeout(this.config.runTimeoutMs)
     const signal = AbortSignal.any([abort.signal, runTimeout])
+    let ownedHandle: import('./launch.ts').TaskLaunchHandle['ownedHandle'] = null
     try {
       signal.throwIfAborted()
       const launch = await launchTaskSession(this.ctx, {
         taskId: task.id,
         runId,
+        sessionId,
         title: `[定时] ${task.title} · ${scheduleLabel(scheduleRule(task.schedule))}`,
         instruction: task.instruction,
         workspacePath: task.execution.workspacePath,
@@ -945,6 +1009,7 @@ export class ScheduledTasksService extends TypertRemoteService {
         permissionPreset: task.execution.permissionPreset,
         model: task.execution.model,
       }, signal)
+      ownedHandle = launch.ownedHandle
       // Fence the session-created intent before anything else observes a
       // half-launched run (design §8.3).
       await this.markSessionCreated(runId, fence, String(launch.sessionId))
@@ -956,9 +1021,9 @@ export class ScheduledTasksService extends TypertRemoteService {
       let outcome: 'success' | 'error' = 'error'
       let detail: string | null = null
       try {
-        await launch.handle.agent.whenIdle()
+        await launch.agent.whenIdle()
         const sessions = this.ctx.get('sessions') as SessionsView | undefined
-        if (sessions !== undefined) await sessions.flush(launch.handle.agent.session)
+        if (sessions !== undefined) await sessions.flush(launch.agent.session)
         outcome = await this.judgeSessionOutcome(String(launch.sessionId))
       } catch (error) {
         detail = classify(error)
@@ -981,6 +1046,16 @@ export class ScheduledTasksService extends TypertRemoteService {
       const status = abort.signal.aborted ? 'cancelled' : 'error'
       await this.settleRun(task.id, runId, fence, status, classify(error))
       return { status: status === 'cancelled' ? 'killed' : 'failed', detail: classify(error) }
+    } finally {
+      // A created/resumed handle belongs to this run; a live reattach never
+      // disposes an agent another holder owns.
+      if (ownedHandle !== null) {
+        try {
+          await ownedHandle.dispose()
+        } catch (disposeError) {
+          this.ctx.logger.warn(`scheduled-tasks: session dispose after run failed: ${classify(disposeError)}`)
+        }
+      }
     }
   }
 

@@ -77,6 +77,29 @@ const CSS = `
 .dsh-stask-tpl-time { font-size: 12px; color: var(--dsw-alias-label-tertiary); }
 
 .dsh-stask-form-header { margin-bottom: 16px; }
+.dsh-stask-tabs-row { margin-bottom: 16px; }
+.dsh-stask-tabs { display: inline-flex; align-items: center; gap: 4px; padding: 4px; border-radius: 12px; background: var(--dsw-alias-bg-layer-2); }
+.dsh-stask-tab {
+  height: 30px; padding: 0 14px; border: none; border-radius: 9px; background: transparent;
+  color: var(--dsw-alias-label-secondary); font: inherit; font-size: 13px; line-height: 20px; font-weight: 500; cursor: pointer;
+}
+.dsh-stask-tab[aria-pressed="true"] { background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); }
+.dsh-stask-runs-wrap { min-width: 0; }
+.dsh-stask-runs { border: 1px solid var(--dsw-alias-border-l2); border-radius: 10px; overflow: hidden; background: var(--dsw-alias-bg-layer-1); }
+.dsh-stask-runs-head, .dsh-stask-run {
+  display: grid; grid-template-columns: 1.5fr 0.6fr 0.9fr 0.6fr auto; gap: 12px; align-items: center;
+  padding: 10px 14px; font-size: 13px; line-height: 20px;
+}
+.dsh-stask-runs-head { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.dsh-stask-run { border-top: 1px solid var(--dsw-alias-border-l2); color: var(--dsw-alias-label-primary); }
+.dsh-stask-run-status { display: inline-flex; align-items: center; gap: 6px; }
+.dsh-stask-run-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--dsw-static-neutral-400); }
+.dsh-stask-run-dot[data-tone='ok'] { background: var(--dsw-static-green-500); }
+.dsh-stask-run-dot[data-tone='busy'] { background: var(--dsw-static-blue-500); }
+.dsh-stask-run-dot[data-tone='bad'] { background: var(--dsw-static-red-400); }
+.dsh-stask-runs-empty { padding: 28px 14px; text-align: center; color: var(--dsw-alias-label-tertiary); font-size: 12px; }
+.dsh-stask-ws:disabled { cursor: default; opacity: 0.7; }
+.dsh-stask-ws:disabled:hover { background: transparent; }
 .dsh-stask-form-title { margin: 0; font-size: 20px; line-height: 28px; font-weight: 600; }
 .dsh-stask-panel { display: flex; flex-direction: column; gap: 16px; padding: 18px 20px; }
 .dsh-stask-field { display: flex; min-width: 0; flex-direction: column; gap: 5px; color: var(--dsw-alias-label-tertiary); font-size: 12px; }

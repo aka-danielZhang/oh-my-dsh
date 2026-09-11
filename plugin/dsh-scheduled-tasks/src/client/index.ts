@@ -32,8 +32,10 @@ import TYPERT_REMOTE from '../typert.remote-client.ts'
 import type {
   CatalogSnapshot,
   CreateTaskRequest,
+  DeleteRunRequest,
   ListSnapshot,
   RemoveTaskRequest,
+  RunList,
   SetEnabledRequest,
   TaskIdRequest,
   UpdateTaskRequest,
@@ -67,6 +69,8 @@ interface ScheduledTasksRemote {
   setEnabled(request: SetEnabledRequest): Promise<RemoteOutcome<UserTaskRow>>
   deleteTask(request: RemoveTaskRequest): Promise<RemoteOutcome<{ removed: true }>>
   runNow(request: TaskIdRequest): Promise<RemoteOutcome<UserTaskRow>>
+  listRuns(request: TaskIdRequest): Promise<RemoteOutcome<RunList>>
+  deleteRun(request: DeleteRunRequest): Promise<RemoteOutcome<{ removed: true }>>
 }
 
 /**
@@ -112,6 +116,15 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       setEnabled: async request => unwrap(await remote.setEnabled(request)),
       deleteTask: async request => unwrap(await remote.deleteTask(request)),
       runNow: async request => unwrap(await remote.runNow(request)),
+      listRuns: async request => unwrap(await remote.listRuns(request)),
+      deleteRun: async request => unwrap(await remote.deleteRun(request)),
+      openSession: sessionId => {
+        // The conversation is the `null` main panel; the session row click
+        // lands the user in the sidebar list, opened on this session.
+        ;(ctx.layout as unknown as { selectPanel(id: string | null): void }).selectPanel(null)
+        const sessions = ctx.get('sessions') as { open(sessionId: string): void } | undefined
+        sessions?.open(sessionId)
+      },
     }
 
     const slots = ctx.get('slots') as unknown as SlotRegistry

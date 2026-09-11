@@ -157,12 +157,15 @@ export function Chip({ value, options, icon, align, title, placeholder, onChange
 }
 
 /** Hero-style workspace chip plus the picker's directory menu. */
-export function WorkspaceChip({ value, options, emptyLabel, chooseLabel, addLabel, onAdd, onChange }: {
+export function WorkspaceChip({ value, options, emptyLabel, chooseLabel, addLabel, disabled, disabledTitle, onAdd, onChange }: {
   value: string
   options: readonly ChipOption[]
   emptyLabel: string
   chooseLabel: string
   addLabel: string
+  /** The workspace is bound to the task's session; locked on edit. */
+  disabled?: boolean
+  disabledTitle?: string
   onAdd: () => void
   onChange: (value: string) => void
 }): ReactNode {
@@ -175,12 +178,13 @@ export function WorkspaceChip({ value, options, emptyLabel, chooseLabel, addLabe
       <button
         type="button"
         className={`dsh-stask-ws${open ? ' dsh-stask-ws-open' : ''}`}
-        title={label}
-        aria-label={label}
-        aria-haspopup="menu"
-        aria-expanded={open}
+        title={disabled === true ? disabledTitle ?? label : label}
+        aria-label={disabled === true ? disabledTitle ?? label : label}
+        aria-haspopup={disabled === true ? undefined : 'menu'}
+        aria-expanded={disabled === true ? undefined : open}
+        disabled={disabled === true}
         onMouseDown={swallow}
-        onClick={() => { setOpen(!open) }}
+        onClick={() => { if (disabled !== true) setOpen(!open) }}
       >
         <span className="dsh-stask-ws-folder"><IconFolderOpenOutline16 size={16} /></span>
         <span className="dsh-stask-ws-label">{label}</span>

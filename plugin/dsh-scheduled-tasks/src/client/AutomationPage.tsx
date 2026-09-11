@@ -30,7 +30,7 @@ import {
   Switch,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import type { CatalogSnapshot, ScheduleSpec, TaskRow, UserTaskRow } from '../types.ts'
+import type { CatalogSnapshot, ScheduleSpec, TaskRunRow, TaskRow, UserTaskRow } from '../types.ts'
 import { LIMITS } from '../types.ts'
 import { Chip, InstructionText, MenuCard, MenuItem, ModelChip, PermissionGlyph, useDismiss, WorkspaceChip } from './chips.tsx'
 import { ScheduleRow, scheduleText, specOf, type ScheduleShape, type Translate } from './ScheduleRow.tsx'
@@ -70,6 +70,10 @@ export interface ScheduledTasksFace {
   setEnabled(request: { id: string, ifRevision: number, enabled: boolean }): Promise<UserTaskRow>
   deleteTask(request: { id: string, ifRevision: number }): Promise<{ removed: true }>
   runNow(request: { id: string }): Promise<UserTaskRow>
+  listRuns(request: { id: string }): Promise<{ runs: TaskRunRow[] }>
+  deleteRun(request: { id: string, runId: string }): Promise<{ removed: true }>
+  /** Leave the panel and open the session in the conversation view. */
+  openSession(sessionId: string): void
 }
 
 /** Editor form state: the wire spec plus the picker keys the UI carries. */
@@ -191,6 +195,57 @@ function TaskCardMenu({ row, busy, labels, onRun, onToggle, onEdit, onRequestDel
   )
 }
 
+/** External-link glyph for the run history's 跳到会话 action. */
+function JumpGlyph(): ReactNode {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M7 3.4H3.4v9.2h9.2V9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" fill="none" />
+      <path d="M9.4 2.6h4v4M13.2 2.8L7.6 8.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" fill="none" />
+    </svg>
+  )
+}
+
+/** Per-run ⋯ menu: jump to the bound session, or remove the history row. */
+function RunRowMenu({ labels, jumpDisabled, onJump, onDelete }: {
+  labels: { more: string, jump: string, deleteRecord: string }
+  jumpDisabled: boolean
+  onJump: () => void
+  onDelete: () => void
+}): ReactNode {
+  const [open, setOpen] = useState(false)
+  useDismiss(open, () => { setOpen(false) })
+  return (
+    <div className="dsh-stask-more-wrap">
+      <button
+        type="button"
+        className="dsh-stask-more"
+        aria-label={labels.more}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={event => { event.stopPropagation(); setOpen(!open) }}
+      >
+        <IconEllipsisOutline16 size={16} />
+      </button>
+      {open && (
+        <MenuCard align="right">
+          <MenuItem
+            label={labels.jump}
+            icon={<JumpGlyph />}
+            disabled={jumpDisabled}
+            onPick={() => { setOpen(false); onJump() }}
+          />
+          <MenuItem
+            label={labels.deleteRecord}
+            danger
+            icon={<IconTrashOutline16 size={16} />}
+            onPick={() => { setOpen(false); onDelete() }}
+          />
+        </MenuCard>
+      )}
+    </div>
+  )
+}
+
 export interface AutomationPageProps {
   face: ScheduledTasksFace
   t: Translate
@@ -211,6 +266,9 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
   const [pendingDelete, setPendingDelete] = useState<UserTaskRow | null>(null)
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [editorTab, setEditorTab] = useState<'settings' | 'history'>('settings')
+  const [runs, setRuns] = useState<readonly TaskRunRow[] | null>(null)
+  const [runsError, setRunsError] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
   // Single-flight guard for the poll: a slow Host must not stack requests.
   const inFlight = useRef(false)
@@ -284,6 +342,7 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
 
   const beginCreate = (schedule?: ScheduleShape, title = '', instruction = ''): void => {
     setForm(blankForm(schedule ?? { kind: 'daily', localTime: '09:00' }, title, instruction, true))
+    setEditorTab('settings')
     setEditing({ mode: 'create' })
   }
 
@@ -299,6 +358,7 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
       modelKey: model === null ? 'default' : routeKey(model.provider, model.model),
       effortKey: model?.reasoningEffort ?? 'default',
     })
+    setEditorTab('settings')
     setEditing({ mode: 'edit', task })
   }
 
@@ -376,6 +436,31 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
     }
   }
 
+  const loadRuns = async (task: UserTaskRow): Promise<void> => {
+    setRuns(null)
+    setRunsError(null)
+    try {
+      const result = await face.listRuns({ id: task.id })
+      setRuns(result.runs)
+    } catch (reason) {
+      setRunsError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
+  const removeRun = async (task: UserTaskRow, runId: string): Promise<void> => {
+    try {
+      await face.deleteRun({ id: task.id, runId })
+      await loadRuns(task)
+    } catch (reason) {
+      setRunsError(reason instanceof Error ? reason.message : String(reason))
+    }
+  }
+
+  const openHistory = (task: UserTaskRow): void => {
+    setEditorTab('history')
+    void loadRuns(task)
+  }
+
   const runNow = async (task: UserTaskRow): Promise<void> => {
     setBusyId(task.id)
     try {
@@ -407,6 +492,62 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
       label: permissionLabel(preset.name),
     }))
     const incomplete = form.title.trim() === '' || form.instruction.trim() === ''
+    const sourceLabel = (trigger: TaskRunRow['trigger']): string => t(`source.${trigger}`)
+    const runStatusLabel = (status: TaskRunRow['status']): string => t(`runState.${status}`)
+    const formatDateTime = (ms: number): string => {
+      const date = new Date(ms)
+      const pad = (value: number): string => String(value).padStart(2, '0')
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
+    }
+    const formatDuration = (ms: number | null): string => {
+      if (ms === null) return '—'
+      const seconds = Math.max(1, Math.round(ms / 1000))
+      if (seconds < 60) return `${seconds}s`
+      return `${Math.floor(seconds / 60)}m${seconds % 60}s`
+    }
+    const runDotTone = (run: TaskRunRow): string => {
+      if (run.status === 'claiming' || run.status === 'running') return 'busy'
+      if (run.status === 'success') return 'ok'
+      if (run.status === 'error') return 'bad'
+      return 'off'
+    }
+    const historyPanel = editing.mode === 'edit' && pendingDelete === null
+      ? (
+        <div className="dsh-stask-runs-wrap">
+          {runsError === null ? null : <div className="dsh-stask-banner" role="alert">{t('state.error', { message: runsError })}</div>}
+          <div className="dsh-stask-runs">
+            <div className="dsh-stask-runs-head">
+              <span>{t('runs.time')}</span>
+              <span>{t('runs.source')}</span>
+              <span>{t('runs.status')}</span>
+              <span>{t('runs.duration')}</span>
+              <span />
+            </div>
+            {runs === null
+              ? <div className="dsh-stask-runs-empty">{t('state.loading')}</div>
+              : runs.length === 0
+                ? <div className="dsh-stask-runs-empty">{t('runs.empty')}</div>
+                : runs.map(run => (
+                  <div className="dsh-stask-run" key={run.runId}>
+                    <span>{formatDateTime(run.scheduledFor)}</span>
+                    <span>{sourceLabel(run.trigger)}</span>
+                    <span className="dsh-stask-run-status">
+                      <span className="dsh-stask-run-dot" data-tone={runDotTone(run)} />
+                      {runStatusLabel(run.status)}
+                    </span>
+                    <span>{formatDuration(run.durationMs)}</span>
+                    <RunRowMenu
+                      labels={{ more: t('action.more'), jump: t('run.jump'), deleteRecord: t('run.deleteRecord') }}
+                      jumpDisabled={editing.task.sessionId === null}
+                      onJump={() => { if (editing.task.sessionId !== null) face.openSession(editing.task.sessionId) }}
+                      onDelete={() => { void removeRun(editing.task, run.runId) }}
+                    />
+                  </div>
+                ))}
+          </div>
+        </div>
+      )
+      : null
     return (
       <div className="dsh-stask-page">
         <header className="dsh-stask-form-header">
@@ -414,6 +555,29 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
             {editing.mode === 'create' ? t('form.createTitle') : t('form.editTitle')}
           </h2>
         </header>
+        {editing.mode === 'edit' && (
+          <div className="dsh-stask-tabs-row">
+            <div className="dsh-stask-tabs" role="tablist">
+              <button
+                type="button"
+                className="dsh-stask-tab"
+                aria-pressed={editorTab === 'settings'}
+                onClick={() => { setEditorTab('settings') }}
+              >
+                {t('tab.settings')}
+              </button>
+              <button
+                type="button"
+                className="dsh-stask-tab"
+                aria-pressed={editorTab === 'history'}
+                onClick={() => { openHistory(editing.task) }}
+              >
+                {t('tab.history')}
+              </button>
+            </div>
+          </div>
+        )}
+        {editing.mode === 'edit' && editorTab === 'history' ? historyPanel : (
         <div className="dsh-stask-card dsh-stask-panel">
           <div className="dsh-stask-field">
             <span className="dsh-stask-field-label">{t('form.status')}</span>
@@ -464,6 +628,8 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
                     chooseLabel={t('workspace.choose')}
                     emptyLabel={t('workspace.empty')}
                     addLabel={t('action.addWorkspace')}
+                    disabled={editing.mode === 'edit'}
+                    disabledTitle={t('workspace.locked')}
                     onAdd={() => { setAnnounce(t('state.workspacePicker')) }}
                     onChange={workspacePath => { setForm({ ...form, workspacePath }) }}
                   />
@@ -507,6 +673,7 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
             </button>
           </div>
         </div>
+        )}
       </div>
     )
   }

@@ -45,6 +45,7 @@ function userRow(): Record<string, unknown> {
     lastSuccessAt: null,
     lastResult: null,
     runCount: 3,
+    sessionId: 'sched-abc',
   }
 }
 
@@ -52,6 +53,7 @@ test('user task rows parse and reject unknown fields', () => {
   const parsed = userTaskRowSchema.parse(userRow())
   assert.equal(parsed.id, 'task-1')
   assert.equal(parsed.runCount, 3)
+  assert.equal(parsed.sessionId, 'sched-abc')
   const extra = userRow()
   ;(extra as Record<string, unknown>).surprise = true
   assert.throws(() => userTaskRowSchema.parse(extra))
@@ -143,7 +145,7 @@ test('scheduleSpecError mirrors the schema bounds with stable messages', () => {
 
 test('typert descriptors cover the six Remote methods on the scheduledTasks service', () => {
   const methods = TYPERT_REMOTE.descriptors.map(descriptor => descriptor.method).sort()
-  assert.deepEqual(methods, ['catalog', 'create', 'deleteTask', 'list', 'runNow', 'setEnabled', 'update'])
+  assert.deepEqual(methods, ['catalog', 'create', 'deleteRun', 'deleteTask', 'list', 'listRuns', 'runNow', 'setEnabled', 'update'])
   for (const descriptor of TYPERT_REMOTE.descriptors) {
     assert.equal(descriptor.service, 'scheduledTasks')
     assert.equal(descriptor.namespace, 'scheduledTasks')

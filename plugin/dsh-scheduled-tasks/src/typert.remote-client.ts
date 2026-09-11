@@ -14,6 +14,8 @@ import type {
   CreateTaskRequest,
   ListSnapshot,
   RemoveTaskRequest,
+  DeleteRunRequest,
+  RunList,
   SetEnabledRequest,
   TaskIdRequest,
   UpdateTaskRequest,
@@ -22,8 +24,10 @@ import type {
 import {
   catalogSnapshotSchema,
   createTaskRequestSchema,
+  deleteRunRequestSchema,
   listSnapshotSchema,
   removeTaskRequestSchema,
+  runListSchema,
   setEnabledRequestSchema,
   taskIdRequestSchema,
   updateTaskRequestSchema,
@@ -43,6 +47,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     setEnabled: (request: SetEnabledRequest) => Promise<RemoteResult<UserTaskRow>>
     deleteTask: (request: RemoveTaskRequest) => Promise<RemoteResult<RemoveResult>>
     runNow: (request: TaskIdRequest) => Promise<RemoteResult<UserTaskRow>>
+    listRuns: (request: TaskIdRequest) => Promise<RemoteResult<RunList>>
+    deleteRun: (request: DeleteRunRequest) => Promise<RemoteResult<RemoveResult>>
   }
   interface TypertRemoteMap {
     'scheduledTasks/list': () => Promise<RemoteResult<ListSnapshot>>
@@ -52,6 +58,8 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     'scheduledTasks/setEnabled': (request: SetEnabledRequest) => Promise<RemoteResult<UserTaskRow>>
     'scheduledTasks/deleteTask': (request: RemoveTaskRequest) => Promise<RemoteResult<RemoveResult>>
     'scheduledTasks/runNow': (request: TaskIdRequest) => Promise<RemoteResult<UserTaskRow>>
+    'scheduledTasks/listRuns': (request: TaskIdRequest) => Promise<RemoteResult<RunList>>
+    'scheduledTasks/deleteRun': (request: DeleteRunRequest) => Promise<RemoteResult<RemoveResult>>
   }
   interface TypertRemoteNamespaceMap {
     scheduledTasks: TypertRemoteNamespace$7363686564756c65645461736b73
@@ -155,6 +163,36 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         codec: { mode: 'strict', typeSymbol: 'dsh-scheduled-tasks/types#TaskIdRequest', schema: taskIdRequestSchema },
       }],
       result: { mode: 'strict', typeSymbol: 'dsh-scheduled-tasks/types#UserTaskRow', schema: userTaskRowSchema },
+      sourceLocation: { file: 'src/index.ts', line: 1, column: 3 },
+    },
+    {
+      id: 'dsh-scheduled-tasks#scheduledTasks/listRuns',
+      service: 'scheduledTasks',
+      namespace: 'scheduledTasks',
+      method: 'listRuns',
+      invocation: { kind: 'direct' },
+      parameters: [{
+        name: 'request',
+        wire: 'request',
+        source: 'json',
+        codec: { mode: 'strict', typeSymbol: 'dsh-scheduled-tasks/types#TaskIdRequest', schema: taskIdRequestSchema },
+      }],
+      result: { mode: 'strict', typeSymbol: 'dsh-scheduled-tasks/types#RunList', schema: runListSchema },
+      sourceLocation: { file: 'src/index.ts', line: 1, column: 3 },
+    },
+    {
+      id: 'dsh-scheduled-tasks#scheduledTasks/deleteRun',
+      service: 'scheduledTasks',
+      namespace: 'scheduledTasks',
+      method: 'deleteRun',
+      invocation: { kind: 'direct' },
+      parameters: [{
+        name: 'request',
+        wire: 'request',
+        source: 'json',
+        codec: { mode: 'strict', typeSymbol: 'dsh-scheduled-tasks/types#DeleteRunRequest', schema: deleteRunRequestSchema },
+      }],
+      result: { mode: 'strict', typeSymbol: 'dsh-scheduled-tasks/types#RemoveResult', schema: removeResultSchema },
       sourceLocation: { file: 'src/index.ts', line: 1, column: 3 },
     },
   ],

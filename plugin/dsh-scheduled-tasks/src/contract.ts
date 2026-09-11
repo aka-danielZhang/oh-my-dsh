@@ -178,6 +178,10 @@ export type TaskRecord = z.infer<typeof taskRecordSchema>
 export const taskRuntimeRecordSchema = z.object({
   version: z.literal(1),
   taskId: z.string(),
+  /** The session this task is bound to; created on the first run and reused
+   *  for every later run (null until then). `.default(null)` keeps
+   *  pre-binding rows parsing — the domain version stays at 1. */
+  sessionId: z.string().nullable().default(null),
   activeRunId: z.string().nullable(),
   activeJobId: z.string().nullable(),
   /** Live session of the active run; drives waiting-input observation and
@@ -254,6 +258,8 @@ export const userTaskRowSchema = z.object({
   lastResult: taskRunSummarySchema.nullable(),
   /** Total settled-and-claimed runs, surfaced as 「已运行 N 次」. */
   runCount: z.number().int().nonnegative(),
+  /** The task's bound session (the 跳到会话 target). */
+  sessionId: z.string().nullable(),
 }).strict()
 
 export const managedTaskRowSchema = z.object({
@@ -370,11 +376,35 @@ export type RemoveTaskRequest = z.infer<typeof removeTaskRequestSchema>
 export const taskIdRequestSchema = z.object({ id: z.string() }).strict()
 export type TaskIdRequest = z.infer<typeof taskIdRequestSchema>
 
+/** One row of a task's run history (latest first, bounded). */
+export const taskRunRowSchema = z.object({
+  runId: z.string(),
+  trigger: z.enum(['scheduled', 'catch-up', 'manual']),
+  scheduledFor: z.number(),
+  startedAt: z.number(),
+  finishedAt: z.number().nullable(),
+  status: z.enum(['claiming', 'running', 'success', 'error', 'cancelled', 'skipped']),
+  durationMs: z.number().nullable(),
+}).strict()
+export type TaskRunRow = z.infer<typeof taskRunRowSchema>
+
+/** Answer of `listRuns`. */
+export const runListSchema = z.object({ runs: z.array(taskRunRowSchema) }).strict()
+export type RunList = z.infer<typeof runListSchema>
+
+/** Wire request for `deleteRun` (history row removal; active runs refuse). */
+export const deleteRunRequestSchema = z.object({
+  id: z.string(),
+  runId: z.string(),
+}).strict()
+export type DeleteRunRequest = z.infer<typeof deleteRunRequestSchema>
+
 /** Validation bounds shared by the service and the tests. */
 export const LIMITS = {
   maxTitleChars: 100,
   maxInstructionChars: 8_000,
   maxTasks: 100,
+  maxRunHistory: 100,
 } as const
 
 /** Stable Remote error codes the browser half branches on. */
@@ -384,6 +414,7 @@ export const TASK_ERRORS = {
   revisionConflict: 'TASK_REVISION_CONFLICT',
   busy: 'TASK_BUSY',
   limitReached: 'TASK_LIMIT_REACHED',
+  runNotFound: 'TASK_RUN_NOT_FOUND',
   validation: 'TASK_VALIDATION',
   workspaceUnavailable: 'TASK_WORKSPACE_UNAVAILABLE',
 } as const
