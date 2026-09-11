@@ -256,6 +256,8 @@ const CSS = `
 .dsh-stask-btn:disabled { cursor: not-allowed; opacity: 0.4; }
 .dsh-stask-btn-primary { background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); }
 .dsh-stask-btn-primary:hover:not(:disabled) { background: var(--dsw-alias-button-primary-hover); }
+.dsh-stask-danger-btn { background: var(--dsw-alias-state-error-primary); }
+.dsh-stask-danger-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 85%, black); }
 .dsh-stask-icon-btn {
   height: 28px; padding: 0 10px; border: 0; border-radius: 14px; background: transparent;
   color: var(--dsw-alias-label-secondary); font: inherit; font-size: 12px; line-height: 18px; cursor: pointer;

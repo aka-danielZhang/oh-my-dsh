@@ -84,6 +84,7 @@ Node ESM 按导入文件实际路径解析依赖：插件 devDep 的 `@deepseek-
 - **任务卡**：从双列网格改**整宽单列列表**（模板区仍为网格）：标题 + 右上「⋯」披露菜单（立即运行 / 暂停·恢复 / 编辑；分隔线以下固定红色「删除」），描述两行截断，底部左绿 pill（时钟字形 + 调度摘要 + 下次运行）右灰 pill（上次执行/尚未执行）。
 - **`runNow`（manual 触发）**：Remote 第七个方法。语义：显式点击即意图——暂停中的任务也能立即跑；运行中拒绝（`TASK_BUSY`）；**不推进 `lastScheduledFor`**（调度游标属于边界走子，手动跑不吞掉错过的边界）；claim 照走 lease + fence + commitIntent，audit/summary 的 `trigger` 枚举加 `manual`（向后兼容存量记录）。service `runNow` 在 mutation 队列内只做检查与 fire-and-forget 的 claim，绝不 await 整个 run（队列不能被一次 agent run 占住）。`claimAndRun` 对 manual 分支：跳过 enabled/cursor 两个守卫、重叠改 warn 不写 skipped。
 - 任务卡的行内 Switch/编辑/删除随之移除（菜单即唯一操作面）；「⇄ 刷新中」态用 `refreshing` 驱动。
+- **五次微调（同日）**：删除确认从「两步确认按钮」改为**确认弹窗**（stock `Modal` + 描述「将删除「{标题}」及其后续调度；执行记录会保留，操作不可撤销」+ 取消/红色删除，Esc 与遮罩关闭）——⋯ 菜单出现后两步按钮的第二次点击要重开菜单，交互不成立；确认按钮用 `--dsw-alias-state-error-primary` 填充。决策修订：早前「不引入弹层」的取舍作废。
 - **四次微调（同日）**：任务卡回**双列网格**并整卡可点（`role=button` + 悬浮描边，点击/回车进编辑；⋯ 菜单在卡片内 `onClick` 停止冒泡，菜单操作不会误触编辑）；灰 pill 改「已运行 N 次」——runtime 记录加 `runCount`（`.default(0)`，存量行免迁移、domain 不 bump version），claim 时递增并随 wire row 下发；managed 卡不提供计数与操作。
 
 - 待人工 GUI 验收：侧栏时钟按钮位置与按下态、主面板页面视觉（含窄屏）、编辑表单交互（调度行/时间滚轮/指令底栏芯片）、记忆页开关驱动梦境投影（需同装 dsh-ohmymemo 的组合）、真实触发创建 Session 的端到端（需可用模型路由）。

@@ -26,6 +26,7 @@ import {
   IconPlayOutline16,
   IconRefreshOutline16,
   IconTrashOutline16,
+  Modal,
   Switch,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -127,14 +128,14 @@ interface TaskCardMenuLabels {
 }
 
 /** The task card's ⋯ disclosure: run now / pause-resume / edit, delete pinned below a divider. */
-function TaskCardMenu({ row, busy, labels, onRun, onToggle, onEdit, onRemove }: {
+function TaskCardMenu({ row, busy, labels, onRun, onToggle, onEdit, onRequestDelete }: {
   row: UserTaskRow
   busy: boolean
   labels: TaskCardMenuLabels
   onRun: () => void
   onToggle: (next: boolean) => void
   onEdit: () => void
-  onRemove: () => void
+  onRequestDelete: () => void
 }): ReactNode {
   const [open, setOpen] = useState(false)
   useDismiss(open, () => { setOpen(false) })
@@ -161,7 +162,7 @@ function TaskCardMenu({ row, busy, labels, onRun, onToggle, onEdit, onRemove }: 
                 danger
                 icon={<IconTrashOutline16 size={16} />}
                 disabled={busy}
-                onPick={() => { setOpen(false); onRemove() }}
+                onPick={() => { setOpen(false); onRequestDelete() }}
               />
             )}
           >
@@ -207,7 +208,7 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
   const [error, setError] = useState<string | null>(null)
   const [form, setForm] = useState<FormState | null>(null)
   const [editing, setEditing] = useState<{ mode: 'create' } | { mode: 'edit', task: UserTaskRow } | null>(null)
-  const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<UserTaskRow | null>(null)
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
@@ -357,13 +358,11 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
     }
   }
 
-  const remove = async (task: UserTaskRow): Promise<void> => {
-    if (confirmId !== task.id) {
-      setConfirmId(task.id)
-      window.setTimeout(() => { setConfirmId(current => current === task.id ? null : current) }, 4_000)
-      return
-    }
-    setConfirmId(null)
+  /** The ⋯ menu only OPENS the dialog; the deletion itself happens here. */
+  const confirmDelete = async (): Promise<void> => {
+    const task = pendingDelete
+    if (task === null) return
+    setPendingDelete(null)
     setBusyId(task.id)
     try {
       await face.deleteTask({ id: task.id, ifRevision: task.revision })
@@ -559,12 +558,12 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
               pause: t('action.pause'),
               resume: t('action.resume'),
               edit: t('action.edit'),
-              remove: confirmId === row.id ? t('action.confirmRemove') : t('action.remove'),
+              remove: t('action.remove'),
             }}
             onRun={() => { void runNow(row) }}
             onToggle={next => { void toggle(row, next) }}
             onEdit={openEdit}
-            onRemove={() => { void remove(row) }}
+            onRequestDelete={() => { setPendingDelete(row) }}
           />
         </div>
         <p className="dsh-stask-task-desc">{row.instruction}</p>
@@ -582,6 +581,19 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
   return (
     <div className="dsh-stask-page">
       <p className="dsh-stask-announce" role="status" aria-live="polite">{announce}</p>
+      <Modal
+        open={pendingDelete !== null}
+        onClose={() => { setPendingDelete(null) }}
+        title={t('delete.title')}
+        closeLabel={t('action.cancel')}
+        description={t('delete.confirm', { title: pendingDelete?.title ?? '' })}
+        footer={(
+          <>
+            <Button variant="outline" onClick={() => { setPendingDelete(null) }}>{t('action.cancel')}</Button>
+            <Button variant="primary" className="dsh-stask-danger-btn" onClick={() => { void confirmDelete() }}>{t('action.remove')}</Button>
+          </>
+        )}
+      />
       <header className="dsh-stask-hero">
         <h1 className="dsh-stask-hero-title">{t('page.title')}</h1>
         <p className="dsh-stask-hero-sub">{t('page.intro')}</p>
