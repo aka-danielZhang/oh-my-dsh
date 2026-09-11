@@ -86,3 +86,6 @@ plugin/dsh-scheduled-tasks/lib/
 
 # dsh-settings-icons：构建产物（scripts/new-plugin.mjs 生成）
 plugin/dsh-settings-icons/lib/
+
+# dsh-usage-stats：创造模式预览产物（scripts/build-dynamic-preview.mjs 生成，含 rmSync 重建）
+plugin/dsh-usage-stats/.preview/
