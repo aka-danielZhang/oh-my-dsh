@@ -1,0 +1,76 @@
+{
+  "name": "dsh-settings-icons",
+  "version": "0.1.0",
+  "description": "Settings-nav icons: unified outline glyphs for the 使用统计 / MCP / 记忆 sections (browser-only DOM decoration of the stock settings shell)",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsdown",
+    "watch": "tsdown --watch",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "plugin:add": "dsh plugin --profile web add file:.",
+    "plugin:remove": "dsh plugin --profile web remove dsh-settings-icons"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "lib/client.js.map",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "settings"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aka-danielZhang/oh-my-dsh.git",
+    "directory": "plugin/dsh-settings-icons"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.0-rc.7 <5",
+    "@deepseek-ai/cordis-plugin-timer": ">=1.1.4 <2",
+    "@deepseek-ai/dsh-client-ui-renderer": ">=0.1.5-alpha.1 <1",
+    "@deepseek-ai/dsh-client-ui-slots": ">=0.1.5-alpha.1 <1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/cordis-plugin-timer": "1.1.4",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-client-ui-slots": "0.1.5-rc.1",
+    "@types/jsdom": "^27.0.0",
+    "@types/node": "^24.13.3",
+    "jsdom": "^29.1.1",
+    "tsdown": "^0.22.2",
+    "tsx": "^4.19.2",
+    "typescript": "^6.0.3"
+  },
+  "packageManager": "pnpm@11.7.0"
+}

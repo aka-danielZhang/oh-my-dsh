@@ -80,3 +80,9 @@ plugin/dsh-usage-stats/lib/
 
 # dsh-copy-session-id：构建产物（scripts/new-plugin.mjs 生成）
 plugin/dsh-copy-session-id/lib/
+
+# dsh-scheduled-tasks：构建产物（scripts/new-plugin.mjs 生成）
+plugin/dsh-scheduled-tasks/lib/
+
+# dsh-settings-icons：构建产物（scripts/new-plugin.mjs 生成）
+plugin/dsh-settings-icons/lib/
