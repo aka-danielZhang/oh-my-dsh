@@ -48,6 +48,7 @@ test('lists every ship:true plugin once, including thread', () => {
   assert.deepEqual(names, [
     'dsh-branding',
     'dsh-compaction-hierarchical',
+    'dsh-copy-session-id',
     'dsh-desktop-bridge',
     'dsh-fs-observation-log',
     'dsh-mcp-settings',
@@ -56,7 +57,9 @@ test('lists every ship:true plugin once, including thread', () => {
     'dsh-ohmymemo',
     'dsh-provider-balance',
     'dsh-reasoning-efforts',
+    'dsh-scheduled-tasks',
     'dsh-send-while-running',
+    'dsh-settings-icons',
     'dsh-thread',
     'dsh-usage-stats',
     'dsh-web-search-toggle',

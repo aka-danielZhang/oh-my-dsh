@@ -41,7 +41,7 @@
     },
     "desktop": {
       "ship": true,
-      "pin": "0.2.3"
+      "pin": "0.2.4"
     }
   },
   "scripts": {
