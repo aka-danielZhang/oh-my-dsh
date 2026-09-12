@@ -18,6 +18,13 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
+    "desktop": {
+      "ship": true,
+      "tarball": "settings-icons.tar.gz",
+      "dest": "plugins/dsh-settings-icons",
+      "env": "DSH_DESKTOP_SETTINGS_ICONS_PLUGIN",
+      "pin": "0.1.0"
+    },
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-ui-renderer",

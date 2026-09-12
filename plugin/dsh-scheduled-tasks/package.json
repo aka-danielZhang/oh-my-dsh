@@ -39,6 +39,13 @@
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
+    "desktop": {
+      "ship": true,
+      "tarball": "scheduled-tasks.tar.gz",
+      "dest": "plugins/dsh-scheduled-tasks",
+      "env": "DSH_DESKTOP_SCHEDULED_TASKS_PLUGIN",
+      "pin": "0.1.0"
+    },
     "client": {
       "inject": [
         "@deepseek-ai/dsh-client-ui-layout",
