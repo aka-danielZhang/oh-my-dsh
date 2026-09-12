@@ -89,6 +89,7 @@ bash scripts/notarize-mac-artifacts.sh release/*.dmg release/*.zip
 | `errSecInternalComponent` | keychain 授权丢了：重跑 `security set-key-partition-list -S apple-tool:,apple:` |
 | 后台没有出现更新入口 | 未打包构建会跳过检查；离线 / Release 还没发过 latest-mac.yml 都走静默软失败。桌面 `v*` tag 推了但 publish 失败时，必须删掉该 tag（否则旧版 `-rc` 客户端刮 atom 会命中空 tag、图标不出现）；新版壳已钉 `allowPrerelease=false`，只认 `/releases/latest` |
 | 更新下载后校验失败 | 标题带入口保留目标版本并进入可重试失败态；核对 electron-builder 签名与 GitHub 附件是否同一次构建 |
+| `update zip has no runtime-revision.json` | rc.54 及之前的壳读取 zip 内清单的路径漏了 `resources/` 段（实际打包位置 `Contents/Resources/resources/runtime-revision.json`，见 `paths.ts resourceDir()`）；rc.55 起修复（先按嵌套路径读、回落 flat）。旧壳上重试/重下都无效——预置代码在旧壳进程里，只能手动安装一次修复版 |
 | 每次热更都下整包 | 看 `~/.dsh-desktop/logs/updater.log` 是否 `Unable to locate previous update.zip`（DMG 第一次是预期）。清过 `~/Library/Caches/oh-my-dsh-updater/` 也会再整包。国内慢先设 `HTTPS_PROXY`，不要指望换 updater 超时 |
 | 热更后 sidecar 起不来 / missing runtime.tar.gz | 确认该 Release 有 `runtime-<sha>-*.tar.gz` 与 `runtime-revision-<triple>.json`，npm 上有 `@crazx/dsh-desktop-runtime-<triple>-0@<版>`，且 `~/.dsh-desktop/runtime/<sha>/.ok` 与 revision 哈希一致；更新必须先下完 zip+runtime 才允许重启 |
 | DMG 安装页退化成默认布局 | `bash scripts/verify-dmg-layout.sh <dmg>` |

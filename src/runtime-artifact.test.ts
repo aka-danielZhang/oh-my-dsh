@@ -319,7 +319,30 @@ describe('readBundledRevisionFromZip', () => {
     }
   })
 
-  it('reads runtime-revision.json out of an app zip', (t) => {
+  it('reads runtime-revision.json out of an app zip (extraResources layout)', (t) => {
+    const zip = spawnSync('zip', ['--version'], { stdio: 'ignore' })
+    if (zip.status !== 0) {
+      t.skip('zip binary unavailable')
+      return
+    }
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-rev-'))
+    try {
+      // The layout electron-builder actually ships: extraResources.to nests
+      // the manifest one level under Contents/Resources.
+      const entry = path.join(dir, 'Oh My DSH.app', 'Contents', 'Resources', 'resources')
+      fs.mkdirSync(entry, { recursive: true })
+      const revision = { sha: 'abc123', runtimeTarball: 'def456' }
+      fs.writeFileSync(path.join(entry, 'runtime-revision.json'), JSON.stringify(revision))
+      const zipPath = path.join(dir, 'update.zip')
+      const packed = spawnSync('zip', ['-q', '-r', zipPath, 'Oh My DSH.app'], { cwd: dir, stdio: 'ignore' })
+      assert.equal(packed.status, 0)
+      assert.deepEqual(readBundledRevisionFromZip(zipPath), revision)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('still accepts the flat legacy Resources layout', (t) => {
     const zip = spawnSync('zip', ['--version'], { stdio: 'ignore' })
     if (zip.status !== 0) {
       t.skip('zip binary unavailable')

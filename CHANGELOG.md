@@ -4,6 +4,12 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 
 ## [Unreleased]
 
+## [0.3.0-rc.55] - 2026-09-12
+
+### Fixed
+
+- 修复应用内更新在下载完成后必然失败的问题：更新预置阶段读取新版本 zip 内 `runtime-revision.json` 的路径少了一层 `resources/`（应用实际打包位置是 `Contents/Resources/resources/`），于是进度走满后报「update zip has no runtime-revision.json」。该缺陷随热更新原子切换（#38）引入，此前在用版本都没真正走过应用内热更所以一直没暴露。受影响的用户请手动下载安装本版一次，之后的自动更新恢复正常。
+
 ## [0.3.0-rc.54] - 2026-09-12
 
 ### Fixed

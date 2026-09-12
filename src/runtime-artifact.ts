@@ -439,20 +439,29 @@ export function downloadRuntimeTarball(input: {
 /**
  * Read the new bundle's runtime-revision.json out of a downloaded update zip
  * (one small entry, so a synchronous unzip is fine). Slim zips carry no
- * runtime.tar.gz but always carry this manifest.
+ * runtime.tar.gz but always carry this manifest — nested under
+ * `Contents/Resources/resources/` (electron-builder `extraResources.to` is
+ * relative to Contents/Resources, and the shell's own readers consume that
+ * same layout via resourceDir()); the flat legacy path stays accepted.
  */
 export function readBundledRevisionFromZip(zipPath: string): { sha?: string; runtimeTarball?: string } | undefined {
-  const result = spawnSync('unzip', ['-p', zipPath, '*/Contents/Resources/runtime-revision.json'], {
-    encoding: 'utf8',
-    maxBuffer: 1024 * 1024,
-    windowsHide: true,
-  })
-  if (result.status !== 0 || typeof result.stdout !== 'string' || result.stdout.trim() === '') return undefined
-  try {
-    return JSON.parse(result.stdout) as { sha?: string; runtimeTarball?: string }
-  } catch {
-    return undefined
+  for (const pattern of [
+    '*/Contents/Resources/resources/runtime-revision.json',
+    '*/Contents/Resources/runtime-revision.json',
+  ]) {
+    const result = spawnSync('unzip', ['-p', zipPath, pattern], {
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+    })
+    if (result.status !== 0 || typeof result.stdout !== 'string' || result.stdout.trim() === '') continue
+    try {
+      return JSON.parse(result.stdout) as { sha?: string; runtimeTarball?: string }
+    } catch {
+      return undefined
+    }
   }
+  return undefined
 }
 
 /**
