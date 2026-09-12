@@ -30,6 +30,8 @@ export const PANEL_KEY = 'automation'
 const SEARCH_LABELS = ['搜索会话', 'Search sessions']
 /** Labels of the add-workspace control that shares the same row. */
 const ADD_LABELS = ['添加工作区', 'Add workspace']
+/** Zero-child texts of the session browser's section label, both locales. */
+const SECTION_LABELS = ['会话', 'Sessions', '工作区', 'Workspaces']
 
 const MARK = 'data-dsh-stask-entry'
 const ROW_MARK = 'data-dsh-stask-entry-row'
@@ -39,6 +41,8 @@ const BUTTON_SIZE = 28
 const FALLBACK_GAP = 8
 /** Coalescing window for DOM mutations, in ms. */
 const SCAN_DEBOUNCE = 60
+/** Walk-up budget when looking for the header row above a control. */
+const MAX_ROW_HOPS = 6
 
 const CLOCK_SVG = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">'
   + '<circle cx="8" cy="8" r="6.2" stroke="currentColor" stroke-width="1.4"/>'
@@ -54,6 +58,43 @@ function buttonByLabels(labels: readonly string[]): HTMLButtonElement | null {
   for (const label of labels) {
     const found = document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
     if (found !== null) return found
+  }
+  return null
+}
+
+/**
+ * Walk up from a control to the header row that holds it: the nearest
+ * ancestor containing at least one other button (the row always holds the
+ * search and add controls together; a Tooltip wrapper or icon span in between
+ * must not win). Returns null past the hop budget.
+ */
+function rowOf(control: HTMLElement): HTMLElement | null {
+  let row: HTMLElement | null = control
+  for (let hop = 0; hop < MAX_ROW_HOPS && row !== null; hop++) {
+    if (row.querySelectorAll('button').length >= 2) return row
+    row = row.parentElement
+  }
+  return null
+}
+
+/**
+ * Fallback anchor used when the aria-label lookup misses (a fork or locale
+ * variant that renders the search control differently): the section label is
+ * a zero-child element reading 会话/Sessions/工作区/Workspaces, and its header
+ * row is the nearest ancestor holding two or more buttons.
+ */
+function rowBySectionLabel(): { row: HTMLElement, anchor: HTMLButtonElement } | null {
+  for (const text of SECTION_LABELS) {
+    for (const label of document.querySelectorAll<HTMLElement>('span,div,h1,h2,h3,h4')) {
+      if (label.childElementCount !== 0 || label.textContent?.trim() !== text) continue
+      let row: HTMLElement | null = label
+      for (let hop = 0; hop < MAX_ROW_HOPS && row !== null; hop++) {
+        row = row.parentElement
+        if (row === null) break
+        const buttons = row.querySelectorAll<HTMLButtonElement>('button')
+        if (buttons.length >= 2) return { row, anchor: buttons[0] }
+      }
+    }
   }
   return null
 }
@@ -103,8 +144,15 @@ class Scanner {
  */
 export function installEntry(layout: LayoutFace, label: () => string): () => void {
   const scan = (): void => {
-    const anchor = buttonByLabels(SEARCH_LABELS) ?? buttonByLabels(ADD_LABELS)
-    const row = anchor?.parentElement ?? null
+    // Primary: the search/add controls by accessible label. Fallback: the
+    // section label text — the previewed injector's proven path, kept for
+    // forks or locales where the rendered control lost the expected label.
+    const byLabel = buttonByLabels(SEARCH_LABELS) ?? buttonByLabels(ADD_LABELS)
+    const located = byLabel !== null && byLabel.parentElement !== null
+      ? { row: rowOf(byLabel), anchor: byLabel }
+      : rowBySectionLabel()
+    const anchor = located?.anchor ?? null
+    const row = located?.row ?? null
     const existing = document.querySelector<HTMLButtonElement>(`[${MARK}]`)
     if (anchor === null || row === null) {
       // Anchor absent (sidebar collapsed to its rail, or a composition without
