@@ -22,6 +22,7 @@ oh-my-dsh 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness
 | 打包手册（构建/签名/公证） | [docs/packaging-playbook.md](docs/packaging-playbook.md) |
 | 发布 runbook（tag/latest 指针/secrets） | [docs/release-runbook.md](docs/release-runbook.md) |
 | 开发插件接入已安装 Desktop（接入前必读） | [docs/desktop-plugin-integration.md](docs/desktop-plugin-integration.md) |
+| OhMyMemo 记忆空间（范围/状态/视图/目录地图） | [docs/ohmymemo-memory-space.md](docs/ohmymemo-memory-space.md) |
 | Harness 基线升级 playbook | [docs/harness-bump/README.md](docs/harness-bump/README.md) |
 | 决策记录（日期命名，非平凡变更必写） | `docs/notes/` |
 
