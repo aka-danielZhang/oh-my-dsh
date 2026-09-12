@@ -229,13 +229,20 @@ export interface ModelChoice {
   provider: string
   providerName: string
   model: string
+  /** Human-readable model name; falls back to the model id. */
+  name?: string
+  /** Adapter default effort, shown while the entry still means 跟随默认. */
+  defaultEffort?: string
   efforts: readonly string[]
 }
 
 /**
- * Model chip with the composer's two-level menu: a root pane offering 模型 /
- * 推理等级, each drilling into its own list. The trigger shows
- * `model · effort`, exactly like the composer's model seat.
+ * Model chip mirroring the composer's model seat: the trigger reads
+ * `model · effort`; the menu opens on a root pane offering 模型 and 推理等级.
+ * The model pane lists 跟随默认 plus one row per route grouped under its
+ * provider; picking a model resets the effort to the new model's default so
+ * 强度 follows the model. The effort row is always present: with no declared
+ * default it reads “Default” (provider default).
  */
 export function ModelChip({ value, effort, models, defaultModel, labels, effortLabel, onChange }: {
   value: string
@@ -255,9 +262,12 @@ export function ModelChip({ value, effort, models, defaultModel, labels, effortL
   const isDefault = value === 'default'
   const current = isDefault ? defaultChoice : models.find(model => `${model.provider}/${model.model}` === value) ?? null
   const efforts = current?.efforts ?? []
-  const explicit = effort !== 'default'
-  const effortText = explicit ? effortLabel(effort) : efforts.length > 0 ? labels.defaultEffort : null
-  const modelText = current?.model ?? (isDefault ? labels.follow : value)
+  const explicit = effort !== 'default' && effort !== ''
+  const declaredDefault = current?.defaultEffort ?? null
+  const effortText = explicit
+    ? effortLabel(effort)
+    : declaredDefault === null ? labels.defaultEffort : effortLabel(declaredDefault)
+  const modelText = current === null ? (isDefault ? labels.follow : value) : current.name ?? current.model
   const modelOptions: ChipOption[] = [
     {
       value: 'default',
@@ -297,12 +307,38 @@ export function ModelChip({ value, effort, models, defaultModel, labels, effortL
       {active ? <span className="dsh-stask-menu-item-check"><IconCheckOutline16 size={16} /></span> : null}
     </button>
   )
+  // 跟随默认 first, then one row per route under a provider section header
+  // (composer-style grouping); picking a model resets the effort.
+  const modelRows: ReactNode[] = [
+    option(
+      { value: 'default', label: defaultChoice === null ? labels.follow : labels.followWith.replace('{model}', defaultChoice.name ?? defaultChoice.model) },
+      isDefault,
+      () => { setOpen(false); onChange('default', 'default') },
+    ),
+  ]
+  let lastProvider = ''
+  for (const model of models) {
+    if (model.provider !== lastProvider) {
+      lastProvider = model.provider
+      modelRows.push(
+        <div className="dsh-stask-menu-section" key={`group:${model.provider}`}>{model.providerName}</div>,
+      )
+    }
+    const key = `${model.provider}/${model.model}`
+    modelRows.push(
+      option(
+        { value: key, label: model.name ?? model.model },
+        !isDefault && key === value,
+        () => { setOpen(false); onChange(key, 'default') },
+      ),
+    )
+  }
   return (
     <div className="dsh-stask-chipwrap">
       <button
         type="button"
         className="dsh-stask-chip"
-        title={effortText === null ? modelText : `${modelText} · ${effortText}`}
+        title={`${modelText} · ${effortText}`}
         aria-haspopup="menu"
         aria-expanded={open}
         onMouseDown={swallow}
@@ -313,7 +349,7 @@ export function ModelChip({ value, effort, models, defaultModel, labels, effortL
         }}
       >
         <span className="dsh-stask-chip-label">{modelText}</span>
-        {effortText === null ? null : <span className="dsh-stask-chip-effort">{effortText}</span>}
+        <span className="dsh-stask-chip-effort">{effortText}</span>
         <span
           className={`dsh-stask-chip-caret${open ? ' dsh-stask-chip-open' : ''}`}
           aria-hidden="true"
@@ -327,16 +363,10 @@ export function ModelChip({ value, effort, models, defaultModel, labels, effortL
             {pane === 'root'
               ? [
                   cell('model', labels.model, modelText, () => { setPane('model') }),
-                  ...efforts.length === 0
-                    ? []
-                    : [cell('effort', labels.effort, effortText ?? labels.defaultEffort, () => { setPane('effort') })],
+                  cell('effort', labels.effort, effortText, () => { setPane('effort') }),
                 ]
               : pane === 'model'
-                ? modelOptions.map(item => option(
-                    item,
-                    isDefault ? item.value === 'default' : item.value === value,
-                    () => { setOpen(false); onChange(item.value, 'default') },
-                  ))
+                ? modelRows
                 : effortOptions.map(item => option(
                     item,
                     (explicit ? effort : 'default') === item.value,

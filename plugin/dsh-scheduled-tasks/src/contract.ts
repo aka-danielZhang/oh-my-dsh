@@ -290,6 +290,10 @@ export const modelRouteOptionSchema = z.object({
   provider: z.string(),
   providerName: z.string(),
   model: z.string(),
+  /** Human-readable model name, as the composer's selector shows it. */
+  name: z.string().optional(),
+  /** Adapter default effort; the selector shows its name while none is picked. */
+  defaultEffort: z.string().optional(),
   efforts: z.array(z.string()),
 }).strict()
 export type ModelRouteOption = z.infer<typeof modelRouteOptionSchema>

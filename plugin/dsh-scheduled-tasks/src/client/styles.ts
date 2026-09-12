@@ -202,6 +202,7 @@ const CSS = `
 .dsh-stask-menu-item-danger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-danger); }
 .dsh-stask-menu-item-check { display: inline-flex; flex: none; color: var(--dsw-alias-label-primary); }
 .dsh-stask-menu-empty { padding: 8px 10px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; }
+.dsh-stask-menu-section { padding: 6px 10px 2px; color: var(--dsw-alias-label-tertiary); font-size: 12px; line-height: 18px; font-weight: 500; }
 .dsh-stask-menu-cell {
   box-sizing: border-box; display: flex; align-items: center; gap: 8px; width: auto; min-width: 100%; height: 40px;
   padding: 0 10px; border: none; border-radius: 10px; background: transparent; color: var(--dsw-alias-label-primary);

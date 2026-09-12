@@ -432,8 +432,8 @@ export class ScheduledTasksService extends TypertRemoteService {
     const agentDefaultModel = this.ctx.get('agentDefaultModel') as { currentSelection(): { provider: string, model: string, reasoningEffort?: string } } | undefined
     const llm = this.ctx.get('llm') as {
       listProviders(): Array<{ id: string, name: string }>
-      listModels(provider: string): Promise<Array<{ id?: unknown }>>
-      resolveModelInfo(provider: string, model: string): Promise<{ reasoning?: { efforts?: Array<unknown> } } | null | undefined>
+      listModels(provider: string): Promise<Array<{ id?: unknown, name?: unknown }>>
+      resolveModelInfo(provider: string, model: string): Promise<{ reasoning?: { efforts?: Array<unknown>, defaultEffort?: unknown } } | null | undefined>
     } | undefined
     if (workspaceRegistry === undefined || agentPresets === undefined || permissionPresets === undefined || agentDefaultModel === undefined || llm === undefined) {
       throw new Error(`${name}: catalog services are not mounted`)
@@ -454,7 +454,7 @@ export class ScheduledTasksService extends TypertRemoteService {
     let total = 0
     for (const provider of llm.listProviders()) {
       if (total >= 40) break
-      let items: Array<{ id?: unknown }>
+      let items: Array<{ id?: unknown, name?: unknown }>
       try {
         items = await llm.listModels(provider.id)
       } catch {
@@ -464,16 +464,34 @@ export class ScheduledTasksService extends TypertRemoteService {
         if (total >= 40) break
         if (typeof item.id !== 'string' || item.id.length === 0) continue
         let efforts: string[] = []
+        let defaultEffort: string | undefined
         try {
           const info = await llm.resolveModelInfo(provider.id, item.id)
-          const declared = info?.reasoning?.efforts
-          if (Array.isArray(declared)) {
-            efforts = declared.map(effort => String(typeof effort === 'string' ? effort : (effort as { id?: unknown }).id ?? effort))
+          const reasoning = info?.reasoning
+          if (reasoning !== undefined) {
+            const declared = reasoning.efforts
+            if (Array.isArray(declared)) {
+              // LlmReasoningEffortInfo is { id, name, description? }; plain
+              // strings are tolerated for forward compatibility.
+              efforts = declared
+                .map(effort => typeof effort === 'string' ? effort : typeof (effort as { id?: unknown }).id === 'string' ? (effort as { id: string }).id : '')
+                .filter(effort => effort !== '')
+            }
+            const declaredDefault = reasoning.defaultEffort
+            if (typeof declaredDefault === 'string' && declaredDefault.length > 0) defaultEffort = declaredDefault
           }
         } catch {
           efforts = []
         }
-        models.push({ provider: provider.id, providerName: provider.name, model: item.id, efforts })
+        const displayName = typeof item.name === 'string' && item.name.length > 0 ? item.name : item.id
+        models.push({
+          provider: provider.id,
+          providerName: provider.name,
+          model: item.id,
+          name: displayName,
+          ...defaultEffort === undefined ? {} : { defaultEffort },
+          efforts,
+        })
         total += 1
       }
     }
