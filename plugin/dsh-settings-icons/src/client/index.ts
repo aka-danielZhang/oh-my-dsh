@@ -15,8 +15,6 @@
  */
 
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-// Type-only: the client timer service (`ctx.timer`) and its Context merge.
-import type {} from '@deepseek-ai/cordis-plugin-timer'
 // Type-only: `ctx.slots` (the renderer-owned slot registry face) and the
 // 'settings.section' declaration this package reads its rows from.
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
@@ -28,15 +26,8 @@ import type { NavRow } from './inject.ts'
 /** The slot key the settings shell projects its nav rows from. */
 const SETTINGS_SECTION = 'settings.section'
 
-/**
- * Rescan coalescing delay. The observer fires once per mutation batch, and
- * opening the panel (or any unrelated repaint on a busy page) arrives as a
- * burst; a short delay collapses each burst into one scan.
- */
-const SCAN_DELAY_MS = 60
-
-/** Services: the slot ledger, and the timer that coalesces rescans. */
-export const inject = ['slots', 'timer']
+/** Service: the slot ledger (rescans ride the observer microtask directly). */
+export const inject = ['slots']
 
 /**
  * Client plugin body: paint the target settings-nav rows and undo the paint
@@ -59,8 +50,5 @@ export function apply(ctx: ClientContext): void {
     return rows
   }
 
-  ctx.effect(() => startInjection({
-    rows: readRows,
-    defer: fn => ctx.timer.timeout(fn, SCAN_DELAY_MS),
-  }, NAV_ICON_TARGETS), 'dsh-settings-icons: settings-nav glyphs')
+  ctx.effect(() => startInjection({ rows: readRows }, NAV_ICON_TARGETS), 'dsh-settings-icons: settings-nav glyphs')
 }

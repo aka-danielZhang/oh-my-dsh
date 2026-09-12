@@ -87,12 +87,6 @@ export function projectRows(options: readonly unknown[]): readonly NavRow[] {
 export interface InjectionDeps {
   /** Live nav rows (re-read on every scan). */
   rows(): readonly NavRow[]
-  /**
-   * Coalesce a rescan (the caller owns the timer service).
-   * @param fn - the rescan.
-   * @returns a canceller for the pending call.
-   */
-  defer(fn: () => void): () => void
 }
 
 /**
@@ -158,8 +152,6 @@ export function startInjection(
 ): () => void {
   const painted = new Map<Element, () => void>()
   let nav: Element | null = null
-  let cancelDeferred: (() => void) | undefined
-  let stopped = false
 
   /** The nav rails survive their own re-renders, so only a detached one re-queries. */
   function currentNav(): Element | null {
@@ -199,21 +191,23 @@ export function startInjection(
     }
   }
 
-  function schedule(): void {
-    if (stopped) return
-    cancelDeferred?.()
-    cancelDeferred = deps.defer(scan)
-  }
-
   scan()
-  const observer = new MutationObserver(schedule)
+  // The observer callback is a microtask: it runs BEFORE the browser paints
+  // the mutation it observed, so a freshly opened panel never renders a
+  // stock-glyph frame on the decorated rows. A scan is a no-op unless the nav
+  // rail is mounted, and the row projection is memoized by ledger version, so
+  // one scan per mutation batch stays trivial.
+  const observer = new MutationObserver(() => {
+    try {
+      scan()
+    } catch {
+      // fail-invisible: a hostile DOM shape costs the glyphs, never the shell.
+    }
+  })
   observer.observe(document.body, { childList: true, subtree: true })
 
   return () => {
-    stopped = true
     observer.disconnect()
-    cancelDeferred?.()
-    cancelDeferred = undefined
     for (const undo of painted.values()) undo()
     painted.clear()
     nav = null

@@ -18,7 +18,7 @@ browser-only，纯 DOM 装饰：不占 slot、不改设置壳、不动主题 tok
 - **fail-invisible**：label 读不到、或 nav 里没有对应文本的行，整条不画；绝不错画到别的行。面板关闭时不做任何事。
 - **跟随主题**：图标是 data-URI `mask-image` 画在 stock 已挂载的 glyph 元素上，颜色取 `currentColor`，因此 hover、选中态与深浅色都由设置壳自己的前景色决定。
 - **locale**：ledger 版本在注册/注销/locale 重注册时都会推进，标签随之重取，中英文都按当时的真实导航文本匹配（代码里没有任何硬编码文案）。
-- **重绘**：glyph 元素被 React 换掉后由 MutationObserver（60ms 合并）重画——标记打在 glyph 元素自身，而不是它的父按钮。
+- **重绘**：glyph 元素被 React 换掉后由 MutationObserver 重画——标记打在 glyph 元素自身，而不是它的父按钮。重画在观察回调（微任务）内同步执行、先于浏览器绘制，因此每次打开设置面板**不会先闪一帧齿轮**；导航未挂载时扫描直接返回，行投影按 ledger 版本记忆，逐批次扫描成本可忽略。
 
 ## Install
 

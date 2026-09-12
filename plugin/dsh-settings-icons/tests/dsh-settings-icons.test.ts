@@ -56,23 +56,12 @@ function mount(document: Document, labels: readonly string[]): void {
 }
 
 /**
- * Start the engine with a captured rescan queue (the timer stand-in).
+ * Start the engine against a static row table.
  * @param rows - the rows the fake ledger reports.
- * @returns the disposer and a flush for the queued rescans.
+ * @returns the disposer (rescans ride the observer microtask directly).
  */
-function harness(rows: readonly NavRow[]): { stop: () => void, flush: () => void } {
-  const queue: (() => void)[] = []
-  const stop = startInjection({
-    rows: () => rows,
-    defer: (fn) => {
-      queue.push(fn)
-      return () => {
-        const at = queue.indexOf(fn)
-        if (at >= 0) queue.splice(at, 1)
-      }
-    },
-  }, NAV_ICON_TARGETS)
-  return { stop, flush: () => { for (const fn of queue.splice(0)) fn() } }
+function harness(rows: readonly NavRow[]): { stop: () => void } {
+  return { stop: startInjection({ rows: () => rows }, NAV_ICON_TARGETS) }
 }
 
 /** Let jsdom deliver its queued MutationObserver records. */
@@ -93,7 +82,7 @@ function marked(document: Document): readonly (string | null)[] {
 test('both halves export a loadable entry', () => {
   assert.equal(typeof hostApply, 'function')
   assert.equal(typeof clientApply, 'function')
-  assert.deepEqual([...inject], ['slots', 'timer'])
+  assert.deepEqual([...inject], ['slots'])
 })
 
 test('the target table covers the three sections and every glyph is a mask', () => {
@@ -145,12 +134,11 @@ test('paints the matched rows only, and stop restores them exactly', () => {
 
 test('paints rows that mount after the plugin starts', async () => {
   const document = installDom()
-  const { stop, flush } = harness(ROWS)
+  const { stop } = harness(ROWS)
   assert.deepEqual(marked(document), [])
 
   mount(document, ['使用统计', '记忆'])
   await tick()
-  flush()
   assert.deepEqual(marked(document), ['usage-stats', 'memory'])
   stop()
 })
@@ -158,7 +146,7 @@ test('paints rows that mount after the plugin starts', async () => {
 test('repaints when the shell replaces the mounted glyph element', async () => {
   const document = installDom()
   mount(document, ['记忆'])
-  const { stop, flush } = harness(ROWS)
+  const { stop } = harness(ROWS)
   const button = document.querySelector('button')
   assert.ok(button !== null)
 
@@ -167,7 +155,6 @@ test('repaints when the shell replaces the mounted glyph element', async () => {
   fresh.appendChild(document.createElementNS(SVG_NS, 'path'))
   button.querySelector('svg')?.replaceWith(fresh)
   await tick()
-  flush()
 
   assert.equal(fresh.getAttribute('data-dsh-sicons'), 'memory')
   assert.equal(fresh.querySelector('path')?.getAttribute('display'), 'none')
@@ -188,9 +175,8 @@ test('stays invisible when no mounted row matches the ledger', () => {
 
 test('stays invisible while the settings panel is closed', async () => {
   const document = installDom()
-  const { stop, flush } = harness(ROWS)
+  const { stop } = harness(ROWS)
   await tick()
-  flush()
   assert.deepEqual(marked(document), [])
   stop()
 })
@@ -206,21 +192,11 @@ test('apply projects the ledger once per version and unmounts clean', async () =
   ]
   let ledgerVersion = 3
   let reads = 0
-  const queue: (() => void)[] = []
   const disposers: (() => void)[] = []
   const ctx = {
     slots: {
       getVersion: (): number => ledgerVersion,
       entries: (): readonly unknown[] => { reads += 1; return sections },
-    },
-    timer: {
-      timeout: (fn: () => void): (() => void) => {
-        queue.push(fn)
-        return () => {
-          const at = queue.indexOf(fn)
-          if (at >= 0) queue.splice(at, 1)
-        }
-      },
     },
     effect: (fn: () => () => void): void => { disposers.push(fn()) },
   }
@@ -232,14 +208,12 @@ test('apply projects the ledger once per version and unmounts clean', async () =
   // An unrelated repaint rescans without re-projecting an unchanged ledger.
   document.body.insertAdjacentHTML('beforeend', '<div id="noise"></div>')
   await tick()
-  for (const fn of queue.splice(0)) fn()
   assert.equal(reads, 1)
 
   // A ledger mutation (registration, teardown, locale re-registration) re-projects.
   ledgerVersion += 1
   document.body.insertAdjacentHTML('beforeend', '<div id="noise-2"></div>')
   await tick()
-  for (const fn of queue.splice(0)) fn()
   assert.equal(reads, 2)
 
   for (const dispose of disposers) dispose()
