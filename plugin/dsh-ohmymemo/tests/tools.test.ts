@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import type { Context } from '@deepseek-ai/cordis'
+import { validateJsonSchemaValue } from '@deepseek-ai/dsh-tools'
 import { createOhMyMemoService } from '../src/service.ts'
 import { OhMyMemoStore } from '../src/store.ts'
 import { apply, name, inject } from '../src/tools.ts'
@@ -12,6 +13,7 @@ import { scratchRoot } from './helpers/scratch.ts'
 interface RegisteredTool {
   name: string
   description: string
+  output: { schema: unknown }
   execute: (args: unknown, exec: unknown) => Promise<unknown>
 }
 
@@ -166,6 +168,50 @@ test('unmount disposes every registration', async () => {
   for (const dispose of disposers) dispose()
   assert.equal(ctx.registered.length, 0)
   assert.equal(ctx.sections.length, 0)
+})
+
+// The ToolRegistry validates every successful execute() value against the
+// declared output schema (createSuccessResult) — a mismatch fails loud at
+// dispatch, as the 0.2.3 memory_search `score` omission proved. The mock
+// registry in this file skips that seam, so this test replays it: run each
+// tool's real execute() and validate the value with the same dsh-tools
+// validator the registry uses.
+test('contract: every tool output validates against its declared output schema', async () => {
+  const { harness: ctx } = await setup()
+  const byName = new Map(ctx.registered.map((tool) => [tool.name, tool]))
+  const remember = byName.get('memory_remember')!
+  const search = byName.get('memory_search')!
+  const get = byName.get('memory_get')!
+  const update = byName.get('memory_update')!
+  const forget = byName.get('memory_forget')!
+
+  const created = (await remember.execute({ content: '契约测试锚点 zanzibar。', kind: 'semantic', key: 'contract.anchor' }, exec(AGENT))) as { id: string }
+  const got = (await get.execute({ ids: [created.id] }, exec(AGENT))) as { records: Array<{ revision: number; hash: string }> }
+  const view = got.records[0]!
+
+  // Sequential on purpose: update and forget touch the same record, and the
+  // store's write lock must see them in program order for the CAS to hold.
+  const searchHit = await search.execute({ query: 'zanzibar' }, exec(AGENT))
+  // The empty result validates trivially — it is exactly the shape that
+  // masked the 0.2.3 score omission in manual testing, so pin it too.
+  const searchEmpty = await search.execute({ query: '绝不匹配的检索词 zzqqxx' }, exec(AGENT))
+  const second = await remember.execute({ content: '第二条契约样本。', kind: 'procedural', key: 'contract.second' }, exec(AGENT))
+  const updated = await update.execute({ id: created.id, ifRevision: view.revision, ifHash: view.hash, confirm: true, reason: 'contract' }, exec(AGENT))
+  const forgotten = await forget.execute({ id: created.id, reason: 'contract' }, exec(AGENT))
+
+  const samples = [
+    ['memory_search', searchHit],
+    ['memory_search(empty)', searchEmpty],
+    ['memory_get', got],
+    ['memory_remember', second],
+    ['memory_update', updated],
+    ['memory_forget', forgotten],
+  ] as const
+  for (const [toolName, value] of samples) {
+    const tool = byName.get(toolName.replace(/\(.*\)$/, ''))!
+    const violations = validateJsonSchemaValue(tool.output.schema as Parameters<typeof validateJsonSchemaValue>[0], value, 'value')
+    assert.deepEqual(violations, [], `${toolName} output violates its declared schema`)
+  }
 })
 
 test('workspace-scoped remember uses the session cwd (forged cwds impossible)', async () => {

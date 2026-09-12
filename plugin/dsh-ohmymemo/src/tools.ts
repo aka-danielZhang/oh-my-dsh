@@ -97,6 +97,7 @@ export function apply(ctx: Context): void {
                 revision: { type: 'number', required: true },
                 status: { type: 'string', required: true },
                 snippet: { type: 'string', required: true },
+                score: { type: 'number', required: true },
               },
             },
           },
