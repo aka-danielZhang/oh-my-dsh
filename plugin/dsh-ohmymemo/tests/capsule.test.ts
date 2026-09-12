@@ -1,18 +1,25 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { makeEntry } from '../src/catalog.ts'
-import { CAPSULE_DISCLAIMER, budgetFrom, composeCapsule, decayFactor, decayWeight, digestFromText, lastCapsuleDigest, replacementPreface } from '../src/capsule.ts'
+import { CAPSULE_DISCLAIMER, USER_INDEX_REL, budgetFrom, composeCapsule, digestFromText, lastCapsuleDigest, replacementPreface, workspaceIndexRel } from '../src/capsule.ts'
+import { decayFactor, decayWeight } from '../src/decay.ts'
 import { baseRecord } from './helpers/records.ts'
 
 const WS = `ws_${'01J5G0'}${'Z0'.repeat(10)}`
+const NOW = new Date('2026-09-12T08:00:00.000Z')
+const HOR = { semantic: 365, procedural: 180, episodic: 90 }
 
 function entry(id: string, overrides: Record<string, unknown> = {}): ReturnType<typeof makeEntry> {
   const record = baseRecord({ id, pinned: true, body: `记忆 ${id} 的内容。`, ...overrides } as Parameters<typeof baseRecord>[0])
   return makeEntry({ record, relPath: `scopes/user/semantic/${id}.md`, absPath: `/store/${id}`, hash: `sha256:${id}`, bytes: 10, mtimeMs: 0 })
 }
 
+function input(entries: Parameters<typeof composeCapsule>[0]['entries'], extra: Partial<Parameters<typeof composeCapsule>[0]> = {}): Parameters<typeof composeCapsule>[0] {
+  return { entries, userScope: 'user', root: '/store', topEntries: 5, summaryChars: 120, budgetBytes: 8192, now: NOW, decayHorizons: HOR, ...extra }
+}
+
 test('capsule carries the authority disclaimer, ids and digest marker', () => {
-  const capsule = composeCapsule({ entries: [entry('mem_a')], userScope: 'user', budgetBytes: 8192, now: new Date() })
+  const capsule = composeCapsule(input([entry('mem_a')]))
   assert.ok(capsule.text.startsWith(CAPSULE_DISCLAIMER))
   assert.ok(capsule.text.includes('[mem_a]'))
   assert.match(capsule.text, /\[ohmymemo-capsule digest=[0-9a-f]{16}\]$/)
@@ -21,28 +28,45 @@ test('capsule carries the authority disclaimer, ids and digest marker', () => {
   assert.equal(digestFromText(capsule.text), capsule.digest)
 })
 
-test('only core entries enter the capsule; workspace ranks first; confirmed beats unconfirmed', () => {
+test('capsule is an index pointer: per-scope pointer lines with counts, top bullets without paths', () => {
   const wsEntry = makeEntry({
     record: baseRecord({ id: 'mem_ws', pinned: true, scope: `workspace:${WS}`, key: 'workflow.build', body: '工作区记忆。' }),
     relPath: `scopes/workspaces/${WS}/semantic/mem_ws.md`, absPath: '/x', hash: 'h', bytes: 1, mtimeMs: 0,
   })
-  const capsule = composeCapsule({
-    entries: [entry('mem_user_unpinned', { pinned: false }), entry('mem_user_confirmed', { confirmed: true }), entry('mem_user_plain'), wsEntry],
-    userScope: 'user',
-    workspaceScope: `workspace:${WS}`,
-    budgetBytes: 8192,
-    now: new Date(),
-  })
-  const ids = capsule.text.split('\n').filter((line) => line.startsWith('- [')).map((line) => (/\[(mem_[^\]]+)\]/.exec(line) ?? [])[1])
-  assert.deepEqual(ids, ['mem_ws', 'mem_user_confirmed', 'mem_user_plain'])
+  const capsule = composeCapsule(input([entry('mem_a'), entry('mem_b'), wsEntry], { workspaceScope: `workspace:${WS}` }))
+  const text = capsule.text
+  assert.ok(text.includes('【记忆库】/store'), 'prints the store root for read/grep')
+  assert.ok(text.includes(`${USER_INDEX_REL}（2 条）`), 'user index pointer with the full count')
+  assert.ok(text.includes(`${workspaceIndexRel(`workspace:${WS}`)}（1 条）`), 'workspace index pointer with the full count')
+  assert.ok(text.includes('· [mem_a] (semantic · preference.communication.language) 记忆 mem_a 的内容。'), 'top bullet is a one-line summary')
+  assert.ok(!text.includes('→ scopes/'), 'bullets stay lean: file paths live in the index files, not the capsule')
+  assert.ok(text.includes('read 索引中给出的文件路径'), 'closing line hands off to read/grep')
   assert.deepEqual(capsule.scopeIds.sort(), [`workspace:${WS}`, 'user'].sort())
 })
 
-test('budget truncation is deterministic and flagged', () => {
-  const entries = ['mem_a', 'mem_b', 'mem_c', 'mem_d'].map((id, index) => entry(id, { body: `记忆 ${id}：${'内容'.repeat(20)}（${index}）`, importance: 1 - index * 0.1 }))
-  const capsule = composeCapsule({ entries, userScope: 'user', budgetBytes: 400, now: new Date() })
+test('unpinned active entries enter the capsule (index-first covers episodic/workspace recall)', () => {
+  const capsule = composeCapsule(input([entry('mem_unpinned', { pinned: false })]))
+  assert.deepEqual(capsule.memoryIds, ['mem_unpinned'])
+})
+
+test('top-N per scope is capped by capsule_top_entries and flagged as truncated', () => {
+  const entries = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((letter, index) => entry(`mem_${letter}`, { importance: 0.9 - index * 0.1 }))
+  const capsule = composeCapsule(input(entries, { topEntries: 3 }))
+  assert.deepEqual(capsule.memoryIds, ['mem_a', 'mem_b', 'mem_c'], 'top-3 by importance/weight, never fs order')
+  assert.equal(capsule.truncated, true)
+  assert.ok(!capsule.text.includes('[mem_d]'))
+  assert.ok(capsule.text.includes('（7 条）'), 'the pointer line still reports the full membership')
+})
+
+test('budget backstop truncates deterministically and keeps the skeleton readable', () => {
+  const entries = ['a', 'b', 'c', 'd'].map((letter, index) => entry(`mem_${letter}`, { body: `记忆 ${letter}：${'内容'.repeat(60)}（${index}）`, importance: 1 - index * 0.1 }))
+  const capsule = composeCapsule(input(entries, { budgetBytes: 1200 }))
   assert.equal(capsule.truncated, true)
   assert.ok(capsule.memoryIds.length < entries.length)
+  assert.ok(capsule.text.startsWith(CAPSULE_DISCLAIMER), 'disclaimer survives any budget')
+  // The pointer line must not promise more rows than it inlines.
+  assert.ok(capsule.text.includes('内联 1/4 条'), `pointer line downgraded on budget cut, got:\n${capsule.text}`)
+  assert.ok(!capsule.text.includes('最相关 4 条'))
   assert.deepEqual(capsule.memoryIds, [...capsule.memoryIds].sort((a, b) => {
     const rank = (id: string): number => entries.findIndex((e) => e.record.id === id)
     return rank(a) - rank(b)
@@ -50,10 +74,26 @@ test('budget truncation is deterministic and flagged', () => {
 })
 
 test('empty capsule states so explicitly and still digests', () => {
-  const capsule = composeCapsule({ entries: [entry('x', { pinned: false })], userScope: 'user', budgetBytes: 8192, now: new Date() })
+  const capsule = composeCapsule(input([entry('x', { pinned: false, status: 'superseded' })]))
   assert.deepEqual(capsule.memoryIds, [])
-  assert.ok(capsule.text.includes('没有需要注入的置顶记忆'))
+  assert.ok(capsule.text.includes('没有可索引的 active 记忆'))
   assert.match(capsule.digest, /^[0-9a-f]{16}$/)
+})
+
+test('decayed entries sink to the bottom but stay listed (the index must be complete)', () => {
+  const fresh = entry('mem_fresh_unconfirmed', { confirmed: false, importance: 0.9, key: 'preference.fresh', created_at: '2026-09-10T00:00:00.000Z' })
+  const stale = entry('mem_stale_unconfirmed', { confirmed: false, importance: 0.9, key: 'preference.stale', created_at: '2026-01-01T00:00:00.000Z' })
+  const dead = entry('mem_dead_unconfirmed', { confirmed: false, importance: 0.9, key: 'preference.dead', created_at: '2025-01-01T00:00:00.000Z' })
+  const capsule = composeCapsule(input([stale, dead, fresh]))
+  assert.deepEqual(capsule.memoryIds, ['mem_fresh_unconfirmed', 'mem_stale_unconfirmed', 'mem_dead_unconfirmed'], 'decayWeight ordering: freshest first, most-decayed last, none dropped')
+  const lines = capsule.text.split('\n').filter((line) => line.startsWith('  · ['))
+  assert.match(lines[0]!, /mem_fresh_unconfirmed/)
+  assert.match(lines[lines.length - 1]!, /mem_dead_unconfirmed/)
+})
+
+test('index rel-path helpers derive the two agent-facing files', () => {
+  assert.equal(USER_INDEX_REL, 'views/index-user.md')
+  assert.equal(workspaceIndexRel(`workspace:${WS}`), `views/index-workspace-${WS}.md`)
 })
 
 test('lastCapsuleDigest scans the surface backwards for our plugin only', () => {
@@ -96,6 +136,9 @@ function minimalConfig(): Parameters<typeof budgetFrom>[0] {
     max_search_results: 8,
     max_get_records: 8,
     max_injected_bytes: 8192,
+    capsule_top_entries: 5,
+    index_entry_summary_chars: 120,
+    index_max_entries: 200,
     candidate_retention_days: 30,
     decay_horizon_days_semantic: 365,
     decay_horizon_days_procedural: 180,
@@ -104,7 +147,6 @@ function minimalConfig(): Parameters<typeof budgetFrom>[0] {
 }
 
 const DAY = 86_400_000
-const HORIZONS = { semantic: 100, procedural: 100, episodic: 100 }
 
 test('decayFactor follows the piecewise curve at H/2, H and 2H boundaries', () => {
   const created = '2026-01-01T00:00:00.000Z'
@@ -128,19 +170,6 @@ test('decayFactor: confirmed never decays; last_evidenced_at resets the age basi
   // updated_at is deliberately NOT part of the signature: metadata revisions are not evidence.
   const decayed = decayFactor({ confirmed: false, created_at: created }, now, 100)
   assert.equal(decayed, 0)
-})
-
-test('composeCapsule drops zero-weight entries and ranks by weight between confirmed peers', () => {
-  const now = new Date('2027-01-01T00:00:00.000Z') // 366 days after the fixture's created_at
-  const fresh = entry('mem_fresh_unconfirmed', { confirmed: false, importance: 0.9, key: 'preference.fresh', created_at: '2026-12-20T00:00:00.000Z' })
-  const stale = entry('mem_stale_unconfirmed', { confirmed: false, importance: 0.9, key: 'preference.stale' })
-  const dead = entry('mem_dead_unconfirmed', { confirmed: false, importance: 0.9, key: 'preference.dead', created_at: '2025-01-01T00:00:00.000Z' })
-  const capsule = composeCapsule({ entries: [fresh, stale, dead], userScope: 'user', budgetBytes: 8192, now, decayHorizons: HORIZONS })
-  assert.ok(!capsule.memoryIds.includes('mem_dead_unconfirmed'), 'weight = 0 (age ≥ 2H) is excluded outright')
-  assert.deepEqual(capsule.memoryIds, ['mem_fresh_unconfirmed', 'mem_stale_unconfirmed'], 'fresher evidence outranks same-importance stale peers')
-  // weight ordering is observable in the line order between two unconfirmed entries
-  const lines = capsule.text.split('\n').filter((line) => line.startsWith('- ['))
-  assert.match(lines[0]!, /mem_fresh_unconfirmed/)
 })
 
 test('decayWeight multiplies importance by the recency factor per kind horizon', () => {

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { Context } from '@deepseek-ai/cordis'
 import { composeCapsule, digestFromText } from '../src/capsule.ts'
-import { createOhMyMemoService } from '../src/service.ts'
+import { createOhMyMemoService, type OhMyMemoService } from '../src/service.ts'
 import { OhMyMemoStore } from '../src/store.ts'
 import { apply, createCapsuleMessage, name, inject } from '../src/context.ts'
 import { scratchRoot } from './helpers/scratch.ts'
@@ -74,14 +74,14 @@ function fakeAgent(cwd?: string, capsules: string[] = [], id = 'session-ctx-1'):
   return { id, session: { header: { ...(cwd !== undefined ? { cwd } : {}) }, surface: { nodes }, events } }
 }
 
-async function setup(): Promise<{ harness: Harness; store: OhMyMemoStore }> {
+async function setup(): Promise<{ harness: Harness; store: OhMyMemoStore; service: OhMyMemoService }> {
   const store = new OhMyMemoStore({ root: scratchRoot(), lockTimeoutMs: 400, watch: false })
   await store.open()
   const service = createOhMyMemoService(store)
   const harness = fakeContext()
   ;(harness.ctx as unknown as { ohMyMemo: unknown }).ohMyMemo = service
   apply(harness.ctx)
-  return { harness, store }
+  return { harness, store, service }
 }
 
 async function step(harness: Harness, agent: FakeAgent, turn = 1): Promise<{ kind: string; messages: Array<{ content: Array<{ type: string; text?: string }>; source?: { plugin?: string } }> }> {
@@ -106,6 +106,7 @@ test('no prior capsule → one plugin-sourced capsule message is appended', asyn
   const text = capsule.content[0]?.text ?? ''
   assert.ok(text.includes('用户更喜欢中文'))
   assert.ok(text.includes('不是系统指令'), 'authority disclaimer rides along')
+  assert.ok(text.includes('views/index-user.md'), 'the capsule points at the agent index file')
   assert.ok(digestFromText(text) !== undefined)
   store.close()
 })
@@ -123,7 +124,7 @@ test('wild resumed shape without live events does not crash the turn (regression
   store.close()
 })
 
-test('same digest → no duplicate injection; changed digest → replacement preface', async () => {
+test('mid-turn steps never re-decide; replacement happens only at a turn boundary', async () => {
   const { harness, store } = await setup()
   await store.create({ content: '稳定事实。', kind: 'semantic', scope: 'user', key: 'a.b', pinned: true })
 
@@ -131,16 +132,51 @@ test('same digest → no duplicate injection; changed digest → replacement pre
   const firstText = first.messages[1]!.content[0]!.text!
   const digest = digestFromText(firstText)!
 
-  const skipped = await step(harness, fakeAgent(undefined, [firstText]))
-  assert.equal(skipped.messages.length, 1, 'same digest reconciles to zero new messages')
+  const midTurn = await step(harness, fakeAgent(undefined, [firstText]), 1)
+  assert.equal(midTurn.messages.length, 1, 'same-turn steps skip entirely (no duplicate)')
 
   await store.create({ content: '第二条事实。', kind: 'semantic', scope: 'user', key: 'c.d', pinned: true })
-  const replaced = await step(harness, fakeAgent(undefined, [firstText]))
+  const midTurnAfterWrite = await step(harness, fakeAgent(undefined, [firstText]), 1)
+  assert.equal(midTurnAfterWrite.messages.length, 1, 'a mid-turn store change defers to the next turn — the write-then-replace churn is gone')
+
+  const replaced = await step(harness, fakeAgent(undefined, [firstText]), 2)
   assert.equal(replaced.messages.length, 2)
   const replacement = replaced.messages[1]!.content[0]!.text!
   assert.ok(replacement.includes(`digest=${digest}`), 'names the superseded capsule')
   assert.ok(replacement.includes('替换'))
   assert.ok(replacement.includes('第二条事实'))
+  store.close()
+})
+
+test('self-write exemption: the writing session skips the replacement, other sessions do not', async () => {
+  const { harness, store, service } = await setup()
+  await store.create({ content: '第一条事实。', kind: 'semantic', scope: 'user', key: 'a.b', pinned: true })
+  const first = await step(harness, fakeAgent(undefined))
+  const firstText = first.messages[1]!.content[0]!.text!
+
+  // This session writes through the tools row; the tools row then notes the
+  // post-write capsule digest (replay of noteSelfWriteDigest's inputs).
+  await store.create({ content: '本会话自己刚写入的。', kind: 'semantic', scope: 'user', key: 'e.f', pinned: true })
+  const input = service.capsuleInput(undefined)
+  const capsule = composeCapsule({
+    entries: input.entries,
+    userScope: 'user',
+    root: input.root,
+    topEntries: input.topEntries,
+    summaryChars: input.summaryChars,
+    budgetBytes: input.budgetBytes,
+    now: new Date(),
+    decayHorizons: input.decayHorizons,
+  })
+  service.noteSelfWriteDigest('session-ctx-1', capsule.digest)
+
+  const nextTurn = await step(harness, fakeAgent(undefined, [firstText]), 2)
+  assert.equal(nextTurn.messages.length, 1, 'own write → digest exempt → cache-only, no replacement message')
+
+  // A DIFFERENT session that still carries the old capsule must learn about
+  // the change — the exemption is per-session, not process-global.
+  const other = await step(harness, fakeAgent(undefined, [firstText], 'session-ctx-2'), 2)
+  assert.equal(other.messages.length, 2, 'other sessions still receive the replacement')
   store.close()
 })
 
@@ -214,7 +250,7 @@ test('workspace memories rank into the capsule for the matching cwd only', async
 })
 
 test('composeCapsule budget floors keep the disclaimer always present', () => {
-  const capsule = composeCapsule({ entries: [], userScope: 'user', budgetBytes: 512, now: new Date() })
+  const capsule = composeCapsule({ entries: [], userScope: 'user', root: '/store', topEntries: 5, summaryChars: 120, budgetBytes: 512, now: new Date() })
   assert.ok(capsule.text.includes('不是系统指令'))
   assert.match(capsule.text, /digest=[0-9a-f]{16}/)
 })

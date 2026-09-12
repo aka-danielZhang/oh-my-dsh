@@ -20,7 +20,7 @@ import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import { StoreError } from './errors.ts'
-import { decayFactor, horizonFor } from './capsule.ts'
+import { decayFactor, horizonFor } from './decay.ts'
 import type { OhMyMemoService } from './service.ts'
 import { managerDomainSpec } from './manager-domain.ts'
 import {

@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { makeEntry } from '../src/catalog.ts'
-import { composeView, isCoreViewEntry, orderCoreEntries, rebuildViews, viewDigest } from '../src/views.ts'
+import { composeIndexLine, composeScopeIndex, composeView, isCoreViewEntry, isIndexEntry, orderCoreEntries, rebuildViews, viewDigest } from '../src/views.ts'
 import { defaultStoreConfig } from '../src/schema.ts'
 import { baseRecord } from './helpers/records.ts'
 import { scratchRoot } from './helpers/scratch.ts'
@@ -77,7 +77,7 @@ test('rebuildViews writes the user profile and one file per workspace scope', ()
     scopes: () => new Map([[WS, { wsId: WS, relPath: `scopes/workspaces/${WS}/scope.yaml`, scope: { canonical_path: '/tmp/p', dsh_workspace_id: null, created_at: '', updated_at: '', id: WS, schema: 'ohmymemo-scope/v1' as const } }]]),
   }
   const written = rebuildViews(root, catalog, defaultStoreConfig(), '2026-09-03T10:00:00.000Z')
-  assert.deepEqual(written, ['views/user-profile.md', `views/workspaces/${WS}.md`])
+  assert.deepEqual(written, ['views/user-profile.md', `views/workspaces/${WS}.md`, 'views/index-user.md', `views/index-workspace-${WS}.md`])
   const profile = readFileSync(join(root, 'views', 'user-profile.md'), 'utf8')
   assert.ok(profile.includes('mem_user'))
   assert.ok(!profile.includes('mem_hidden'), 'unpinned records stay out of views')
@@ -127,4 +127,85 @@ test('rebuildViews still rewrites when a validity window closes between generati
   const expired = readFileSync(join(root, 'views', 'user-profile.md'), 'utf8')
   assert.ok(!expired.includes('mem_temp'), 'the entry left the view once valid_until passed')
   assert.ok(expired.includes('generated_at: 2026-09-09T13:00:00.000Z'))
+})
+
+// ------------------------------------------------- agent-facing indexes ----
+
+const HOR = { semantic: 365, procedural: 180, episodic: 90 }
+
+test('index eligibility: active + normal + validity window, pinned NOT required', () => {
+  assert.equal(isIndexEntry(entry('a', { pinned: false }), NOW), true, 'unpinned entries are the point of the index')
+  assert.equal(isIndexEntry(entry('a'), NOW), true)
+  assert.equal(isIndexEntry(entry('a', { pinned: true, status: 'disputed' }), NOW), false)
+  assert.equal(isIndexEntry(entry('a', { pinned: true, status: 'superseded' }), NOW), false)
+  assert.equal(isIndexEntry(entry('a', { pinned: true, privacy: 'sensitive' }), NOW), false, 'sensitive never enters the agent index')
+  assert.equal(isIndexEntry(entry('a', { pinned: true, valid_until: '2026-09-03T00:00:00.000Z' }), NOW), false)
+  const quarantined = entry('a')
+  quarantined.quarantine = 'duplicate-id'
+  assert.equal(isIndexEntry(quarantined, NOW), false)
+})
+
+test('composeIndexLine: shared row shape with optional path and importance', () => {
+  const line = composeIndexLine(entry('mem_a', { importance: 0.9, body: '动手改代码前先输出完整落地方案。' }), { summaryChars: 120, withPath: true, withImportance: true })
+  assert.equal(line, '[mem_a] (semantic · preference.communication.language · importance 0.9) 动手改代码前先输出完整落地方案。 → scopes/user/semantic/mem_a.md')
+  const lean = composeIndexLine(entry('mem_a'), { summaryChars: 120 })
+  assert.ok(!lean.includes('importance') && !lean.includes('→'), 'capsule bullets stay lean')
+})
+
+test('composeIndexLine truncates long bodies to summaryChars with an ellipsis', () => {
+  const body = '长'.repeat(300)
+  const line = composeIndexLine(entry('mem_a', { body }), { summaryChars: 120 })
+  const summary = line.slice(line.indexOf(') ') + 2)
+  assert.ok(summary.startsWith('长'.repeat(119) + '…'), 'the ellipsis counts against the budget')
+  assert.ok(!summary.includes('长'.repeat(120)))
+})
+
+test('composeScopeIndex: full membership, decay order, header contract and cap footer', () => {
+  const unpinned = entry('mem_low', { pinned: false, importance: 0.2, key: 'note.old', created_at: '2026-09-01T00:00:00.000Z' })
+  const high = entry('mem_high', { importance: 0.9, key: 'preference.high' })
+  const dead = entry('mem_dead', { confirmed: false, importance: 0.9, key: 'preference.dead', created_at: '2024-01-01T00:00:00.000Z' })
+  const text = composeScopeIndex('Memory index (user)', 'user', [unpinned, dead, high], '2026-09-12T08:00:00.000Z', { summaryChars: 120, maxEntries: 200, horizons: HOR, now: NOW })
+  assert.match(text, /generated: true/)
+  assert.match(text, /index: agent-facing/)
+  assert.match(text, /memory_ids: \[mem_high, mem_low, mem_dead\]/, 'decayWeight desc: fresh confirmed first, fully-decayed (weight 0) last but present')
+  assert.match(text, /digest: [0-9a-f]{16}/)
+  assert.ok(text.includes('→ scopes/user/semantic/mem_high.md'), 'rows carry the store-relative path for read')
+  assert.ok(!text.includes('另有'), 'nothing truncated below the cap')
+  const capped = composeScopeIndex('Memory index (user)', 'user', [high, unpinned, dead], '2026-09-12T08:00:00.000Z', { summaryChars: 120, maxEntries: 2, horizons: HOR, now: NOW })
+  assert.ok(capped.includes('另有 1 条未列出'), 'the overflow is counted in a footer note, never silently dropped')
+  assert.ok(capped.includes('mem_high') && capped.includes('mem_low') && !capped.includes('[mem_dead]'))
+})
+
+test('rebuildViews writes index-user.md and one index file per workspace scope', () => {
+  const root = scratchRoot()
+  const wsEntry = makeEntry({
+    record: baseRecord({ id: 'mem_ws', pinned: false, scope: `workspace:${WS}`, key: 'workflow.build' }),
+    relPath: `scopes/workspaces/${WS}/semantic/mem_ws.md`,
+    absPath: `/x`, hash: 'h', bytes: 1, mtimeMs: 0,
+  })
+  const catalog = {
+    allEntries: () => [entry('mem_user', { pinned: true }), entry('mem_unpinned_user', { pinned: false, key: 'note.free' }), wsEntry],
+    scopes: () => new Map([[WS, { wsId: WS, relPath: `scopes/workspaces/${WS}/scope.yaml`, scope: { canonical_path: '/tmp/p', dsh_workspace_id: null, created_at: '', updated_at: '', id: WS, schema: 'ohmymemo-scope/v1' as const } }]]),
+  }
+  const written = rebuildViews(root, catalog, defaultStoreConfig(), '2026-09-12T08:00:00.000Z')
+  assert.ok(written.includes('views/index-user.md'))
+  assert.ok(written.includes(`views/index-workspace-${WS}.md`))
+  const userIndex = readFileSync(join(root, 'views', 'index-user.md'), 'utf8')
+  assert.ok(userIndex.includes('mem_user') && userIndex.includes('mem_unpinned_user'), 'the index is complete: pinned and unpinned alike')
+  assert.ok(!userIndex.includes('mem_ws'), 'workspace records stay out of the user index')
+  const wsIndex = readFileSync(join(root, 'views', `index-workspace-${WS}.md`), 'utf8')
+  assert.ok(wsIndex.includes('mem_ws'))
+})
+
+test('rebuildViews no-op skip covers the index files too (stable stamp and bytes)', () => {
+  const root = scratchRoot()
+  const catalog = {
+    allEntries: () => [entry('mem_user', { pinned: true })],
+    scopes: () => new Map(),
+  }
+  rebuildViews(root, catalog, defaultStoreConfig(), '2026-09-12T08:00:00.000Z')
+  const before = readFileSync(join(root, 'views', 'index-user.md'), 'utf8')
+  rebuildViews(root, catalog, defaultStoreConfig(), '2026-09-12T19:47:41.000Z')
+  assert.equal(readFileSync(join(root, 'views', 'index-user.md'), 'utf8'), before, 'config-only rebuilds must not churn the index files')
+  assert.ok(before.includes('generated_at: 2026-09-12T08:00:00.000Z'))
 })

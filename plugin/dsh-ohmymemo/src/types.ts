@@ -117,6 +117,12 @@ export interface StoreUserConfig {
   max_search_results: number
   max_get_records: number
   max_injected_bytes: number
+  /** Top-N one-line summaries the capsule inlines per scope (index-first interaction). */
+  capsule_top_entries: number
+  /** Summary width in characters for one index line (views + capsule shared). */
+  index_entry_summary_chars: number
+  /** Hard row cap per agent-facing index file; the overflow is counted in a footer note. */
+  index_max_entries: number
   candidate_retention_days: number
   /** Read-time decay horizons per kind, in days (see the lifecycle design note). */
   decay_horizon_days_semantic: number

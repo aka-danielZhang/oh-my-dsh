@@ -1,6 +1,6 @@
 {
   "name": "dsh-ohmymemo",
-  "version": "0.2.4",
+  "version": "0.3.0",
   "description": "OhMyMemo persistent Markdown memory for DSH with explicit tools, context capsules, scheduled evidence-grounded candidate extraction, and a read-only Memory settings UI",
   "type": "module",
   "main": "lib/index.js",
@@ -41,7 +41,7 @@
     },
     "desktop": {
       "ship": true,
-      "pin": "0.2.4"
+      "pin": "0.3.0"
     }
   },
   "scripts": {

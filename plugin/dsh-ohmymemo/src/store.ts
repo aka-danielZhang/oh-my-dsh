@@ -41,6 +41,7 @@ import { refreshSubtree, scanFile, scanStore } from './scan.ts'
 import {
   defaultStoreConfig,
   detectSecretLike,
+  MAX_TAGS,
   normalizeKey,
   normalizeTag,
   normalizeText,
@@ -115,12 +116,18 @@ export interface StoreConfigSnapshot {
   hash: string
 }
 
-/** In-place revision update input (mandatory revision+hash CAS). */
+/**
+ * In-place revision update input. `ifRevision` is the mandatory CAS anchor
+ * (read from the record file's frontmatter); `ifHash` is optional since the
+ * index-first interaction removed `memory_get` — when omitted, the revision
+ * comparison against the freshly re-read disk record is the only guard, and
+ * an explicit hash still protects against same-revision hand edits.
+ */
 export interface UpdateInput {
   id: string
   ifRevision: number
   /** Content hash the caller read (a same-revision hand edit must not be overwritten). */
-  ifHash: string
+  ifHash?: string
   content?: string
   key?: string
   importance?: number
@@ -133,7 +140,7 @@ export interface UpdateInput {
 export interface SupersedeInput {
   id: string
   ifRevision: number
-  ifHash: string
+  ifHash?: string
   content: string
   key?: string
   importance?: number
@@ -1305,7 +1312,7 @@ export class OhMyMemoStore {
   }
 
   /** Mark a record disputed, merging symmetric `contradicts` links (Phase 2 minimal dispute). */
-  async markDispute(input: { id: string; ifRevision: number; ifHash: string; contradictsWith?: string[]; reason: string }): Promise<MutationResult> {
+  async markDispute(input: { id: string; ifRevision: number; ifHash?: string; contradictsWith?: string[]; reason: string }): Promise<MutationResult> {
     await this.ensureReady()
     return this.withWriterLock(() => {
       const current = this.readUnderLock(input.id)
@@ -1326,7 +1333,7 @@ export class OhMyMemoStore {
   }
 
   /** Reactivate a disputed record (resolution without a replacement). */
-  async markActive(input: { id: string; ifRevision: number; ifHash: string; reason: string }): Promise<MutationResult> {
+  async markActive(input: { id: string; ifRevision: number; ifHash?: string; reason: string }): Promise<MutationResult> {
     await this.ensureReady()
     return this.withWriterLock(() => {
       const current = this.readUnderLock(input.id)
@@ -1544,11 +1551,14 @@ export class OhMyMemoStore {
     this.refreshEntry(current.relPath)
   }
 
-  private assertCas(current: { record: MemoryRecord; hash: string }, ifRevision: number, ifHash: string): void {
+  private assertCas(current: { record: MemoryRecord; hash: string }, ifRevision: number, ifHash: string | undefined): void {
     if (current.record.revision !== ifRevision) {
       throw new StoreError('OHMYMEMO_CAS_REVISION', `revision mismatch: expected ${ifRevision}, disk has ${current.record.revision}`, { id: current.record.id, diskRevision: current.record.revision, diskHash: current.hash })
     }
-    if (current.hash !== ifHash) {
+    // Hash CAS is opt-in since memory_get retired: callers who read the hash
+    // (UI, curator, dream machinery) still send it; the model-facing update
+    // path anchors on the frontmatter revision against the disk re-read.
+    if (ifHash !== undefined && current.hash !== ifHash) {
       throw new StoreError('OHMYMEMO_CAS_HASH', `content hash mismatch: expected ${ifHash}, disk has ${current.hash}`, { id: current.record.id, diskRevision: current.record.revision, diskHash: current.hash })
     }
   }
@@ -1731,18 +1741,23 @@ function appendSource(sources: MemorySource[], source: MemorySource): MemorySour
   return duplicate ? sources : [...sources, source]
 }
 
+/**
+ * Lenient tag normalization (index-first interaction): tags are retrieval
+ * aids, never worth a hard write failure. Each tag is best-effort normalized
+ * (lowercase, whitespace/underscores → hyphen, non-[a-z0-9-] dropped — CJK
+ * tags normalize to nothing and are dropped); duplicates collapse and the
+ * list truncates to the schema cap. An all-unnormalizable input degrades to
+ * no tags, never an error.
+ */
 function normalizeTags(tags: string[] | undefined): string[] {
   if (tags === undefined) return []
   const out: string[] = []
   for (const tag of tags) {
     const normalized = normalizeTag(tag)
-    if (normalized === undefined) {
-      throw new StoreError('OHMYMEMO_INVALID_KEY', `tag "${tag}" cannot be normalized`)
-    }
-    if (!out.includes(normalized)) out.push(normalized)
+    if (normalized === undefined || out.includes(normalized)) continue
+    out.push(normalized)
   }
-  if (out.length > 8) throw new StoreError('OHMYMEMO_BAD_REQUEST', 'at most 8 tags per record')
-  return out
+  return out.slice(0, MAX_TAGS)
 }
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?)?$/

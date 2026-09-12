@@ -10,7 +10,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { decayHorizonsFromConfig, type DecayHorizons } from './capsule.ts'
+import { decayHorizonsFromConfig, type DecayHorizons } from './decay.ts'
 import type { CuratorCatalogEntry } from './dream.ts'
 import type { CatalogEntry, Diagnostic, MemoryChange, MemoryKind, MemoryRecord, MemorySource, MemoryStatus } from './types.ts'
 import type { MemorySearchRequest, MemorySearchResult } from './search.ts'
@@ -83,8 +83,8 @@ export interface OhMyMemoService {
   hasMemoryKey(scope: string, kind: MemoryKind, key: string): boolean
   withMaintenanceLease<T>(run: () => Promise<T>): Promise<T>
   update(request: ServiceUpdateInput): Promise<MutationResult & { supersededId?: string }>
-  dispute(request: { id: string; ifRevision: number; ifHash: string; contradictsWith?: string[]; reason: string }): Promise<MutationResult>
-  reactivate(request: { id: string; ifRevision: number; ifHash: string; reason: string }): Promise<MutationResult>
+  dispute(request: { id: string; ifRevision: number; ifHash?: string; contradictsWith?: string[]; reason: string }): Promise<MutationResult>
+  reactivate(request: { id: string; ifRevision: number; ifHash?: string; reason: string }): Promise<MutationResult>
   forget(request: { id?: string; scope?: string; key?: string; reason?: string }): Promise<ForgetResult>
   /** Deterministic lifecycle maintenance (nightly sweep, no LLM). */
   runLifecycleMaintenance(): Promise<LifecycleMaintenanceReport>
@@ -100,8 +100,30 @@ export interface OhMyMemoService {
   watchStatus(): { active: boolean; degradedReason?: string }
   /** Read-only scope resolution for the current cwd (never creates). */
   scopeForCwd(cwd: string | undefined): string | undefined
-  /** Catalog facts the context capsule needs (entries in scope + budget). */
-  capsuleInput(cwd: string | undefined): { entries: CatalogEntry[]; workspaceScope?: string; budgetBytes: number; decayHorizons: DecayHorizons }
+  /**
+   * Catalog facts the context capsule needs (entries in scope + budget +
+   * the index-first shaping knobs). `root` prints real paths into the
+   * capsule so the model can `read`/`grep` the store.
+   */
+  capsuleInput(cwd: string | undefined): {
+    entries: CatalogEntry[]
+    workspaceScope?: string
+    root: string
+    budgetBytes: number
+    decayHorizons: DecayHorizons
+    topEntries: number
+    summaryChars: number
+    indexMaxEntries: number
+  }
+  /**
+   * Interaction-layer churn guard (index-first): after a successful write,
+   * the tools row records the capsule digest this write produced, keyed by
+   * the writing session. The context row skips the replacement injection
+   * when the disk digest is one of this session's own writes.
+   */
+  noteSelfWriteDigest(sessionId: string, digest: string): void
+  /** True when `digest` was noted by `sessionId`'s own writes (bounded memory). */
+  hasSelfWriteDigest(sessionId: string, digest: string): boolean
   subscribe(listener: (change: MemoryChange) => void): () => void
 }
 
@@ -115,6 +137,12 @@ declare module '@deepseek-ai/cordis' {
 /** Build the service over an opened store. */
 export function createOhMyMemoService(store: OhMyMemoStore, options: { now?: () => Date } = {}): OhMyMemoService {
   const now = options.now ?? ((): Date => new Date())
+
+  // Self-write digest exemption state (index-first interaction): per-session
+  // bounded FIFO of capsule digests this session's own writes produced.
+  const selfWriteDigests = new Map<string, string[]>()
+  const SELF_WRITE_SESSIONS = 64
+  const SELF_WRITE_DIGESTS_PER_SESSION = 16
 
   const searchContextFor = (request: MemorySearchRequest, caller?: { cwd?: string }): SearchContext => {
     const workspaceScope = store.resolveWorkspaceScopeForRead(caller?.cwd)
@@ -211,7 +239,7 @@ export function createOhMyMemoService(store: OhMyMemoStore, options: { now?: () 
         return await store.supersede({
           id: request.id,
           ifRevision: request.ifRevision,
-          ifHash: request.ifHash,
+          ...(request.ifHash !== undefined ? { ifHash: request.ifHash } : {}),
           content: request.content,
           ...(request.key !== undefined ? { key: request.key } : {}),
           ...(request.importance !== undefined ? { importance: request.importance } : {}),
@@ -220,10 +248,10 @@ export function createOhMyMemoService(store: OhMyMemoStore, options: { now?: () 
         })
       }
       if (resolution === 'dispute') {
-        return await service.dispute({ id: request.id, ifRevision: request.ifRevision, ifHash: request.ifHash, ...(request.contradictsWith !== undefined ? { contradictsWith: request.contradictsWith } : {}), reason: request.reason })
+        return await service.dispute({ id: request.id, ifRevision: request.ifRevision, ...(request.ifHash !== undefined ? { ifHash: request.ifHash } : {}), ...(request.contradictsWith !== undefined ? { contradictsWith: request.contradictsWith } : {}), reason: request.reason })
       }
       if (resolution === 'reactivate') {
-        return await service.reactivate({ id: request.id, ifRevision: request.ifRevision, ifHash: request.ifHash, reason: request.reason })
+        return await service.reactivate({ id: request.id, ifRevision: request.ifRevision, ...(request.ifHash !== undefined ? { ifHash: request.ifHash } : {}), reason: request.reason })
       }
       const { resolution: _resolution, ...rest } = request
       return store.update(rest)
@@ -296,12 +324,34 @@ export function createOhMyMemoService(store: OhMyMemoStore, options: { now?: () 
       const workspaceScope = store.resolveWorkspaceScopeForRead(cwd)
       const entries = store.readCatalog().activeEntries().filter((entry) =>
         entry.record.scope === 'user' || (workspaceScope !== undefined && entry.record.scope === workspaceScope))
+      const config = store.storeConfig
       return {
         entries,
         ...(workspaceScope !== undefined ? { workspaceScope } : {}),
-        budgetBytes: Math.max(512, store.storeConfig.max_injected_bytes),
-        decayHorizons: decayHorizonsFromConfig(store.storeConfig),
+        root: store.root,
+        budgetBytes: Math.max(512, config.max_injected_bytes),
+        decayHorizons: decayHorizonsFromConfig(config),
+        topEntries: boundedInteger(config.capsule_top_entries, 1, 20, 5),
+        summaryChars: boundedInteger(config.index_entry_summary_chars, 40, 400, 120),
+        indexMaxEntries: boundedInteger(config.index_max_entries, 10, 2000, 200),
       }
+    },
+    noteSelfWriteDigest(sessionId, digest) {
+      let digests = selfWriteDigests.get(sessionId)
+      if (digests === undefined) {
+        digests = []
+        selfWriteDigests.set(sessionId, digests)
+      }
+      if (!digests.includes(digest)) digests.push(digest)
+      if (digests.length > SELF_WRITE_DIGESTS_PER_SESSION) digests.splice(0, digests.length - SELF_WRITE_DIGESTS_PER_SESSION)
+      // Bound the session map: drop the oldest session beyond the cap.
+      if (selfWriteDigests.size > SELF_WRITE_SESSIONS) {
+        const oldest = selfWriteDigests.keys().next().value
+        if (oldest !== undefined) selfWriteDigests.delete(oldest)
+      }
+    },
+    hasSelfWriteDigest(sessionId, digest) {
+      return selfWriteDigests.get(sessionId)?.includes(digest) ?? false
     },
     subscribe(listener) {
       return store.subscribe(listener)
@@ -334,6 +384,12 @@ function scopeValues(store: OhMyMemoStore): string[] {
     values.push(`workspace:${scopeEntry.wsId}`)
   }
   return values
+}
+
+/** Clamp to [min, max] with a default fallback for non-finite input. */
+function boundedInteger(value: number, min: number, max: number, fallback: number): number {
+  if (!Number.isFinite(value)) return fallback
+  return Math.min(max, Math.max(min, Math.floor(value)))
 }
 
 /** First content line for a curator catalog entry (flattened, bounded). */

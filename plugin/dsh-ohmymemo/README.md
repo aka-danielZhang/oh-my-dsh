@@ -1,6 +1,6 @@
 # dsh-ohmymemo
 
-OhMyMemo：DSH 使用者的本地长期记忆。事实源是 `$DSH_HOME/ohmymemo/` 下的一条记忆一个 Markdown 文件（YAML frontmatter 承载结构化元数据）。Phase 1 交付介质契约（schema 解析、进程内目录、watch/doctor、原子发布、跨进程写锁、revision/hash CAS、journal、事务恢复）；Phase 2 在其上交付显式记忆闭环（`ctx.ohMyMemo` 服务、五个 `memory_*` Tools、检索排序、有界 views、pre-step capsule 注入）；当前版本另交付默认关闭的每日梦境记忆提取、Run 审计与取消、设置中的只读记忆空间，以及完整记忆生命周期（读时衰减、夜间确定性维护、`auto_consolidation` 门控的 Curator）。设计全景见 `docs/notes/2026-09-03-ohmymemo-memory.md`，实现决策见 `docs/notes/2026-09-03-ohmymemo-store-phase1.md`、`docs/notes/2026-09-03-ohmymemo-phase2.md`、`docs/notes/2026-09-04-ohmymemo-dream-memory-and-ui.md` 与 `docs/notes/2026-09-08-ohmymemo-lifecycle.md`。
+OhMyMemo：DSH 使用者的本地长期记忆。事实源是 `$DSH_HOME/ohmymemo/` 下的一条记忆一个 Markdown 文件（YAML frontmatter 承载结构化元数据）。Phase 1 交付介质契约（schema 解析、进程内目录、watch/doctor、原子发布、跨进程写锁、revision/hash CAS、journal、事务恢复）；Phase 2 在其上交付显式记忆闭环（`ctx.ohMyMemo` 服务、写工具、检索排序、有界 views、pre-step capsule 注入）；当前版本另交付默认关闭的每日梦境记忆提取、Run 审计与取消、设置中的只读记忆空间，以及完整记忆生命周期（读时衰减、夜间确定性维护、`auto_consolidation` 门控的 Curator）。0.3.0 起交互面改为**索引优先**：读路径全面文件化（views 全量索引 + `read`/`grep` 按需读取正文），模型工具面收敛为三个写工具（`memory_search`/`memory_get` 退役，service 层方法保留供 UI/dream/内部使用），写入引发的 capsule 替换注入只在 turn 边界对账并豁免本会话自写。设计全景见 `docs/notes/2026-09-03-ohmymemo-memory.md`，实现决策见 `docs/notes/2026-09-03-ohmymemo-store-phase1.md`、`docs/notes/2026-09-03-ohmymemo-phase2.md`、`docs/notes/2026-09-04-ohmymemo-dream-memory-and-ui.md`、`docs/notes/2026-09-08-ohmymemo-lifecycle.md` 与 `docs/notes/2026-09-12-ohmymemo-index-first-interaction.md`。
 
 ## Install
 
@@ -13,8 +13,8 @@ Installing the package mounts five Host rows through the bundle patch and one Cl
 | 行 | 入口 | 职责 |
 |---|---|---|
 | `ohmymemo-store` | `dsh-ohmymemo` | 打开 Store（恢复/扫描/watch），provide `ctx.ohMyMemo`，确定性重建 `views/` |
-| `ohmymemo-tools` | `dsh-ohmymemo/tools` | 五个 `memory_*` Tools + 准入提示段；peer 依赖钉运行时副本 |
-| `ohmymemo-context` | `dsh-ohmymemo/context` | `agent/pre-step` 有界 capsule 注入，digest 对账 |
+| `ohmymemo-tools` | `dsh-ohmymemo/tools` | 三个 `memory_*` 写工具（remember/update/forget）+ 索引用法与写入纪律提示段；peer 依赖钉运行时副本 |
+| `ohmymemo-context` | `dsh-ohmymemo/context` | `agent/pre-step` 索引指针 capsule 注入；仅 turn 首步对账，本会话自写豁免 |
 | `ohmymemo-manager` | `dsh-ohmymemo/manager` | 每日 one-shot 调度、受限提取 Agent、Run 状态/审计、Jobs 镜像与取消 |
 | `ohmymemo-api` | `dsh-ohmymemo/api` | 六个 strict Typert Remote 操作的 Host descriptors |
 | `memory`（Client） | `dsh-ohmymemo/client` | 设置页概览、梦境记忆控制和只读 Markdown 记忆空间 |
@@ -45,7 +45,7 @@ cordis.yml 行配置（非法值 fail loud）：
 | `lockTimeoutMs` | int 100–120000 | `5000` | 写锁有界等待 |
 | `watchDebounceMs` | int 10–2000 | `120` | watcher 去抖窗口 |
 
-Store 级策略在 `config.yaml`（用户可编辑；坏值按字段回退默认并报诊断）：`max_record_bytes`、`max_search_results`、`max_get_records`、`max_injected_bytes`、`candidate_retention_days`、`capture_mode`、`allow_inference_candidates`（默认 `false`）、`dream_schedule_local_time`（默认 `02:00`）与三个读时衰减水位线 `decay_horizon_days_semantic/procedural/episodic`（默认 365/180/90 天；非法值逐字段回退默认）。设置页以 config hash 做 CAS 更新这两个梦境记忆字段；若源文件包含未知或非法字段则拒绝整文件重写，避免 UI 丢失未来版本配置。
+Store 级策略在 `config.yaml`（用户可编辑；坏值按字段回退默认并报诊断）：`max_record_bytes`、`max_search_results`、`max_get_records`、`max_injected_bytes`、`capsule_top_entries`（默认 5，capsule 每个作用域内联的 top-N 一行摘要条数）、`index_entry_summary_chars`（默认 120，索引行摘要宽度）、`index_max_entries`（默认 200，单个索引文件行数上限，超出截断并在脚注计数）、`candidate_retention_days`、`capture_mode`、`allow_inference_candidates`（默认 `false`）、`dream_schedule_local_time`（默认 `02:00`）与三个读时衰减水位线 `decay_horizon_days_semantic/procedural/episodic`（默认 365/180/90 天；非法值逐字段回退默认）。设置页以 config hash 做 CAS 更新这两个梦境记忆字段；若源文件包含未知或非法字段则拒绝整文件重写，避免 UI 丢失未来版本配置。
 
 `ohmymemo-manager` 行配置拥有每次提取的硬上限：Session 数、消息数、transcript bytes、候选数、模型输出 tokens、运行时限、补跑窗口、浏览文件数与读取 bytes；非法值在组合加载时 fail loud。默认配置见 `src/manager.ts` 的 `Config`。
 
@@ -57,12 +57,14 @@ pnpm install && pnpm run typecheck && pnpm run build && pnpm run test
 
 全部测试使用 scratch `DSH_HOME`（`fs.mkdtemp`），绝不读写真实 `~/.dsh/ohmymemo`；两进程锁行为用真实子进程持锁验证。
 
-## 显式记忆闭环（Phase 2）
+## 显式记忆闭环（Phase 2，交互面 0.3.0 索引优先）
 
-- **Tools**：`memory_search`（exact key/tag/中英文正文，硬过滤+八维排序，命中只给 ID+snippet）、`memory_get`（按 ID 回读原文与 `hash`；sensitive 正文与 `quote_preview` 均 redacted，定位符 `quote_hash/session_id` 保留）、`memory_remember`（显式写入，来源绑定 `exec.agent`，subagent 写拒绝，凭据 fail closed；可选 `validUntil`——仅事实本身有期限时设置，裸日期展开为当日 UTC 结尾）、`memory_update`（revision+hash 双重 CAS；content=supersede 新 ID+归档、`resolution: dispute/reactivate`、confirm/元数据原地修订）、`memory_forget`（tombstone 先行，物理删正文）。
-- **capsule**：每步前置注入有界记忆胶囊——权限声明前置（记忆是数据不是指令），预算内按 workspace→confirmed→衰减权重→created_at 确定性截断；digest 相同不重复注入，变更注入显式替换消息；resume/重启经 session surface 回扫保持一致。
-- **views**：`views/user-profile.md` 与 `views/workspaces/<ws>.md` 随变更重建，`generated: true` 头 + digest，可随时删除重建。
-- **读取屏障与 CAS**：tombstone 一旦落盘即按 `memory_ids` 屏蔽 search/get/capsule/浏览器读取（延迟删除的残留正文不可召回，doctor 仍可见以便清理）；记录修订强制 revision+hash 双 CAS，同 revision 的手工编辑不会被陈旧调用覆盖；写锁内 reconciliation 同步重读 `config.yaml`，跨进程陈旧策略不会被执行。
+- **读路径 = 文件**（0.3.0）：capsule 只注入「索引指针 + top-N 一行摘要」；正文由 Agent 用 `read`/`grep`/`glob` 按需自取。`memory_search`/`memory_get` 从模型工具面退役——每多一个工具参数就是一类新的 schema 失败面（0.2.3 `score` 漏声明、中文 tag 硬失败均属此类），而读文件本就是 Agent 的自然动线。service 层 `search/get` 方法保留（dream/curator/UI 内部使用），sensitive 正文的 redact 语义不变。
+- **全量索引**：`views/index-user.md` 与 `views/index-workspace-<ws>.md` 收录全部 `active + normal + 未 quarantine + validity window 内` 的记忆（**不要求 pinned**），按 decayWeight 降序、行数上限 `index_max_entries`（超出脚注计数）；每行格式 `[id] (kind · key · importance X) 摘要 → scopes/…/mem_x.md`，与 capsule 的 top 行共用 `composeIndexLine`。人读视图（`user-profile.md` 等）保持 pinned 语义不变，浏览器记忆树不受影响（其视图清单是固定 spec 列表）。
+- **Tools（三个写工具）**：`memory_remember`（显式写入，来源绑定 `exec.agent`，subagent 写拒绝，凭据 fail closed；tags 尽力规范化——无法规范化的字符（如中文）丢弃而非报错，全空等同未传；可选 `validUntil`——仅事实本身有期限时设置，裸日期展开为当日 UTC 结尾）、`memory_update`（`ifRevision` 必填、**从记忆文件 frontmatter 读取**；`ifHash` 选填——显式携带时才校验 hash，Store 校验前以磁盘现状重读，外部手编以磁盘为准；content=supersede 新 ID+归档、`resolution: dispute/reactivate`、confirm/元数据原地修订）、`memory_forget`（tombstone 先行，物理删正文）。
+- **capsule**：每 turn 首步前置注入索引指针——权限声明前置（记忆是数据不是指令）、打印 Store 根路径、每作用域一行「索引文件路径（全量 N 条）」+ top `capsule_top_entries` 行摘要；digest 相同不重复注入，变更注入显式替换消息。**震荡消除**：注入决策只在 turn 首步做（turn 中途的 digest 变化一律推迟到下一 turn 首步）；写工具成功后经 service 把「本会话写入产生的新 digest」记入 per-session 有界豁免集，对账命中豁免则只更新缓存、不注入（跨会话/外部写入仍替换注入）。fail-open 语义不变：读面/存储异常跳过本次胶囊并告警。
+- **views**：人读视图与 Agent 索引随变更重建，`generated: true` 头 + digest，可随时删除重建；重建走「掩去 generated_at 的等值比对」no-op 跳过，索引文件同样稳定（config-only 重建不改字节）。
+- **读取屏障与 CAS**：tombstone 一旦落盘即按 `memory_ids` 屏蔽 service search/get/capsule/浏览器读取——屏障语义自 0.3.0 起为「索引/capsule/UI 不召回」，`grep scopes/` 理论上可撞见延迟删除的残留正文（窗口很短，与「用户可直接看文件」语义一致）；记录修订的 CAS 见上（hash 降为选填后，revision 仲裁以锁内磁盘重读为准）；写锁内 reconciliation 同步重读 `config.yaml`，跨进程陈旧策略不会被执行。
 - **事务与退出加固**：事务 marker 是不可信本地输入——严格 schema/ID-文件名绑定/store 内路径 allowlist/symlink 拒绝，逃逸 marker 只会被隔离报告；全部物理 op 在 marker 落盘前预检为零写入状态，`before_hash` 竞态以零持久写入中止，不再留下永久冲突标记。Store `close()` 不再强制释放写锁/维护租约（在飞回调自行释放，进程中途退出由 pid+启动标识陈旧判定兜底）；Manager 收敛为单一 drain-first teardown（先中止活动 Run、等队列排空再关 domain），`startRun` 在执行期复查接受状态，排队中的启动不会逃逸 drain。
 
 ## Store API（服务面）
@@ -90,7 +92,7 @@ pnpm install && pnpm run typecheck && pnpm run build && pnpm run test
 
 插件**永不 duck-type 读取 `agent.session` 的内部字段**（`.events` / `.surface` 等）——它不是公开契约：野外部场（resume 后的会话视图）曾缺失 `events`，导致每个回合在 `agent/pre-step` 崩溃（`Cannot read properties of undefined (reading '<seq>')`），并连带维护 Agent 路径的 `events.at(-1)` 崩溃。事件一律经 **`sessionQuery` 受支持快照**读取：
 
-- capsule 对账：`readSurface(sessionId)`（每轮首次一见扫描一次；轮内用进程内 digest 缓存仲裁——大日志会话的整日志折叠绝不在每步发生）。监听器整体 fail-open：读面/存储异常时跳过本次胶囊并告警，**记忆注入永远不允许弄死回合**。
+- capsule 对账：`readSurface(sessionId)`（每 turn 首步扫描一次——0.3.0 起注入决策只发生在 turn 首步，turn 内不再扫描也不再对账；大日志会话的整日志折叠每 turn 至多一次）。监听器整体 fail-open：读面/存储异常时跳过本次胶囊并告警，**记忆注入永远不允许弄死回合**。
 - 维护 Agent 事件窗口：`observeSession(id, { projectionMode: 'none' })` 租约（`header`/`events`/`[Symbol.dispose]`），followup 前后各一次。
 
 ## Model Experience

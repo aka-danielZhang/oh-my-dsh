@@ -136,7 +136,7 @@ test('update resolutions: replace supersedes, dispute symmetrizes, reactivate re
 
 test('capsuleInput scopes entries and reports the budget; scopeForCwd never creates', async () => {
   const project = mkdtempSync(join(tmpdir(), 'ohmymemo-svc2-'))
-  const { service } = await openService()
+  const { service, store } = await openService()
   await service.remember({ content: '全局。', kind: 'semantic', scope: 'user', key: 'u.a', pinned: true })
   await service.remember({ content: '工作区。', kind: 'semantic', scope: 'workspace', cwd: project, key: 'w.a', pinned: true })
   await service.remember({ content: '别处。', kind: 'semantic', scope: 'workspace', cwd: mkdtempSync(join(tmpdir(), 'ohmymemo-svc3-')), key: 'w.b', pinned: true })
@@ -150,6 +150,25 @@ test('capsuleInput scopes entries and reports the budget; scopeForCwd never crea
   assert.ok(!ids.includes('w.b'), 'other workspaces stay out')
 
   assert.equal(service.scopeForCwd('/definitely/not/registered'), undefined)
+  // Index-first shaping knobs ride along (config.yaml overridable).
+  assert.equal(input.root, store.root)
+  assert.equal(input.topEntries, 5)
+  assert.equal(input.summaryChars, 120)
+  assert.equal(input.indexMaxEntries, 200)
+})
+
+test('self-write digest registry is per-session and bounded', async () => {
+  const { service } = await openService()
+  service.noteSelfWriteDigest('s1', 'aaaaaaaaaaaaaaaa')
+  service.noteSelfWriteDigest('s1', 'bbbbbbbbbbbbbbbb')
+  assert.equal(service.hasSelfWriteDigest('s1', 'aaaaaaaaaaaaaaaa'), true)
+  assert.equal(service.hasSelfWriteDigest('s1', 'bbbbbbbbbbbbbbbb'), true)
+  assert.equal(service.hasSelfWriteDigest('s2', 'aaaaaaaaaaaaaaaa'), false, 'per-session, never process-global')
+  for (let index = 0; index < 20; index += 1) {
+    service.noteSelfWriteDigest('s1', `digest${String(index).padStart(2, '0')}`)
+  }
+  assert.equal(service.hasSelfWriteDigest('s1', 'aaaaaaaaaaaaaaaa'), false, 'oldest digests age out of the bounded FIFO')
+  assert.equal(service.hasSelfWriteDigest('s1', 'digest19'), true)
 })
 
 test('stats/doctor/subscribe/rebuildViews operate over the live store', async () => {

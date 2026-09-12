@@ -142,6 +142,28 @@ test('update enforces revision and hash CAS; success bumps revision in place', a
   store.close()
 })
 
+test('hash-less update: ifHash omitted anchors on the freshly re-read disk revision (index-first)', async () => {
+  const root = scratchRoot()
+  const store = await openStore(root)
+  const created = await store.create({ content: 'v1', kind: 'semantic', scope: 'user', key: 'preference.nohash' })
+  // memory_get retired: the model only knows the frontmatter revision.
+  const updated = await store.update({ id: created.id, ifRevision: 1, content: 'v2', confirm: true, reason: 'frontmatter revision only' })
+  assert.equal(updated.revision, 2)
+  assert.equal(updated.id, created.id)
+  // A stale revision is still refused with no hash involved.
+  await assert.rejects(
+    () => store.update({ id: created.id, ifRevision: 1, content: 'v3', reason: 'stale' }),
+    (error: unknown) => {
+      assert.equal((error as { code: string }).code, 'OHMYMEMO_CAS_REVISION')
+      return true
+    },
+  )
+  // The supersede path shares the optional hash.
+  const superseded = await store.supersede({ id: created.id, ifRevision: 2, content: 'v3 meaning change', reason: 'successor' })
+  assert.notEqual(superseded.id, created.id)
+  store.close()
+})
+
 test('external hand edits win: journaled as external-edit-detected and CAS blocks stale writers', async () => {
   const root = scratchRoot()
   const store = await openStore(root, { watch: true })
