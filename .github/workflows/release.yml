@@ -1,10 +1,10 @@
 name: Release
 
-# 增量发布流水线，tag 分流（见 AGENTS.md「发版」，无斜杠命名）：
+# 增量发布流水线，tag 分流（见 docs/plugin-monorepo.md「发版」，无斜杠命名）：
 #   v<semver>             → 桌面公证版（完整 DMG + 瘦 zip + Windows NSIS + runtime-<sha>-*.tar.gz + runtime-revision-<platform>-<arch>.json + npm 分片 + latest-mac.yml / latest.yml）
 #   dsh-<name>-v<semver>  → 插件 Release（git archive 附件；allowlist 双通道插件
 #                           另发 npm——dsh-mcp-settings / dsh-provider-balance，见
-#                           plugin job 的 npm channel gate 与 AGENTS.md「发版」）
+#                           plugin job 的 npm channel gate 与 docs/plugin-monorepo.md「发版」）
 #
 # ⚠️ latest 指针纪律：Electron 自动更新端点是 releases/latest/download/latest-mac.yml
 # （mac）与 latest.yml（win）；desktop Release 独占 latest 指针；插件 Release
@@ -434,7 +434,7 @@ jobs:
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      # npm dual channel (AGENTS.md 「发版」): only the allowlisted plugins
+      # npm dual channel (docs/plugin-monorepo.md「发版」): only the allowlisted plugins
       # publish to the registry; every plugin still ships the git-archive
       # tarball below. The gate also records whether the package needs a
       # build step before packing (mcp-settings builds lib/ against the

@@ -16,7 +16,7 @@
 
 ⚠️ **0.2.x → 0.3.x 断链**：0.2.x 走 Tauri `latest.json` + minisign。0.3.x 走 electron-updater。0.3.x Release 仍附带一份 cutover `latest.json`（版本号 + 换壳说明，平台 URL 是占位），避免 0.2.x 检查 404 后完全静默；不能把 Electron 包当 Tauri 更新安装。已装 0.2.x 须从 Releases 手动下载。
 
-**独立版本不等于独立交付面**：插件 tag 只发布可手动安装的插件 archive，不会更新已安装 desktop。若该插件属于 AGENTS.md 声明的 desktop-owned 资源集合，首次发布或版本升级必须同一轮更新 prepare/resources/壳安装链、提升 desktop 版本并再推 `v<semver>`；只有 desktop Release 才会把它交付给桌面用户。具体到本次交付，`dsh-web-search-toggle` 0.1.3 必须由 Desktop `v0.2.0-rc.14` 携带，不能以插件 `dsh-web-search-toggle-v0.1.3` Release 替代。
+**独立版本不等于独立交付面**：插件 tag 只发布可手动安装的插件 archive，不会更新已安装 desktop。若该插件属于 docs/plugins-catalog.md 声明的 desktop-owned 资源集合，首次发布或版本升级必须同一轮更新 prepare/resources/壳安装链、提升 desktop 版本并再推 `v<semver>`；只有 desktop Release 才会把它交付给桌面用户。具体到本次交付，`dsh-web-search-toggle` 0.1.3 必须由 Desktop `v0.2.0-rc.14` 携带，不能以插件 `dsh-web-search-toggle-v0.1.3` Release 替代。
 
 **何时打 `v*`（少发桌面版）**：壳 / IPC / 打包 / runtime 解压 / 标题带更新 / desktop-owned 六包升版才发桌面。纯插件且不在该清单 → 只打插件 tag。壳没变不要推 `v*`。同一天能合并的壳修复合成一版。
 
