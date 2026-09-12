@@ -22,7 +22,7 @@ const t = (key: DesktopBridgeKey, params?: Record<string, unknown>): string => {
   return text
 }
 
-/** Idle updater face: the control stays hidden until a status says otherwise. */
+/** Idle updater face: the control is always present as the manual-check entry. */
 function updaterFace(status: DesktopUpdateStatus = { phase: 'idle' }) {
   return {
     checkUpdate: vi.fn(async () => null),
@@ -56,13 +56,14 @@ function fullFace(overrides: Partial<Face> = {}): Face {
   }
 }
 
-test('renders exactly the left cluster (idle updater): toggle, bell, New Session', () => {
+test('renders exactly the left cluster (idle updater): toggle, check, bell, New Session', () => {
   const face = fullFace()
   render(<DesktopToolbar {...face} t={t} />)
   expect(screen.getByRole('toolbar', { name: en['toolbar.label'] })).toBeTruthy()
-  // Toggle, notification bell, New Session — nothing else while the updater is idle.
-  expect(screen.getAllByRole('button')).toHaveLength(3)
+  // Toggle, updater (manual-check entry), notification bell, New Session.
+  expect(screen.getAllByRole('button')).toHaveLength(4)
   expect(screen.getByTitle(en['rail.toggle'])).toBeTruthy()
+  expect(screen.getByTitle(en['update.check'])).toBeTruthy()
   expect(screen.getByTitle(en['rail.newSession'])).toBeTruthy()
   expect(screen.getByTitle(en['notify.center'])).toBeTruthy()
 })
@@ -80,8 +81,10 @@ test('keeps the two layout zones with the status cluster on the left and a corne
   render(<DesktopToolbar {...fullFace()} t={t} />)
   const controls = document.querySelector('[data-desktop-toolbar-controls]')
   expect(controls).toBeTruthy()
-  // Toggle button, notify root, New Session button (the idle updater renders null).
-  expect(controls!.childElementCount).toBe(3)
+  // Toggle button, updater control (style sheet + button), notify root, New
+  // Session button.
+  expect(controls!.querySelector('button[data-desktop-rail-button]')).toBeTruthy()
+  expect(controls!.querySelector('[data-desktop-update-button]')).toBeTruthy()
   // The bell lives in the LEFT cluster, not the trailing cluster.
   expect(controls!.querySelector('[data-desktop-notify-root]')).toBeTruthy()
   expect(document.querySelector('[data-desktop-toolbar-main]')).toBeTruthy()

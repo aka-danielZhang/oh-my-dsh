@@ -120,11 +120,6 @@ export function notesFromStatus(status: DesktopUpdateStatus): string {
   return ''
 }
 
-/** Quiet title-band visibility: background failures remain silent. */
-export function isUpdateIndicatorVisible(status: DesktopUpdateStatus): boolean {
-  return status.phase === 'available' || status.phase === 'ready' || isUpdateBusy(status)
-}
-
 /** Integer percentage when the server reports a usable content length. */
 export function updatePercent(status: DesktopUpdateStatus): number | undefined {
   if (status.phase !== 'downloading' || status.total === undefined) return undefined
