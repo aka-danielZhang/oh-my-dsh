@@ -23,7 +23,7 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void; reject(e
   return { promise, resolve, reject }
 }
 
-test('click opens the available dialog; downloading starts from the dialog only', async () => {
+test('click starts the download dialog with a live progress bar; ready switches to restart', async () => {
   const initial = deferred<unknown>()
   const install = deferred<never>()
   const downloadGate = deferred<void>()
@@ -51,13 +51,6 @@ test('click opens the available dialog; downloading starts from the dialog only'
   expect(update.downloadUpdate).not.toHaveBeenCalled()
 
   fireEvent.click(screen.getByRole('button', { name: availableTitle }))
-  // The dialog presents version and notes first; the fetch needs its button.
-  const foundTitle = en['update.dialog.available'].replace('{version}', '0.3.0')
-  const found = await screen.findByRole('dialog', { name: foundTitle })
-  expect(within(found).getByText('titlebar drift')).toBeTruthy()
-  expect(update.downloadUpdate).not.toHaveBeenCalled()
-
-  fireEvent.click(within(found).getByText(en['update.dialog.download']))
   const downloadingTitle = en['update.dialog.downloading'].replace('{version}', '0.3.0')
   await waitFor(() => { expect(screen.getByRole('dialog', { name: downloadingTitle })).toBeTruthy() })
   expect(update.downloadUpdate).toHaveBeenCalledTimes(1)
@@ -110,7 +103,6 @@ test('cancel download closes the dialog and returns to the downloadable state', 
   const availableTitle = en['update.available'].replace('{version}', '0.3.0')
   await waitFor(() => { expect(screen.getByRole('button', { name: availableTitle })).toBeTruthy() })
   fireEvent.click(screen.getByRole('button', { name: availableTitle }))
-  fireEvent.click(await screen.findByText(en['update.dialog.download']))
   const downloadingTitle = en['update.dialog.downloading'].replace('{version}', '0.3.0')
   await waitFor(() => { expect(screen.getByRole('dialog', { name: downloadingTitle })).toBeTruthy() })
 
@@ -146,7 +138,6 @@ test('closing the dialog hides it while the download continues; ready reopens it
   const availableTitle = en['update.available'].replace('{version}', '0.3.0')
   await waitFor(() => { expect(screen.getByRole('button', { name: availableTitle })).toBeTruthy() })
   fireEvent.click(screen.getByRole('button', { name: availableTitle }))
-  fireEvent.click(await screen.findByText(en['update.dialog.download']))
   await waitFor(() => { expect(screen.getByRole('progressbar')).toBeTruthy() })
 
   // Escape only hides the dialog; the download keeps running in place.
@@ -205,7 +196,6 @@ test('a failed download offers retry inside the dialog', async () => {
   const availableTitle = en['update.available'].replace('{version}', '0.3.0')
   await waitFor(() => { expect(screen.getByRole('button', { name: availableTitle })).toBeTruthy() })
   fireEvent.click(screen.getByRole('button', { name: availableTitle }))
-  fireEvent.click(await screen.findByText(en['update.dialog.download']))
 
   const dialog = await screen.findByRole('dialog', { name: en['update.dialog.failed'] })
   expect(within(dialog).getByText('Update download failed')).toBeTruthy()
@@ -284,64 +274,4 @@ test('the busy button stays a compact spinner; the progress bar lives in the dia
     expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('25')
   })
   expect(update.downloadUpdate).not.toHaveBeenCalled()
-})
-
-test('the control is always present; a manual check reports the current state', async () => {
-  let generation = 0
-  const update = {
-    checkUpdate: vi.fn((force?: boolean) => {
-      if (force === true) generation += 1
-      return Promise.resolve(null)
-    }),
-    getUpdateStatus: vi.fn(async (): Promise<DesktopUpdateStatus> => ({ phase: 'current' })),
-    updateGeneration: () => generation,
-    downloadUpdate: vi.fn(async () => undefined),
-    cancelUpdate: vi.fn(async () => undefined),
-    installUpdate: vi.fn(async () => {
-      throw new Error('unreachable')
-    }),
-    t,
-  }
-  render(<UpdateControl {...update} />)
-
-  // Even with no update pending the control stays mounted as the entry point.
-  await waitFor(() => { expect(screen.getByRole('button', { name: en['update.check'] })).toBeTruthy() })
-  fireEvent.click(screen.getByRole('button', { name: en['update.check'] }))
-  await waitFor(() => { expect(update.checkUpdate).toHaveBeenCalledWith(true) })
-
-  // Nothing new: transient confirmation on the control itself, no dialog.
-  await waitFor(() => { expect(screen.getByRole('button', { name: en['update.current'] })).toBeTruthy() })
-  expect(screen.queryByRole('dialog')).toBeNull()
-  expect(update.downloadUpdate).not.toHaveBeenCalled()
-  expect(update.installUpdate).not.toHaveBeenCalled()
-})
-
-test('a manual check that finds an update opens the available dialog without downloading', async () => {
-  let generation = 0
-  const update = {
-    checkUpdate: vi.fn((force?: boolean) => {
-      if (force === true) generation += 1
-      return Promise.resolve({ version: '0.3.0', notes: '### Added\n- thing' })
-    }),
-    getUpdateStatus: vi.fn(async (): Promise<DesktopUpdateStatus> => ({ phase: 'current' })),
-    updateGeneration: () => generation,
-    downloadUpdate: vi.fn(async () => undefined),
-    cancelUpdate: vi.fn(async () => undefined),
-    installUpdate: vi.fn(async () => {
-      throw new Error('unreachable')
-    }),
-    t,
-  }
-  render(<UpdateControl {...update} />)
-
-  await waitFor(() => { expect(screen.getByRole('button', { name: en['update.check'] })).toBeTruthy() })
-  fireEvent.click(screen.getByRole('button', { name: en['update.check'] }))
-  const foundTitle = en['update.dialog.available'].replace('{version}', '0.3.0')
-  const found = await screen.findByRole('dialog', { name: foundTitle })
-  expect(within(found).getByText('thing')).toBeTruthy()
-  expect(update.downloadUpdate).not.toHaveBeenCalled()
-
-  fireEvent.click(within(found).getByText(en['update.dialog.download']))
-  expect(update.downloadUpdate).toHaveBeenCalledTimes(1)
-  expect(update.installUpdate).not.toHaveBeenCalled()
 })

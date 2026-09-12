@@ -5,14 +5,13 @@ import {
   IconCheckOutline16,
   IconDownloadOutline16,
   IconLoadingOutline16,
-  IconRefreshOutline16,
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { UpdateLogo } from './update-logo.tsx'
 import { isElectronCutoverNotes, parseUpdateNotes } from './update-notes.ts'
 import {
-  formatBytes, isUpdateBusy, notesFromStatus, statusFromCheck,
+  formatBytes, isUpdateBusy, isUpdateIndicatorVisible, notesFromStatus, statusFromCheck,
   updatePercent, visibleUpdateNotes,
   type DesktopUpdaterInjected, type DesktopUpdateStatus,
 } from './updates.ts'
@@ -24,10 +23,6 @@ export type UpdateIndicatorProps = UpdateIndicatorInjected & PropsLocale<'deskto
 const UPDATE_INTERVAL_MS = 2 * 60 * 60 * 1000
 /** First check delay after mount, beyond the boot request burst. */
 const FIRST_CHECK_DELAY_MS = 3000
-/** A fresh release published while the window was hidden surfaces on return. */
-const RESUME_CHECK_MIN_MS = 30 * 60 * 1000
-/** How long the "already current" confirmation stays on the control. */
-const CURRENT_FEEDBACK_MS = 4000
 
 /** Shared CSS for the busy spinner, the download dialog, and the notes panel. */
 const UPDATE_CONTROL_CSS = [
@@ -71,18 +66,14 @@ function statusVersionOf(status: DesktopUpdateStatus): string | undefined {
   return 'version' in status ? status.version : undefined
 }
 
-/** The compact updater control rendered beside the sidebar toggle. */
-export function UpdateControl(props: UpdateIndicatorProps): ReactElement {
+/** The compact updater button rendered beside the sidebar toggle. */
+export function UpdateControl(props: UpdateIndicatorProps): ReactElement | null {
   const { checkUpdate, getUpdateStatus, updateGeneration, downloadUpdate, cancelUpdate, installUpdate, t } = props
   const [status, setStatus] = useState<DesktopUpdateStatus>({ phase: 'idle' })
   const [requested, setRequested] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
-  /** Transient "checked, nothing new" feedback on the always-present control. */
-  const [justChecked, setJustChecked] = useState(false)
   const mounted = useRef(true)
   const statusRequest = useRef(0)
-  /** Monotonic time of the last settled check, for the resume-on-visible gate. */
-  const lastCheckAt = useRef(0)
   /** Notes survive preparing/downloading snapshots that omit the field. */
   const lastNotes = useRef('')
   /** Version survives the versionless preparing snapshot. */
@@ -136,30 +127,24 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement {
     })()
   }, [downloadUpdate, refreshStatus, updateGeneration])
 
-  /** One settled check (either answer), shared by boot, interval, and resume. */
-  const run = useCallback((force: boolean): void => {
-    const request = checkUpdate(force)
-    const requestGeneration = updateGeneration()
-    request.then(
-      (found) => {
-        lastCheckAt.current = Date.now()
-        if (mounted.current && updateGeneration() === requestGeneration) setRequested(false)
-        if (found !== null) {
-          const incoming = visibleUpdateNotes(found.notes)
-          if (incoming.length > 0) lastNotes.current = incoming
-          lastVersion.current = found.version
-        }
-        void refreshStatus(requestGeneration, statusFromCheck(found))
-      },
-      () => {
-        lastCheckAt.current = Date.now()
-        void refreshStatus(requestGeneration)
-      },
-    )
-  }, [checkUpdate, refreshStatus, updateGeneration])
-
   useEffect(() => {
     mounted.current = true
+    const run = (force: boolean): void => {
+      const request = checkUpdate(force)
+      const requestGeneration = updateGeneration()
+      request.then(
+        (found) => {
+          if (mounted.current && updateGeneration() === requestGeneration) setRequested(false)
+          if (found !== null) {
+            const incoming = visibleUpdateNotes(found.notes)
+            if (incoming.length > 0) lastNotes.current = incoming
+            lastVersion.current = found.version
+          }
+          void refreshStatus(requestGeneration, statusFromCheck(found))
+        },
+        () => { void refreshStatus(requestGeneration) },
+      )
+    }
     void refreshStatus(updateGeneration())
     const first = setTimeout(() => { run(false) }, FIRST_CHECK_DELAY_MS)
     const interval = setInterval(() => { run(true) }, UPDATE_INTERVAL_MS)
@@ -168,25 +153,7 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement {
       clearTimeout(first)
       clearInterval(interval)
     }
-  }, [refreshStatus, run, updateGeneration])
-
-  // Background throttling can silence the 2h interval for a hidden window;
-  // returning to the page re-checks when the last answer is stale.
-  useEffect(() => {
-    const onVisibility = (): void => {
-      if (document.visibilityState !== 'visible') return
-      if (Date.now() - lastCheckAt.current < RESUME_CHECK_MIN_MS) return
-      run(true)
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => { document.removeEventListener('visibilitychange', onVisibility) }
-  }, [run])
-
-  useEffect(() => {
-    if (!justChecked) return
-    const timer = setTimeout(() => { setJustChecked(false) }, CURRENT_FEEDBACK_MS)
-    return () => { clearTimeout(timer) }
-  }, [justChecked])
+  }, [checkUpdate, refreshStatus, updateGeneration])
 
   useEffect(() => {
     if (!isUpdateBusy(status)) return
@@ -213,10 +180,7 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement {
   }, [status, requested])
 
   const onActivate = useCallback(() => {
-    // Busy and ready reopen the live dialog; available shows what's new and
-    // waits for an explicit download (a ~100MB fetch must never start from a
-    // stray click).
-    if (isUpdateBusy(status) || status.phase === 'ready' || status.phase === 'available') {
+    if (isUpdateBusy(status) || status.phase === 'ready') {
       setDialogOpen(true)
       return
     }
@@ -235,26 +199,12 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement {
           startDownload(found.version)
           return
         }
-        // idle/current: an explicit manual check on the always-present control.
-        setJustChecked(false)
-        setStatus({ phase: 'checking' })
-        const found = await checkUpdate(true)
-        // The check answer is the freshest shell state there is; adopting it
-        // directly avoids a status round-trip that can lag the transition.
-        if (found === null) {
-          setJustChecked(true)
-          setStatus({ phase: 'current' })
-          return
-        }
-        const incoming = visibleUpdateNotes(found.notes)
-        if (incoming.length > 0) lastNotes.current = incoming
-        lastVersion.current = found.version
         setDialogOpen(true)
-        setStatus(statusFromCheck(found))
+        startDownload(target)
       } catch {
         const fallback: DesktopUpdateStatus = target === undefined
-          ? { phase: 'failed', message: 'Update check failed' }
-          : { phase: 'failed', version: target, message: 'Update check failed' }
+          ? { phase: 'failed', message: 'Update download failed' }
+          : { phase: 'failed', version: target, message: 'Update download failed' }
         await refreshStatus(updateGeneration(), fallback)
       }
     })()
@@ -288,15 +238,17 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement {
     })
   }, [installUpdate, refreshStatus, status, updateGeneration])
 
+  const visible = isUpdateIndicatorVisible(status) || (requested && status.phase === 'failed')
+  if (!visible) return null
+
   const busy = isUpdateBusy(status)
   const percent = updatePercent(status)
   const version = statusVersionOf(status) ?? lastVersion.current
   const notes = visibleUpdateNotes(
-    (status.phase === 'ready' || status.phase === 'available' ? status.notes : '') || lastNotes.current,
+    (status.phase === 'ready' ? status.notes : '') || lastNotes.current,
   )
   const cutover = isElectronCutoverNotes(notes)
   const noteBlocks = parseUpdateNotes(notes)
-  const current = status.phase === 'current' || status.phase === 'idle'
   const title = status.phase === 'available'
     ? t('update.available', { version: status.version })
     : status.phase === 'downloading' && percent !== undefined
@@ -305,66 +257,27 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement {
         ? t('update.ready', { version: status.version })
         : status.phase === 'failed'
           ? t('update.failed')
-          : status.phase === 'checking'
-            ? t('update.checking')
-            : status.phase === 'installing' || status.phase === 'restarting'
-              ? t('update.installing')
-              : current && justChecked
-                ? t('update.current')
-                : current
-                  ? t('update.check')
-                  : t('update.preparing')
-  const icon = status.phase === 'ready' || (current && justChecked)
+          : status.phase === 'installing' || status.phase === 'restarting'
+            ? t('update.installing')
+            : t('update.preparing')
+  const icon = status.phase === 'ready'
     ? <IconCheckOutline16 />
     : busy
       ? <span data-desktop-update-spinner=""><IconLoadingOutline16 /></span>
-      : current
-        ? <IconRefreshOutline16 />
-        : <IconDownloadOutline16 />
+      : <IconDownloadOutline16 />
 
   const dialogVisible = dialogOpen
-    && (status.phase === 'available' || status.phase === 'preparing' || status.phase === 'downloading'
-      || status.phase === 'ready' || status.phase === 'failed'
-      || status.phase === 'installing' || status.phase === 'restarting')
+    && (status.phase === 'preparing' || status.phase === 'downloading' || status.phase === 'ready'
+      || status.phase === 'failed' || status.phase === 'installing' || status.phase === 'restarting')
   const downloading = status.phase === 'preparing' || status.phase === 'downloading'
   const installing = status.phase === 'installing' || status.phase === 'restarting'
-  const dialogTitle = status.phase === 'available'
-    ? t('update.dialog.available', { version })
-    : downloading
-      ? t('update.dialog.downloading', { version })
-      : status.phase === 'ready'
-        ? t(cutover ? 'update.confirm.downloadTitle' : 'update.dialog.ready', { version })
-        : status.phase === 'failed'
-          ? t('update.dialog.failed')
-          : t('update.installing')
-  // The notes pane is shared by the available (pre-download) and ready
-  // (pre-restart) dialogs.
-  const notesSection = (
-    <section
-      data-desktop-update-notes=""
-      data-empty={notes.length === 0 ? '' : undefined}
-      aria-label={t('update.confirm.notes')}
-    >
-      <h3>{t('update.confirm.notes')}</h3>
-      {notes.length === 0 || noteBlocks.length === 0
-        ? <p>{t('update.confirm.empty')}</p>
-        : (
-          <div data-desktop-update-changelog="">
-            {noteBlocks.map((block, index) => {
-              if (block.type === 'heading') return <h4 key={index}>{block.text}</h4>
-              if (block.type === 'list') {
-                return (
-                  <ul key={index}>
-                    {block.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}
-                  </ul>
-                )
-              }
-              return <p key={index}>{block.text}</p>
-            })}
-          </div>
-        )}
-    </section>
-  )
+  const dialogTitle = downloading
+    ? t('update.dialog.downloading', { version })
+    : status.phase === 'ready'
+      ? t(cutover ? 'update.confirm.downloadTitle' : 'update.dialog.ready', { version })
+      : status.phase === 'failed'
+        ? t('update.dialog.failed')
+        : t('update.installing')
   // The dialog header shows the static app logo in every phase; live progress
   // belongs to the bar and the byte counter, not a spinning icon.
   const dialogIcon = <UpdateLogo />
@@ -439,13 +352,35 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement {
               </div>
             </div>
           )}
-          {status.phase === 'available' && notesSection}
           {status.phase === 'ready' && (
             <>
               <p data-desktop-update-dialog-description="">
                 {t(cutover ? 'update.confirm.downloadDescription' : 'update.confirm.description', { version })}
               </p>
-              {notesSection}
+              <section
+                data-desktop-update-notes=""
+                data-empty={notes.length === 0 ? '' : undefined}
+                aria-label={t('update.confirm.notes')}
+              >
+                <h3>{t('update.confirm.notes')}</h3>
+                {notes.length === 0 || noteBlocks.length === 0
+                  ? <p>{t('update.confirm.empty')}</p>
+                  : (
+                    <div data-desktop-update-changelog="">
+                      {noteBlocks.map((block, index) => {
+                        if (block.type === 'heading') return <h4 key={index}>{block.text}</h4>
+                        if (block.type === 'list') {
+                          return (
+                            <ul key={index}>
+                              {block.items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}
+                            </ul>
+                          )
+                        }
+                        return <p key={index}>{block.text}</p>
+                      })}
+                    </div>
+                  )}
+              </section>
             </>
           )}
           {status.phase === 'failed' && (
@@ -460,16 +395,6 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement {
                 <Button variant="outline" size="sm" onClick={onCancelDownload}>
                   {t('update.dialog.cancel')}
                 </Button>
-              )}
-              {status.phase === 'available' && (
-                <>
-                  <Button variant="outline" size="sm" onClick={() => { setDialogOpen(false) }}>
-                    {t('update.confirm.later')}
-                  </Button>
-                  <Button variant="primary" size="sm" onClick={() => { startDownload(status.version) }}>
-                    {t('update.dialog.download')}
-                  </Button>
-                </>
               )}
               {status.phase === 'ready' && (
                 <>

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  decodeUpdateStatus, formatBytes, isUpdateBusy, notesFromStatus,
+  decodeUpdateStatus, formatBytes, isUpdateBusy, isUpdateIndicatorVisible, notesFromStatus,
   statusFromCheck, updatePercent, visibleUpdateNotes,
 } from '../src/client/updates.ts'
 
@@ -61,6 +61,14 @@ test('status helpers preserve check metadata and active phases', () => {
   assert.equal(notesFromStatus({ phase: 'installing', version: '0.3.0' }), '')
   assert.equal(visibleUpdateNotes('See the release page for notes.'), '')
   assert.equal(visibleUpdateNotes('  ### Fixed\n- drift  '), '### Fixed\n- drift')
+})
+
+test('title-band visibility keeps background failures quiet', () => {
+  assert.equal(isUpdateIndicatorVisible({ phase: 'failed', version: '0.3.0', message: 'offline' }), false)
+  assert.equal(isUpdateIndicatorVisible({ phase: 'current' }), false)
+  assert.equal(isUpdateIndicatorVisible({ phase: 'available', version: '0.3.0', notes: '' }), true)
+  assert.equal(isUpdateIndicatorVisible({ phase: 'downloading', version: '0.3.0', downloaded: 0 }), true)
+  assert.equal(isUpdateIndicatorVisible({ phase: 'ready', version: '0.3.0', notes: '' }), true)
 })
 
 test('updatePercent clamps completed downloads and needs a total', () => {

@@ -36,3 +36,17 @@ bridge client 半（`update-indicator.tsx`）三处改动，壳 IPC 不变：
 - 收起态 main lane 避让宽度恒为 204px 档（原 `:has([data-desktop-update-button])` 条件恒真），无布局跳动。
 - 交付：随 bridge 0.2.0-rc.17 进下一版 Desktop Release（rc.54）；当前 rc.52 客户端
   在自动检查撞上 rc.53 后仍按 rc.16 行为工作（发现即弹窗开下），不受影响。
+
+## 同日撤销（bridge 0.2.0-rc.18）
+
+用户实机看到常驻的「检查更新」刷新按钮后否决：**只想修 bug，不想改交互流程**。
+rc.18 将 `update-indicator.tsx` / `locales.ts` / `updates.ts` 与三份测试整体还原到
+rc.16（`72c54a8`）逐字节一致，仅 package.json 版本走动——即恢复：
+
+- 控件仅在 available / busy / failed（或 requested && failed）时出现，平时完全隐藏；
+- 发现新版点击即弹窗并直接开始下载，完成后「稍后 / 重启以更新」；
+- 后台检查 = 启动 3s 首查 + 2h interval（visibilitychange 补检一并撤销）。
+
+教训：此插件的用户对该工具栏的改动极敏感，「修 bug」请求一律不做顺手的 UX 顺延；
+静默可用性问题如需处理，先单独提案再动手。
+
