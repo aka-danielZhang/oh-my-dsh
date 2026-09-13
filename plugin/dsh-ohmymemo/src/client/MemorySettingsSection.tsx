@@ -20,7 +20,7 @@ import {
   type MarkdownLabels,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { DreamModelsSnapshot, DreamRunStatus, MemoryDocument, MemoryOverview, MemoryTreeSnapshot } from '../manager-contract.ts'
+import type { DreamModelsSnapshot, DreamRunStatus, DreamRunSummary, MemoryDocument, MemoryOverview, MemoryTreeSnapshot } from '../manager-contract.ts'
 import type { MemorySettingsController } from './controller.ts'
 import { buildMemoryTree, type MemoryTreeNode } from './tree.ts'
 import type { MemoryLocaleKey } from './locales.ts'
@@ -298,7 +298,11 @@ function TimePicker(props: {
         onMouseDown={event => { event.stopPropagation() }}
         onClick={() => { setOpen(!open) }}
       >
-        {props.value}
+        <span className="omm-tp-face" aria-hidden="true">
+          <span className="omm-tp-seg">{hour ?? '00'}</span>
+          <span className="omm-tp-seg">{minute ?? '00'}</span>
+          <span className="omm-tp-colon">:</span>
+        </span>
       </button>
       {open ? (
         <div className="omm-tp-menu" role="listbox" onMouseDown={event => { event.stopPropagation() }}>
@@ -450,6 +454,7 @@ function Overview(props: {
             </div>
           )}
           {lastResult.detail !== null && <div className="omm-diagnostic">{lastResult.detail}</div>}
+          <OutputDiagnostics result={lastResult} t={t} />
         </section>
       )}
 
@@ -684,5 +689,52 @@ function folderLabel(path: string, fallback: string, t: (key: MemoryLocaleKey) =
     case 'archive': return t('folderArchive')
     case 'views': return t('folderViews')
     default: return fallback
+  }
+}
+
+/**
+ * Structured output diagnostics (2026-09-13 note §10): why the turn stopped,
+ * how its body was read, and whether that is a real capacity truncation, a
+ * recovered format variant, or a protocol error. Rendered from the persisted
+ * classification fields — never re-derived from the run's English `detail`.
+ */
+function OutputDiagnostics(props: {
+  result: DreamRunSummary
+  t: (key: MemoryLocaleKey) => string
+}): React.ReactElement | null {
+  const { result, t } = props
+  // A record without a turn end reason predates structured classification: its
+  // `truncated` flag came from the parser fallback and cannot be trusted.
+  if (result.turnEndReason === null) {
+    if (!result.truncated) return null
+    return <div className="omm-output-meta">{t('outputLegacyAmbiguous')}</div>
+  }
+  const rows: string[] = [
+    `${t('outputTurnEnd')} ${result.turnEndReason}`,
+    `${t('outputFormat')} ${t(outputFormatKey(result.outputFormat))}`,
+    result.outputComplete ? t('outputComplete') : t('outputIncomplete'),
+  ]
+  if (result.formatRecovered) rows.push(t('outputFormatRecovered'))
+  if (result.salvagedItems > 0) rows.push(`${t('outputSalvaged')} ${result.salvagedItems}`)
+  const warning = result.outputFormat === 'invalid'
+    ? t('outputProtocolError')
+    : result.truncated
+      ? t('outputTruncated')
+      : null
+  return (
+    <>
+      <div className="omm-output-meta">{rows.join(' · ')}</div>
+      {warning !== null && <div className="omm-diagnostic">{warning}</div>}
+    </>
+  )
+}
+
+function outputFormatKey(format: DreamRunSummary['outputFormat']): MemoryLocaleKey {
+  switch (format) {
+    case 'bare-json': return 'outputBareJson'
+    case 'json-fence': return 'outputJsonFence'
+    case 'prefix-salvage': return 'outputPrefixSalvage'
+    case 'invalid': return 'outputInvalid'
+    default: return 'outputUnknown'
   }
 }

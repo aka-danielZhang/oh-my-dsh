@@ -9,6 +9,14 @@ import { z } from 'zod'
 export const dreamRunStatusSchema = z.enum(['idle', 'running', 'success', 'error', 'cancelled'])
 export type DreamRunStatus = z.infer<typeof dreamRunStatusSchema>
 
+/**
+ * How one legacy extractor response was read. Orthogonal to the turn end
+ * reason and to {@link dreamRunSummarySchema}'s `truncated`: a format fallback
+ * is never evidence of a capacity truncation (2026-09-13 note §4.1).
+ */
+export const dreamOutputFormatSchema = z.enum(['bare-json', 'json-fence', 'prefix-salvage', 'invalid'])
+export type DreamOutputFormat = z.infer<typeof dreamOutputFormatSchema>
+
 export const dreamRunSummarySchema = z.object({
   runId: z.string(),
   trigger: z.enum(['manual', 'scheduled', 'catch-up']),
@@ -27,9 +35,22 @@ export const dreamRunSummarySchema = z.object({
     kind: z.enum(['semantic', 'episodic', 'procedural']),
     content: z.string(),
   }).strict()).default([]),
-  /** The output hit the model's max-token ceiling and only a prefix was used.
-   *  Older persisted runs predate the field; they default to false so a
-   *  stored record never blocks boot after an upgrade. */
+  /** Why the extraction turn stopped, verbatim from `turn/end.reason.kind`.
+   *  Null on records persisted before structured classification existed: null
+   *  means "unknown", never "completed". */
+  turnEndReason: z.string().nullable().default(null),
+  /** How the final assistant text was read. Null on older records — see
+   *  {@link isLegacyAmbiguousOutput} before trusting their `truncated` flag. */
+  outputFormat: dreamOutputFormatSchema.nullable().default(null),
+  /** The body needed format normalization (Markdown fence) before it parsed. */
+  formatRecovered: z.boolean().default(false),
+  /** The body was one complete JSON document; false for prefix salvage. */
+  outputComplete: z.boolean().default(false),
+  /** Complete item objects recovered by prefix salvage (0 when not used). */
+  salvagedItems: z.number().int().nonnegative().default(0),
+  /** True only when the turn itself ended at the model's max-token ceiling.
+   *  Never derived from a parser fallback path. Older persisted runs predate
+   *  the field; they default to false so a stored record never blocks boot. */
   truncated: z.boolean().default(false),
   /** Deterministic lifecycle maintenance counts (nightly no-LLM segment).
    *  Older persisted runs predate the fields; they default to 0 so a stored
@@ -86,6 +107,13 @@ export const dreamRunAuditSchema = z.object({
   }).strict()),
   memoriesCreated: z.array(z.string()),
   memoriesRejected: z.number().int().nonnegative(),
+  /** Structured output classification; mirrors the run summary fields and is
+   *  null-able for audits persisted before it existed. */
+  turnEndReason: z.string().nullable().default(null),
+  outputFormat: dreamOutputFormatSchema.nullable().default(null),
+  formatRecovered: z.boolean().default(false),
+  outputComplete: z.boolean().default(false),
+  salvagedItems: z.number().int().nonnegative().default(0),
   truncated: z.boolean().default(false),
   /** Lifecycle maintenance counts; older persisted audits default to 0. */
   expiredMemories: z.number().int().nonnegative().default(0),
@@ -97,6 +125,19 @@ export const dreamRunAuditSchema = z.object({
   detail: z.string().nullable(),
 }).strict()
 export type DreamRunAudit = z.infer<typeof dreamRunAuditSchema>
+
+/**
+ * A persisted record predating structured classification: its `truncated`
+ * flag came from the legacy parser fallback, which also fired on fenced JSON,
+ * so it must never be counted as a real capacity truncation. Trustworthy
+ * truncation rates start with runs that carry `turnEndReason` (note §5.1).
+ */
+export function isLegacyAmbiguousOutput(record: {
+  turnEndReason: string | null
+  truncated: boolean
+}): boolean {
+  return record.turnEndReason === null && record.truncated
+}
 
 export const memoryFileSchema = z.object({
   path: z.string(),

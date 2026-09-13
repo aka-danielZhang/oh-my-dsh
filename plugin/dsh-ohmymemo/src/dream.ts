@@ -9,6 +9,7 @@ import { isAppendSurfaceEvent } from '@deepseek-ai/dsh-session/surface'
 import type { SessionLogSnapshot } from '@deepseek-ai/dsh-session-query'
 import { detectSecretLike, normalizeKey, normalizeText } from './schema.ts'
 import type { MemoryKind } from './types.ts'
+import type { DreamOutputFormat } from './manager-contract.ts'
 import type { DreamEvidenceHandle, DreamToolLimits } from './dream-tools.ts'
 
 /** Durable Session-id prefix reserved for dream-memory maintenance Agents. */
@@ -316,35 +317,169 @@ function fitPromptLine(
   }
 }
 
-/** Parsed extractor output: grounded proposals plus why anything was dropped. */
+/**
+ * Structured account of how one legacy extractor response was read.
+ *
+ * Three facts stay orthogonal (2026-09-13 note §4.1): the Session event says
+ * why the turn stopped (`turnEndReason`), this record says how the body was
+ * parsed (`outputFormat`, `formatRecovered`, `outputComplete`), and
+ * `truncated` is decided ONLY by the turn end reason — a format fallback must
+ * never be reported as a capacity truncation.
+ */
+export interface DreamLegacyOutputClassification {
+  turnEndReason: string
+  outputFormat: DreamOutputFormat
+  formatRecovered: boolean
+  outputComplete: boolean
+  truncated: boolean
+  salvagedItems: number
+}
+
+/** Parsed extractor output: grounded proposals plus the output classification. */
 export interface DreamParseResult {
   proposals: DreamProposal[]
   rejected: number
-  /** True when the output stopped mid-stream and only its complete prefix was used. */
-  truncated: boolean
+  classification: DreamLegacyOutputClassification
 }
 
 /**
- * Parse and ground one model response.
- *
- * Well-formed JSON takes the strict path: any invalid item fails the whole
- * batch (an ungrounded citation is model misbehavior, not bad luck). A
- * response cut mid-stream takes the salvage path: the complete prefix of the
- * memories array is recovered, every salvaged item still faces the full
- * grounding validation — truncation excuses missing items, never invalid
- * ones — and zero usable survivors still fails the batch.
+ * Deterministic legacy-output failure carrying its own classification, so the
+ * caller persists what was actually observed instead of re-deriving it from a
+ * fallback path. Covers every deterministic failure after the turn settled:
+ * an unparseable turn end, a `completed` body that is not one JSON document,
+ * and a document whose items fail the full grounding checks.
  */
-export function parseDreamOutput(
+export class DreamOutputClassificationError extends Error {
+  readonly classification: DreamLegacyOutputClassification
+
+  constructor(message: string, classification: DreamLegacyOutputClassification, options?: { cause?: unknown }) {
+    super(message, options)
+    this.name = 'DreamOutputClassificationError'
+    this.classification = classification
+  }
+}
+
+/** Turn end reasons the legacy JSON protocol knows how to interpret. */
+const PARSEABLE_TURN_END_REASONS = new Set(['completed', 'max-tokens'])
+
+/**
+ * Parse and ground one legacy JSON response under the turn's real end reason.
+ *
+ * `completed` accepts exactly one anchored JSON document — bare or wrapped in
+ * a single Markdown fence — and treats everything else as a deterministic
+ * protocol error: a malformed body is model misbehavior, not bad luck, so it
+ * is never salvaged. `max-tokens` is the only reason that permits prefix
+ * salvage, because only there a cut body is expected. Every item of every
+ * accepted document still faces the full shape, grounding, quote, and secret
+ * validation.
+ *
+ * `truncated` is true exactly when the turn ended at the ceiling; the parse
+ * path never changes it.
+ */
+export function parseLegacyDreamOutput(
   output: string,
+  turnEndReason: string,
   evidence: Map<string, DreamEvidence>,
   options: { maxMemories: number; maxContentChars: number },
 ): DreamParseResult {
-  let raw: unknown
-  try {
-    raw = parseJsonObject(output)
-  } catch (error) {
-    return salvageDreamOutput(output, evidence, options, error)
+  const truncated = turnEndReason === 'max-tokens'
+  if (!PARSEABLE_TURN_END_REASONS.has(turnEndReason)) {
+    throw new DreamOutputClassificationError(
+      `legacy dream extractor turn did not complete (${turnEndReason})`,
+      outputClassification(turnEndReason, 'invalid'),
+    )
   }
+
+  const bare = tryParseJsonObject(output)
+  if (bare.ok) {
+    const classification = outputClassification(turnEndReason, 'bare-json', { truncated, outputComplete: true })
+    return { ...groundOrThrow(bare.value, evidence, options, classification), classification }
+  }
+
+  const fenced = normalizeJsonFence(output)
+  if (fenced !== undefined) {
+    const inner = tryParseJsonObject(fenced)
+    if (inner.ok) {
+      const classification = outputClassification(turnEndReason, 'json-fence', {
+        truncated,
+        outputComplete: true,
+        formatRecovered: true,
+      })
+      return { ...groundOrThrow(inner.value, evidence, options, classification), classification }
+    }
+  }
+
+  if (truncated) {
+    const salvaged = salvageLegacyPrefix(output, evidence, options)
+    if (salvaged !== undefined) {
+      return {
+        proposals: salvaged,
+        rejected: 0,
+        classification: outputClassification(turnEndReason, 'prefix-salvage', { truncated: true, salvagedItems: salvaged.length }),
+      }
+    }
+  }
+
+  const reason = bare.error instanceof Error ? bare.error.message : String(bare.error)
+  throw new DreamOutputClassificationError(
+    `dream extractor response was not one complete JSON document: ${reason}`,
+    outputClassification(turnEndReason, 'invalid', { truncated }),
+    { cause: bare.error },
+  )
+}
+
+/** Build one classification with every unset fact explicitly false/zero. */
+function outputClassification(
+  turnEndReason: string,
+  outputFormat: DreamOutputFormat,
+  patch: Partial<Pick<DreamLegacyOutputClassification, 'formatRecovered' | 'outputComplete' | 'truncated' | 'salvagedItems'>> = {},
+): DreamLegacyOutputClassification {
+  return {
+    turnEndReason,
+    outputFormat,
+    formatRecovered: patch.formatRecovered ?? false,
+    outputComplete: patch.outputComplete ?? false,
+    truncated: patch.truncated ?? false,
+    salvagedItems: patch.salvagedItems ?? 0,
+  }
+}
+
+/**
+ * Hard requirement: exactly one anchored Markdown fence covering the whole
+ * body, at most one level deep, with an empty or `json` language tag. Anything
+ * else (prose around the fence, a second fence, another tag, an unterminated
+ * fence) is not a format variant — it is a protocol error, and the caller must
+ * not hunt for a JSON substring inside prose.
+ */
+function normalizeJsonFence(output: string): string | undefined {
+  const lines = output.trim().split('\n')
+  if (lines.length < 3) return undefined
+  const opening = (lines[0] ?? '').trim()
+  const closing = (lines.at(-1) ?? '').trim()
+  if (!opening.startsWith('```') || closing !== '```') return undefined
+  const tag = opening.slice(3).trim().toLowerCase()
+  if (tag !== '' && tag !== 'json') return undefined
+  const body = lines.slice(1, -1).join('\n')
+  if (body.includes('```')) return undefined
+  return body.trim()
+}
+
+function tryParseJsonObject(output: string): { ok: true; value: unknown } | { ok: false; error: unknown } {
+  const text = output.trim()
+  if (text.length === 0) return { ok: false, error: new SyntaxError('dream extractor response was empty') }
+  try {
+    return { ok: true, value: JSON.parse(text) as unknown }
+  } catch (error) {
+    return { ok: false, error }
+  }
+}
+
+/** Shape-check one document and ground every item; one bad item fails the batch. */
+function groundMemories(
+  raw: unknown,
+  evidence: Map<string, DreamEvidence>,
+  options: { maxMemories: number; maxContentChars: number },
+): { proposals: DreamProposal[]; rejected: number } {
   if (!isPlainObject(raw) || Object.keys(raw).some(key => key !== 'memories') || !Array.isArray(raw.memories)) {
     throw new Error('dream extractor response must contain only a memories array')
   }
@@ -356,26 +491,64 @@ export function parseDreamOutput(
     else proposals.push(proposal)
   }
   if (rejected > 0) throw new Error(`dream extractor response contained ${rejected} invalid or over-limit item(s)`)
-  return { proposals, rejected: 0, truncated: false }
+  return { proposals, rejected: 0 }
 }
 
-/** Strict salvage of a truncated memories stream; throws the original error when unusable. */
-function salvageDreamOutput(
+/** Ground one already-parsed document, keeping the classification on failure. */
+function groundOrThrow(
+  raw: unknown,
+  evidence: Map<string, DreamEvidence>,
+  options: { maxMemories: number; maxContentChars: number },
+  classification: DreamLegacyOutputClassification,
+): { proposals: DreamProposal[]; rejected: number } {
+  try {
+    return groundMemories(raw, evidence, options)
+  } catch (error) {
+    throw new DreamOutputClassificationError(
+      error instanceof Error ? error.message : String(error),
+      classification,
+      { cause: error },
+    )
+  }
+}
+
+/**
+ * Recover the complete item objects of a `max-tokens`-cut `{"memories":[…`
+ * stream. A string-aware brace scan collects every top-level object that
+ * closed before the cut; anything after it is lost. Returns undefined when the
+ * output does not open the memories array or holds no usable item — the caller
+ * then reports a capacity failure rather than a partial success.
+ */
+function salvageLegacyPrefix(
   output: string,
   evidence: Map<string, DreamEvidence>,
   options: { maxMemories: number; maxContentChars: number },
-  original: unknown,
-): DreamParseResult {
+): DreamProposal[] | undefined {
   const salvaged = salvageTruncatedItems(output)
-  if (salvaged === undefined) throw original
+  if (salvaged === undefined) return undefined
   const proposals: DreamProposal[] = []
   for (const item of salvaged.slice(0, options.maxMemories)) {
     const proposal = parseProposal(item, evidence, options.maxContentChars)
-    if (proposal === undefined) throw original
+    // Truncation excuses missing items, never invalid ones.
+    if (proposal === undefined) return undefined
     proposals.push(proposal)
   }
-  if (proposals.length === 0) throw original
-  return { proposals, rejected: 0, truncated: true }
+  return proposals.length === 0 ? undefined : proposals
+}
+
+/**
+ * Human-readable audit supplement for one classification. `detail` carries
+ * prose only — the UI renders the structured fields itself (note §7.2).
+ */
+export function describeOutputClassification(classification: DreamLegacyOutputClassification): string | null {
+  const notes: string[] = []
+  if (classification.truncated) {
+    notes.push(classification.outputFormat === 'prefix-salvage'
+      ? `turn ended at the model's max-token ceiling; ${classification.salvagedItems} item(s) recovered from the complete prefix`
+      : "turn ended at the model's max-token ceiling")
+  }
+  if (classification.formatRecovered) notes.push('output arrived in a Markdown fence and was normalized before parsing')
+  return notes.length === 0 ? null : notes.join('; ')
 }
 
 /**
@@ -383,7 +556,7 @@ function salvageDreamOutput(
  * A string-aware brace scan collects every top-level object that closed
  * before the cut; anything after it is lost. Returns undefined when the
  * output does not even open the memories array — a shape violation rather
- * than a truncation — so the caller rethrows the original parse error.
+ * than a truncation — so the caller reports a capacity failure.
  */
 function salvageTruncatedItems(output: string): unknown[] | undefined {
   const key = output.indexOf('"memories"')
@@ -560,12 +733,6 @@ function parseRefreshItem(raw: unknown, evidence: Map<string, DreamEvidence>): C
     quote,
     quoteHash: `sha256:${createHash('sha256').update(quote).digest('hex')}`,
   }
-}
-
-function parseJsonObject(output: string): unknown {
-  const text = output.trim()
-  if (text.length === 0) throw new Error('dream extractor response did not contain JSON')
-  return JSON.parse(text) as unknown
 }
 
 function evidenceKey(sessionId: string, seq: number): string {

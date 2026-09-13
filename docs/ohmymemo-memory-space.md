@@ -126,6 +126,9 @@ frontmatter 下面就是正文——记忆本身，一两句话。
 **Q：为什么这条记忆没有出现在每回合的 capsule 里？**
 按顺序查四个条件：`status` 是不是 `active` → `privacy` 是不是 `normal` → `pinned` 是否为 `true` → 预算（`max_injected_bytes`，默认 8KB）内是否排得进（workspace 优先、importance 降序，排不进的会被确定性截断）。
 
+**Q：设置页提示 `max-token ceiling` 是什么意思？**
+梦境提取一轮结束后，运行结果里分开记录三件独立的事：**turn 为什么结束**（`turnEndReason`，原样取自会话事件 `turn/end.reason.kind`）、**正文怎么被解析**（`outputFormat`：裸 JSON / 围栏 JSON / 前缀抢救 / 无效）、**是否真的被截断**（`truncated`，只由 `turnEndReason === 'max-tokens'` 决定）。模型把 JSON 套进 ` ```json ` 围栏属于**格式变体**：会被规范化后正常解析，记 `formatRecovered`、`truncated=false`，不再是容量事故。只有 turn 真正以 `max-tokens` 结束才叫容量截断（此时才允许从完整对象前缀抢救）。早于该分类的旧记录没有 `turnEndReason`，其 `truncated` 标记一律按「分类缺失、无法判定」展示，不计入截断率。
+
 **Q：记忆空间里手改文件可以吗？**
 可以，但以磁盘为准：插件 watch 到外部修改会按文件内容重载并记 `external-edit-detected`；手编 `views/` 没有意义（下次重建即覆盖），要改就改 `scopes/` 里的正典文件。
 
@@ -137,5 +140,6 @@ frontmatter 下面就是正文——记忆本身，一两句话。
 - 包行为契约：[`plugin/dsh-ohmymemo/README.md`](../plugin/dsh-ohmymemo/README.md)
 - 总设计：[`docs/notes/2026-09-03-ohmymemo-memory.md`](notes/2026-09-03-ohmymemo-memory.md)
 - 梦境提取与今日预算/抢救/死信决策：[`docs/notes/2026-09-07-ohmymemo-dream-output-budget-and-salvage.md`](notes/2026-09-07-ohmymemo-dream-output-budget-and-salvage.md)
+- 输出分类修复与长期可靠消费方案（权威：结束原因/格式/截断正交化、微批与逐批 cursor）：[`docs/notes/2026-09-13-ohmymemo-dream-reliable-consumption.md`](notes/2026-09-13-ohmymemo-dream-reliable-consumption.md)
 - 提取→入库→召回时序图：[`docs/diagrams/memory-extraction-sequence.html`](diagrams/memory-extraction-sequence.html)
 - 本指南配图（目录包含关系）：[`docs/diagrams/memory-space-nested.html`](diagrams/memory-space-nested.html)

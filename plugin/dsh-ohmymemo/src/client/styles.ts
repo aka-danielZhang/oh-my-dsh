@@ -42,6 +42,7 @@ export const MEMORY_SETTINGS_CSS = `
 .omm-result-metric{display:flex;flex-direction:column;gap:2px;color:var(--dsw-alias-label-tertiary);font-size:11px;}
 .omm-result-metric b{color:var(--dsw-alias-label-primary);font-size:14px;}
 .omm-diagnostic{margin-top:10px;color:var(--dsw-alias-state-error-primary);font-size:12px;overflow-wrap:anywhere;white-space:pre-wrap;}
+.omm-output-meta{margin-top:10px;color:var(--dsw-alias-label-tertiary);font-size:12px;overflow-wrap:anywhere;}
 .omm-counts{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;border-top:1px solid var(--dsw-alias-border-l2);border-bottom:1px solid var(--dsw-alias-border-l2);}
 .omm-count{display:flex;min-width:0;flex-direction:column;gap:2px;padding:11px 10px;border-right:1px solid var(--dsw-alias-border-l2);}
 .omm-count:last-child{border-right:0;}
@@ -91,7 +92,10 @@ export const MEMORY_SETTINGS_CSS = `
 .omm-v{color:var(--dsw-alias-label-primary);min-width:0;font-size:12.5px;}
 .omm-time-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
 .omm-tp{position:relative;width:110px;flex:none;}
-.omm-tp-trigger{box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:100%;height:32px;padding:0 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;font-variant-numeric:tabular-nums;text-align:center;cursor:pointer;}
+.omm-tp-trigger{position:relative;box-sizing:border-box;display:flex;align-items:center;width:100%;height:32px;padding:0 9px;border:1px solid var(--dsw-alias-border-l1);border-radius:6px;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;font-variant-numeric:tabular-nums;text-align:center;cursor:pointer;}
+.omm-tp-face{position:absolute;inset:0;display:flex;align-items:center;gap:2px;padding:0 4px;}
+.omm-tp-seg{flex:1 1 0;min-width:0;text-align:center;}
+.omm-tp-colon{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);}
 .omm-tp-trigger:hover:not(:disabled),.omm-tp-trigger[aria-expanded=true]{border-color:var(--dsw-alias-border-l3);}
 .omm-tp-trigger:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px;}
 .omm-tp-trigger:disabled{opacity:.55;cursor:default;}

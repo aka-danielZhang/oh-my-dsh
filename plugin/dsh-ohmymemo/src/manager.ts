@@ -27,14 +27,17 @@ import {
   buildCuratorPrompt,
   buildDreamPrompt,
   cursorWatermarks,
+  describeOutputClassification,
+  DreamOutputClassificationError,
   DREAM_MAINTENANCE_SESSION_PREFIX,
   dueCatchUpBoundary,
   extractDreamSource,
   nextScheduleBoundary,
   parseCuratorOutput,
-  parseDreamOutput,
+  parseLegacyDreamOutput,
   type CuratorCatalogEntry,
   type DreamEvidence,
+  type DreamLegacyOutputClassification,
   type DreamSourceSession,
 } from './dream.ts'
 import type {
@@ -142,7 +145,9 @@ export interface RunProgress {
   memoriesRejected: number
   items: DreamRunSummary['items']
   cursors: Record<string, number>
-  truncated: boolean
+  /** How the extractor turn ended and how its body was parsed. Null when the
+   *  run failed before any output was classified (infrastructure failures). */
+  classification: DreamLegacyOutputClassification | null
   /** Deterministic lifecycle maintenance outcome (runs even without evidence). */
   expiredMemories: number
   expiredCandidates: number
@@ -681,24 +686,29 @@ export class OhMyMemoManager extends TypertRemoteService {
         // A max-tokens ending is salvageable: the parse below recovers the
         // complete prefix of the memories array. Everything else but a clean
         // completion is a deterministic output failure.
-        const outcome = turnOutcome(suffix)
-        if (outcome !== 'completed' && outcome !== 'max-tokens') {
-          throw new DreamOutputError(`dream-memory Agent did not complete (${outcome})`)
+        // The turn end reason is read once from the Session event and drives
+        // every downstream decision; no parse path may infer capacity from
+        // itself (2026-09-13 note §5.1).
+        const turnEndReason = classifyTurnEnd(suffix)
+        if (turnEndReason !== 'completed' && turnEndReason !== 'max-tokens') {
+          throw new DreamOutputError(`dream-memory Agent did not complete (${turnEndReason})`)
         }
         const output = lastAssistantText(suffix)
-        // Parse failures (garbage, truncation with no usable prefix, or a
+        // Parse failures (garbage, a cut body with no usable prefix, or a
         // well-formed response with ungrounded items) are deterministic
-        // output failures — wrap them so the dead-letter streak counts them.
+        // output failures — wrap them so the dead-letter streak counts them,
+        // recording what was actually observed on the way out.
         let parsed
         try {
-          parsed = parseDreamOutput(output, promptInput.evidence, {
+          parsed = parseLegacyDreamOutput(output, turnEndReason, promptInput.evidence, {
             maxMemories: this.config.maxMemoriesPerRun,
             maxContentChars: this.config.maxCandidateContentChars,
           })
         } catch (error) {
+          if (error instanceof DreamOutputClassificationError) progress.classification = error.classification
           throw new DreamOutputError(`dream-memory extraction output invalid: ${errorMessage(error)}`, { cause: error })
         }
-        progress.truncated = outcome === 'max-tokens' || parsed.truncated
+        progress.classification = parsed.classification
         progress.memoriesRejected += parsed.rejected
         for (const proposal of parsed.proposals) {
           signal.throwIfAborted()
@@ -843,9 +853,9 @@ export class OhMyMemoManager extends TypertRemoteService {
       } finally {
         after[Symbol.dispose]()
       }
-      const outcome = turnOutcome(suffix)
-      if (outcome !== 'completed' && outcome !== 'max-tokens') {
-        throw new Error(`curator Agent did not complete (${outcome})`)
+      const turnEndReason = classifyTurnEnd(suffix)
+      if (turnEndReason !== 'completed' && turnEndReason !== 'max-tokens') {
+        throw new Error(`curator Agent did not complete (${turnEndReason})`)
       }
       const parsed = parseCuratorOutput(lastAssistantText(suffix), evidence)
 
@@ -971,7 +981,7 @@ export class OhMyMemoManager extends TypertRemoteService {
       memoriesCreated: result.progress.memoriesCreated.length,
       memoriesRejected: result.progress.memoriesRejected,
       items: cancelled ? [] : result.progress.items,
-      truncated: cancelled ? false : result.progress.truncated,
+      ...outputFields(result.progress.classification),
       expiredMemories: result.progress.expiredMemories,
       expiredCandidates: result.progress.expiredCandidates,
       curatorRefreshed: result.progress.curatorRefreshed,
@@ -979,8 +989,9 @@ export class OhMyMemoManager extends TypertRemoteService {
       curatorRejected: result.progress.curatorRejected,
       detail: cancelled ? 'cancelled before commit' : null,
     }
-    if (!cancelled && summary.truncated) {
-      summary.detail = `output hit the model's max-token ceiling; ${summary.memoriesCreated} memor(y/ies) salvaged from the complete prefix`
+    if (!cancelled && result.progress.classification !== null) {
+      const note = describeOutputClassification(result.progress.classification)
+      if (note !== null) summary.detail = summary.detail === null ? note : `${summary.detail}; ${note}`
     }
     if (!cancelled && result.progress.maintenanceError !== null) {
       const suffix = `lifecycle maintenance failed: ${result.progress.maintenanceError}`
@@ -1058,7 +1069,7 @@ export class OhMyMemoManager extends TypertRemoteService {
       memoriesCreated: progress.memoriesCreated.length,
       memoriesRejected: progress.memoriesRejected,
       items: [],
-      truncated: progress.truncated,
+      ...outputFields(progress.classification),
       expiredMemories: progress.expiredMemories,
       expiredCandidates: progress.expiredCandidates,
       curatorRefreshed: progress.curatorRefreshed,
@@ -1155,7 +1166,7 @@ export class OhMyMemoManager extends TypertRemoteService {
       memoriesCreated: 0,
       memoriesRejected: 0,
       items: [],
-      truncated: false,
+      ...outputFields(null),
       expiredMemories: 0,
       expiredCandidates: 0,
       curatorRefreshed: 0,
@@ -1224,6 +1235,25 @@ function initialState(): DreamRuntimeState {
   }
 }
 
+/**
+ * Structured output facts shared by the run summary and the audit record.
+ * A null classification (infrastructure failure before any output settled)
+ * persists as unknown — never as a fabricated end reason, and never as a
+ * silent `truncated=false` a later reader could mistake for a clean run.
+ */
+function outputFields(
+  classification: DreamLegacyOutputClassification | null,
+): Pick<DreamRunSummary, 'turnEndReason' | 'outputFormat' | 'formatRecovered' | 'outputComplete' | 'salvagedItems' | 'truncated'> {
+  return {
+    turnEndReason: classification?.turnEndReason ?? null,
+    outputFormat: classification?.outputFormat ?? null,
+    formatRecovered: classification?.formatRecovered ?? false,
+    outputComplete: classification?.outputComplete ?? false,
+    salvagedItems: classification?.salvagedItems ?? 0,
+    truncated: classification?.truncated ?? false,
+  }
+}
+
 function emptyProgress(): RunProgress {
   return {
     provider: null,
@@ -1235,7 +1265,7 @@ function emptyProgress(): RunProgress {
     memoriesRejected: 0,
     items: [],
     cursors: {},
-    truncated: false,
+    classification: null,
     expiredMemories: 0,
     expiredCandidates: 0,
     maintenanceError: null,
@@ -1262,7 +1292,7 @@ function auditFrom(request: RunRequest, progress: RunProgress, summary: DreamRun
     sourceSessions: progress.sourceSessions.map(item => ({ ...item })),
     memoriesCreated: [...progress.memoriesCreated],
     memoriesRejected: progress.memoriesRejected,
-    truncated: progress.truncated,
+    ...outputFields(progress.classification),
     expiredMemories: progress.expiredMemories,
     expiredCandidates: progress.expiredCandidates,
     curatorRefreshed: progress.curatorRefreshed,
@@ -1273,11 +1303,12 @@ function auditFrom(request: RunRequest, progress: RunProgress, summary: DreamRun
 }
 
 /**
- * End reason of the extraction turn, validating consumed work first.
- * `max-tokens` is recoverable (prefix salvage); every other non-completed
- * reason is a deterministic output failure for the caller to classify.
+ * End reason of one maintenance turn, validating consumed work first, read
+ * verbatim from `turn/end.reason.kind`. `max-tokens` is the only recoverable
+ * reason (legacy prefix salvage); every other non-completed reason is a
+ * deterministic output failure for the caller to classify.
  */
-function turnOutcome(events: readonly SessionEvent[]): string {
+function classifyTurnEnd(events: readonly SessionEvent[]): string {
   const consumed = foldConsumedWork(events)
   if (consumed.droppedUnrun) throw new DreamOutputError('dream-memory Agent dropped queued input')
   return consumed.end?.data.reason.kind ?? 'missing'

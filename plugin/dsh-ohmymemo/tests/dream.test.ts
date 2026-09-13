@@ -5,17 +5,20 @@ import {
   buildCuratorPrompt,
   buildDreamPrompt,
   cursorWatermarks,
+  DreamOutputClassificationError,
   dueCatchUpBoundary,
   extractDreamSource,
   latestScheduleBoundary,
   nextScheduleBoundary,
+  describeOutputClassification,
   parseCuratorOutput,
-  parseDreamOutput,
+  parseLegacyDreamOutput,
   parseLocalTime,
   type CuratorCatalogEntry,
   type DreamEvidence,
   type DreamSourceSession,
 } from '../src/dream.ts'
+import { isLegacyAmbiguousOutput } from '../src/manager-contract.ts'
 
 function snapshot(): SessionLogSnapshot {
   return {
@@ -81,7 +84,7 @@ test('prompt input is byte-bounded and output proposals require exact evidence q
   assert.ok(prompt.prompt.includes('BEGIN UNTRUSTED NDJSON'))
   assert.ok(prompt.prompt.includes('"workspaceAvailable":true'))
   assert.ok(!prompt.prompt.includes('/work/project'))
-  const accepted = parseDreamOutput(JSON.stringify({
+  const accepted = parseLegacyDreamOutput(JSON.stringify({
     memories: [{
       content: 'The user prefers pnpm for JavaScript projects.',
       kind: 'semantic',
@@ -91,13 +94,13 @@ test('prompt input is byte-bounded and output proposals require exact evidence q
       tags: ['javascript', 'pnpm'],
       evidence: { sessionId: 'session-user', seq: 3, quote: 'always use pnpm' },
     }],
-  }), prompt.evidence, { maxMemories: 4, maxContentChars: 500 })
+  }), 'completed', prompt.evidence, { maxMemories: 4, maxContentChars: 500 })
   assert.equal(accepted.rejected, 0)
   assert.equal(accepted.proposals.length, 1)
   assert.match(accepted.proposals[0]!.key, /^dream\.preference\.package-manager\.[a-f0-9]{12}$/)
   assert.equal(accepted.proposals[0]!.evidence.seq, 3)
 
-  assert.throws(() => parseDreamOutput(JSON.stringify({
+  assert.throws(() => parseLegacyDreamOutput(JSON.stringify({
     memories: [{
       content: 'The user prefers npm.',
       kind: 'semantic',
@@ -107,7 +110,7 @@ test('prompt input is byte-bounded and output proposals require exact evidence q
       tags: [],
       evidence: { sessionId: 'session-user', seq: 3, quote: 'always use npm' },
     }],
-  }), prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), /invalid or over-limit/)
+  }), 'completed', prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), /invalid or over-limit/)
 })
 
 test('prompt byte limit emits complete JSON and truncates oversized text without starvation', () => {
@@ -128,9 +131,13 @@ test('prompt byte limit emits complete JSON and truncates oversized text without
   assert.ok(payload.text.length > 0)
   assert.ok(payload.text.length < source.messages[0]!.text.length)
   assert.equal(bounded.evidence.get('session-user:3')?.text, payload.text)
-  assert.throws(() => parseDreamOutput('not json', new Map(), { maxMemories: 1, maxContentChars: 100 }))
-  assert.throws(() => parseDreamOutput('result: {"memories":[]}', new Map(), { maxMemories: 1, maxContentChars: 100 }))
-  assert.throws(() => parseDreamOutput('```json\n{"memories":[]}\n```', new Map(), { maxMemories: 1, maxContentChars: 100 }))
+  assert.throws(() => parseLegacyDreamOutput('not json', 'completed', new Map(), { maxMemories: 1, maxContentChars: 100 }))
+  assert.throws(() => parseLegacyDreamOutput('result: {"memories":[]}', 'completed', new Map(), { maxMemories: 1, maxContentChars: 100 }))
+  // One anchored Markdown fence is a supported wrapper, not a parse failure.
+  const fenced = parseLegacyDreamOutput('```json\n{"memories":[]}\n```', 'completed', new Map(), { maxMemories: 1, maxContentChars: 100 })
+  assert.equal(fenced.classification.outputFormat, 'json-fence')
+  assert.equal(fenced.classification.formatRecovered, true)
+  assert.equal(fenced.classification.truncated, false)
 })
 
 test('cursor watermarks advance only through the contiguous fitted seq prefix', () => {
@@ -185,8 +192,11 @@ test('truncated output salvages the complete prefix and marks the result', () =>
   // Cut mid-way through the second item: only the first survives, the result
   // is marked truncated, and nothing throws.
   const cut = `${JSON.stringify({ memories: [first] }).slice(0, -2)},{"content":"second item that never`
-  const salvaged = parseDreamOutput(cut, prompt.evidence, { maxMemories: 4, maxContentChars: 500 })
-  assert.equal(salvaged.truncated, true)
+  const salvaged = parseLegacyDreamOutput(cut, 'max-tokens', prompt.evidence, { maxMemories: 4, maxContentChars: 500 })
+  assert.equal(salvaged.classification.truncated, true)
+  assert.equal(salvaged.classification.turnEndReason, 'max-tokens')
+  assert.equal(salvaged.classification.outputFormat, 'prefix-salvage')
+  assert.equal(salvaged.classification.salvagedItems, 1)
   assert.equal(salvaged.rejected, 0)
   assert.equal(salvaged.proposals.length, 1)
   assert.match(salvaged.proposals[0]!.key, /^dream\.preference\.package-manager\./)
@@ -194,13 +204,17 @@ test('truncated output salvages the complete prefix and marks the result', () =>
   // An ungrounded item among the salvaged ones still fails the batch:
   // truncation excuses missing items, never invalid ones.
   const poisoned = `${JSON.stringify({ memories: [{ ...first, evidence: { sessionId: 'session-user', seq: 3, quote: 'fabricated quote text' } }] }).slice(0, -2)},{"content":"cut`
-  assert.throws(() => parseDreamOutput(poisoned, prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), SyntaxError)
+  const isCapacityFailure = (error: unknown): boolean =>
+    error instanceof DreamOutputClassificationError
+    && error.classification.outputFormat === 'invalid'
+    && error.classification.truncated === true
+  assert.throws(() => parseLegacyDreamOutput(poisoned, 'max-tokens', prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), isCapacityFailure)
 
-  // Cut before any item closes → nothing salvageable → the original error.
-  assert.throws(() => parseDreamOutput('{"memories":[{"content":"lorem', prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), SyntaxError)
+  // Cut before any item closes → nothing salvageable → the same capacity failure.
+  assert.throws(() => parseLegacyDreamOutput('{"memories":[{"content":"lorem', 'max-tokens', prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), isCapacityFailure)
 
-  // No memories array at all → shape violation, not truncation → rethrow.
-  assert.throws(() => parseDreamOutput('{"results":[{"content":"x', prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), SyntaxError)
+  // No memories array at all → shape violation, not a salvaged prefix.
+  assert.throws(() => parseLegacyDreamOutput('{"results":[{"content":"x', 'max-tokens', prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), isCapacityFailure)
 })
 
 test('over-long evidence quotes are rejected and the prompt states both limits', () => {
@@ -213,7 +227,7 @@ test('over-long evidence quotes are rejected and the prompt states both limits',
   assert.ok(prompt.prompt.includes('at most 300 characters'))
   assert.ok(prompt.prompt.includes('at most 200 characters'))
   const longQuote = 'always use pnpm'.padEnd(201, 'x')
-  assert.throws(() => parseDreamOutput(JSON.stringify({
+  assert.throws(() => parseLegacyDreamOutput(JSON.stringify({
     memories: [{
       content: 'The user prefers pnpm.',
       kind: 'semantic',
@@ -223,7 +237,7 @@ test('over-long evidence quotes are rejected and the prompt states both limits',
       tags: [],
       evidence: { sessionId: 'session-user', seq: 3, quote: longQuote },
     }],
-  }), prompt.evidence, { maxMemories: 4, maxContentChars: 300 }), /invalid or over-limit/)
+  }), 'completed', prompt.evidence, { maxMemories: 4, maxContentChars: 300 }), /invalid or over-limit/)
 })
 
 test('extraction prompt carries the valid_until guidance and parses it through', () => {
@@ -236,7 +250,7 @@ test('extraction prompt carries the valid_until guidance and parses it through',
   assert.ok(prompt.prompt.includes('valid_until (optional ISO 8601 date)'), 'time-bound guidance present')
   assert.ok(prompt.prompt.includes('Do not extract one-off task states'))
 
-  const accepted = parseDreamOutput(JSON.stringify({
+  const accepted = parseLegacyDreamOutput(JSON.stringify({
     memories: [{
       content: 'The user is preparing for the November architect exam.',
       kind: 'semantic',
@@ -247,12 +261,12 @@ test('extraction prompt carries the valid_until guidance and parses it through',
       valid_until: '2026-11-30',
       evidence: { sessionId: 'session-user', seq: 3, quote: 'always use pnpm' },
     }],
-  }), prompt.evidence, { maxMemories: 4, maxContentChars: 500 })
+  }), 'completed', prompt.evidence, { maxMemories: 4, maxContentChars: 500 })
   assert.equal(accepted.proposals[0]?.validUntil, '2026-11-30')
 
   // A malformed valid_until fails the strict path (whole batch) — the same
   // discipline as any other ungrounded field.
-  assert.throws(() => parseDreamOutput(JSON.stringify({
+  assert.throws(() => parseLegacyDreamOutput(JSON.stringify({
     memories: [{
       content: 'The user is preparing for an exam.',
       kind: 'semantic',
@@ -263,7 +277,7 @@ test('extraction prompt carries the valid_until guidance and parses it through',
       valid_until: 'next month',
       evidence: { sessionId: 'session-user', seq: 3, quote: 'always use pnpm' },
     }],
-  }), prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), /invalid or over-limit/)
+  }), 'completed', prompt.evidence, { maxMemories: 4, maxContentChars: 500 }), /invalid or over-limit/)
 })
 
 function curatorCatalog(): CuratorCatalogEntry[] {
@@ -344,4 +358,134 @@ test('curator output: grounded refresh passes, fabricated quotes drop, merges de
   // Empty catalog decisions are fine — an all-keep night is a valid outcome.
   const quiet = parseCuratorOutput('{"refresh":[],"merge":[],"keep":[]}', fitted.evidence)
   assert.deepEqual(quiet, { refresh: [], merge: [], keep: [], rejected: 0 })
+})
+
+test('output classification keeps turn end, format, and truncation orthogonal', () => {
+  const evidence = new Map<string, DreamEvidence>([['session-user:3', {
+    sessionId: 'session-user',
+    seq: 3,
+    messageId: 'm3',
+    cwd: '/work/project',
+    time: 0,
+    text: 'I always use pnpm for JavaScript projects.',
+  }]])
+  const options = { maxMemories: 4, maxContentChars: 500 }
+  const item = {
+    content: 'The user prefers pnpm for JavaScript projects.',
+    kind: 'semantic',
+    scope: 'workspace',
+    key: 'preference.package-manager',
+    importance: 0.8,
+    tags: ['pnpm'],
+    evidence: { sessionId: 'session-user', seq: 3, quote: 'always use pnpm' },
+  }
+  const document = JSON.stringify({ memories: [item] })
+  const isInvalid = (truncated: boolean) => (error: unknown): boolean =>
+    error instanceof DreamOutputClassificationError
+    && error.classification.outputFormat === 'invalid'
+    && error.classification.truncated === truncated
+
+  // completed + bare JSON: strict success, explicitly not truncated.
+  const bare = parseLegacyDreamOutput(document, 'completed', evidence, options)
+  assert.equal(bare.classification.outputFormat, 'bare-json')
+  assert.equal(bare.classification.outputComplete, true)
+  assert.equal(bare.classification.formatRecovered, false)
+  assert.equal(bare.classification.truncated, false)
+
+  // completed + one anchored fence, with and without the language tag, is a
+  // format variant: recovered, complete, still not truncated.
+  for (const wrapped of [`\u0060\u0060\u0060json\n${document}\n\u0060\u0060\u0060`, `\u0060\u0060\u0060\n${document}\n\u0060\u0060\u0060`]) {
+    const fenced = parseLegacyDreamOutput(wrapped, 'completed', evidence, options)
+    assert.equal(fenced.classification.outputFormat, 'json-fence')
+    assert.equal(fenced.classification.formatRecovered, true)
+    assert.equal(fenced.classification.outputComplete, true)
+    assert.equal(fenced.classification.truncated, false)
+    assert.equal(fenced.proposals.length, 1)
+  }
+
+  // Everything else under completed is a deterministic protocol error: prose
+  // around the fence, a second fence, another language tag, an unterminated
+  // fence, and a cut-looking prefix holding complete items (never salvaged).
+  const cutPrefix = `${document.slice(0, -2)},{"content":"never closed`
+  const malformed = [
+    `Here you go:\n\u0060\u0060\u0060json\n${document}\n\u0060\u0060\u0060`,
+    `\u0060\u0060\u0060json\n${document}\n\u0060\u0060\u0060\nHope that helps`,
+    `\u0060\u0060\u0060json\n${document}\n\u0060\u0060\u0060\n\u0060\u0060\u0060json\n${document}\n\u0060\u0060\u0060`,
+    `\u0060\u0060\u0060javascript\n${document}\n\u0060\u0060\u0060`,
+    cutPrefix,
+  ]
+  for (const output of malformed) {
+    assert.throws(() => parseLegacyDreamOutput(output, 'completed', evidence, options), isInvalid(false))
+  }
+
+  // max-tokens is the only turn end that salvages a complete prefix.
+  const salvaged = parseLegacyDreamOutput(cutPrefix, 'max-tokens', evidence, options)
+  assert.equal(salvaged.classification.turnEndReason, 'max-tokens')
+  assert.equal(salvaged.classification.outputFormat, 'prefix-salvage')
+  assert.equal(salvaged.classification.outputComplete, false)
+  assert.equal(salvaged.classification.truncated, true)
+  assert.equal(salvaged.classification.salvagedItems, 1)
+
+  // A cut body with no usable item is a capacity failure, still truncated,
+  // and a body that never opens the array is not a truncation at all.
+  assert.throws(() => parseLegacyDreamOutput('{"memories":[{"content":"lorem', 'max-tokens', evidence, options), (error: unknown): boolean =>
+    error instanceof DreamOutputClassificationError
+    && error.classification.outputFormat === 'invalid'
+    && error.classification.truncated === true
+    && error.classification.salvagedItems === 0)
+  assert.throws(() => parseLegacyDreamOutput('{"results":[{"content":"x', 'max-tokens', evidence, options), isInvalid(true))
+
+  // A parseable body under a failed turn end never becomes a success.
+  for (const reason of ['error', 'aborted', 'interrupted', 'missing']) {
+    assert.throws(() => parseLegacyDreamOutput(document, reason, evidence, options), (error: unknown): boolean =>
+      error instanceof DreamOutputClassificationError
+      && error.classification.turnEndReason === reason
+      && isInvalid(false)(error))
+  }
+
+  // Normalized items still face the full grounding validation.
+  const ungrounded = JSON.stringify({
+    memories: [{ ...item, evidence: { sessionId: 'session-user', seq: 3, quote: 'fabricated quote text' } }],
+  })
+  assert.throws(() => parseLegacyDreamOutput(`\u0060\u0060\u0060json\n${ungrounded}\n\u0060\u0060\u0060`, 'completed', evidence, options), (error: unknown): boolean =>
+    error instanceof DreamOutputClassificationError
+    && error.classification.outputFormat === 'json-fence'
+    && error.classification.formatRecovered === true)
+})
+
+test('a truncated flag without a turn end reason is legacy-ambiguous, not a capacity signal', () => {
+  // Records persisted before structured classification: the parser fallback
+  // also fired on fenced JSON, so the flag cannot be counted as truncation.
+  assert.equal(isLegacyAmbiguousOutput({ turnEndReason: null, truncated: true }), true)
+  assert.equal(isLegacyAmbiguousOutput({ turnEndReason: null, truncated: false }), false)
+  // Classified records own their flag, either way.
+  assert.equal(isLegacyAmbiguousOutput({ turnEndReason: 'completed', truncated: true }), false)
+  assert.equal(isLegacyAmbiguousOutput({ turnEndReason: 'max-tokens', truncated: true }), false)
+})
+test('the audit detail describes the classification instead of assuming truncation', () => {
+  const base = {
+    turnEndReason: 'completed',
+    outputFormat: 'bare-json' as const,
+    formatRecovered: false,
+    outputComplete: true,
+    truncated: false,
+    salvagedItems: 0,
+  }
+  // A clean run adds no alarming prose at all.
+  assert.equal(describeOutputClassification(base), null)
+  // A fenced complete body is reported as a format variant, never as capacity.
+  const fenced = describeOutputClassification({ ...base, outputFormat: 'json-fence', formatRecovered: true })
+  assert.ok(fenced !== null && fenced.includes('Markdown fence'))
+  assert.ok(!fenced.includes('max-token'))
+  // Only a real max-tokens turn mentions the ceiling, and salvage adds the count.
+  const salvaged = describeOutputClassification({
+    ...base,
+    turnEndReason: 'max-tokens',
+    outputFormat: 'prefix-salvage',
+    outputComplete: false,
+    truncated: true,
+    salvagedItems: 3,
+  })
+  assert.ok(salvaged !== null && salvaged.includes('max-token ceiling'))
+  assert.ok(salvaged.includes('3 item(s)'))
 })

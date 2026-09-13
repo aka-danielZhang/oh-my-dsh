@@ -407,7 +407,7 @@ function poisonedFailure(promptHash: string, cursors: Record<string, number> = {
   const progress = {
     provider: 'p', model: 'm', agentSessionId: 'ohmymemo-maintenance-x', promptHash,
     sourceSessions: [{ sessionId: 's1', capturedThroughSeq: 5, messageCount: 2 }],
-    memoriesCreated: [], memoriesRejected: 0, items: [], cursors, truncated: false,
+    memoriesCreated: [], memoriesRejected: 0, items: [], cursors, classification: null,
     expiredMemories: 0, expiredCandidates: 0, maintenanceError: null,
     curatorRefreshed: 0, curatorMerged: 0, curatorRejected: 0, curatorError: null,
   } as RunProgress
