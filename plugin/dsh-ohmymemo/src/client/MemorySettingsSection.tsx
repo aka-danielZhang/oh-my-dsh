@@ -238,6 +238,78 @@ function ModelPicker(props: {
   )
 }
 
+const TIME_HOURS = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0'))
+const TIME_MINUTES = Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, '0'))
+
+/** Two-column time wheel dropdown (hours/minutes), the same pattern as the scheduled-tasks picker. */
+function TimePicker(props: {
+  value: string
+  ariaLabel: string
+  disabled: boolean
+  onChange(value: string): void
+}): React.ReactElement {
+  const [open, setOpen] = React.useState(false)
+  const hourRef = React.useRef<HTMLDivElement | null>(null)
+  const minuteRef = React.useRef<HTMLDivElement | null>(null)
+  React.useEffect(() => {
+    if (!open) return undefined
+    const close = (): void => { setOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => { document.removeEventListener('mousedown', close) }
+  }, [open])
+  React.useLayoutEffect(() => {
+    if (!open) return
+    for (const column of [hourRef.current, minuteRef.current]) {
+      if (column === null) continue
+      const active = column.querySelector('.omm-tp-active')
+      if (!(active instanceof HTMLElement)) continue
+      column.scrollTop = Math.max(0, active.offsetTop - (column.clientHeight - active.clientHeight) / 2)
+    }
+  }, [open])
+  const [hour, minute] = props.value.split(':')
+  const column = (
+    ref: typeof hourRef,
+    items: readonly string[],
+    current: string | undefined,
+    pick: (item: string) => void,
+  ): React.ReactElement => (
+    <div className="omm-tp-col" ref={ref}>
+      {items.map(item => (
+        <button
+          key={item}
+          type="button"
+          className={item === current ? 'omm-tp-cell omm-tp-active' : 'omm-tp-cell'}
+          onClick={() => { pick(item) }}
+        >
+          {item}
+        </button>
+      ))}
+    </div>
+  )
+  return (
+    <div className="omm-tp">
+      <button
+        type="button"
+        className="omm-tp-trigger"
+        aria-label={props.ariaLabel}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        disabled={props.disabled}
+        onMouseDown={event => { event.stopPropagation() }}
+        onClick={() => { setOpen(!open) }}
+      >
+        {props.value}
+      </button>
+      {open ? (
+        <div className="omm-tp-menu" role="listbox" onMouseDown={event => { event.stopPropagation() }}>
+          {column(hourRef, TIME_HOURS, hour, item => { props.onChange(`${item}:${minute ?? '00'}`) })}
+          {column(minuteRef, TIME_MINUTES, minute, item => { props.onChange(`${hour ?? '00'}:${item}`) })}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function Overview(props: {
   overview: MemoryOverview
   models: DreamModelsSnapshot | null
@@ -293,16 +365,11 @@ function Overview(props: {
           <div className="omm-rows">
             <span className="omm-k">{t('scheduleTime')}</span>
             <div className="omm-v omm-time-row">
-              <input
-                className="omm-time"
-                type="time"
+              <TimePicker
                 value={overview.dream.scheduleLocalTime}
+                ariaLabel={t('scheduleTime')}
                 disabled={busy}
-                onChange={(event) => {
-                  if (/^(?:[01]\d|2[0-3]):[0-5]\d$/u.test(event.currentTarget.value)) {
-                    props.onSettings({ scheduleLocalTime: event.currentTarget.value })
-                  }
-                }}
+                onChange={value => { props.onSettings({ scheduleLocalTime: value }) }}
               />
               <span className="omm-k">{overview.dream.timeZone}</span>
             </div>
