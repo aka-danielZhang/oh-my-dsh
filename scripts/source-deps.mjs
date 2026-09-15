@@ -25,8 +25,8 @@ import { fileURLToPath } from 'node:url'
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pluginRoot = resolve(repoRoot, 'plugin')
 const anchor = resolve(pluginRoot, 'deepseek-harness')
-const OFFICIAL_VERSION = '0.1.5-rc.2'
-const FORK_VERSION = '0.1.5-rc.2.zw.1'
+const OFFICIAL_VERSION = '0.1.6-alpha.1'
+const FORK_VERSION = '0.1.6-alpha.1.zw.1'
 
 /**
  * The fork-modified package set — exactly what
@@ -66,9 +66,9 @@ const REGISTRY_OVERRIDES = {
 
 /**
  * Transitive-dependency containment: official rc.1 packages depend on
- * caret ranges (`^0.1.5-rc.2`), which silently float to any newer prerelease
+ * caret ranges (`^0.1.6-alpha.1`), which silently float to any newer prerelease
  * on the registry — a partial upstream rc.2 then dead-ends the install
- * (`dsh-llm@^0.1.5-rc.2` unresolved) and, worse, mixes upstream lines into
+ * (`dsh-llm@^0.1.6-alpha.1` unresolved) and, worse, mixes upstream lines into
  * one tree. Every plugin therefore pins the FULL official dsh package
  * inventory to the baseline (fork packages to the fork layer) through
  * `pnpm.overrides`, making the install hermetic against registry drift.

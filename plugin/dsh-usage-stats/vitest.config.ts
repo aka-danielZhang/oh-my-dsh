@@ -17,7 +17,7 @@ export default defineConfig({
     testTimeout: 15_000,
     server: {
       deps: {
-        inline: [/@deepseek-ai\/dsh-client-ui-primitives/],
+        inline: [/@(deepseek-ai|crazx)\/dsh-client-ui-primitives/],
       },
     },
   },

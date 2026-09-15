@@ -1,6 +1,12 @@
 # Changelog
 
-Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的，不在这里重复。发版时 `scripts/release-notes.mjs` 抽取对应 `## [version]`（没有则回退 `## [Unreleased]`）写入 GitHub Release 与 `latest-mac.yml` / `latest.yml` 的 `releaseNotes`。
+Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的，不在这里重复。发版时 `scripts/release-notes.mjs` 抽取对应 `## [version]`（没有则回退 `## [Unreleased]
+
+## [0.3.1-rc.4] - 2026-09-16
+
+### Changed
+
+- runtime 基线升级到 fork `v0.1.6-alpha.1+zw.1`（上游 `0.1.6-alpha.1`：composer 命令菜单、asar runtime、MCP 资源提供方与连接生命周期重构等 800 个提交；fork 的 status 事件、scoped-republish、会话头 toolbar portal 已全部移植，全部插件依赖基线同步，插件行为零变更）。`）写入 GitHub Release 与 `latest-mac.yml` / `latest.yml` 的 `releaseNotes`。
 
 ## [Unreleased]
 

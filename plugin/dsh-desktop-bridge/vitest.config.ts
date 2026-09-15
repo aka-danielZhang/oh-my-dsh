@@ -17,7 +17,7 @@ export default defineConfig({
     // files went through the Vite pipeline.
     server: {
       deps: {
-        inline: [/@deepseek-ai\/dsh-client-ui-primitives/],
+        inline: [/@(deepseek-ai|crazx)\/dsh-client-ui-primitives/],
       },
     },
   },

@@ -19,47 +19,9 @@ import type {
   CredentialRef,
   ResolvedCredential,
 } from '@deepseek-ai/dsh-credentials'
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
-// ---- Mock MCP SDK ----
-
-// vi.mock factories are hoisted above every import/const, so the mock fns and
-// class must be created inside vi.hoisted to exist when the factories run.
-const { mockConnect, mockClose, mockListTools, MockClient, instances } = vi.hoisted(() => {
-  const mockConnect = vi.fn<() => Promise<void>>()
-  const mockClose = vi.fn<() => Promise<void>>()
-  const mockListTools = vi.fn<(_params?: Record<string, unknown>) => Promise<unknown>>()
-  const mockRequest = vi.fn(async (
-    request: { method: string; params?: Record<string, unknown> },
-    _schema: unknown,
-  ): Promise<unknown> => {
-    if (request.method === 'tools/list') return await mockListTools(request.params)
-    throw new Error(`unexpected MCP request: ${request.method}`)
-  })
-  class MockClient {
-    onclose: (() => void) | undefined
-    connect = mockConnect
-    close = mockClose
-    request = mockRequest
-    setNotificationHandler = vi.fn()
-    constructor() { instances.push(this) }
-  }
-  const instances: MockClient[] = []
-  return { mockConnect, mockClose, mockListTools, MockClient, instances }
-})
-
-vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
-  Client: MockClient,
-}))
-
-vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({
-  StdioClientTransport: vi.fn(),
-}))
-
-vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
-  StreamableHTTPClientTransport: vi.fn(),
-}))
+// ---- mcp-client stand-in (config-aliased, see tests/mcp-client-fake.ts) ----
+import { connections, receivedConfigs, resetFake } from './mcp-client-fake.ts'
 
 // vi.mock is hoisted above static imports, so the modules under test see the
 // mocked SDK even through a static import.
@@ -134,14 +96,6 @@ class MemoryCredentials extends CredentialProvider {
   }
 }
 
-/** The tool list the mock server advertises after a successful connect. */
-function listing(...names: string[]): { tools: { name: string; inputSchema: { type: string } }[]; nextCursor: undefined } {
-  return {
-    tools: names.map(name => ({ name, inputSchema: { type: 'object' } })),
-    nextCursor: undefined,
-  }
-}
-
 function stdioEntry(serverName: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return { transport: 'stdio', serverName, command: 'echo', ...extra }
 }
@@ -174,13 +128,7 @@ function captureErrors(ctx: Context): string[] {
 describe('mcp-manager composition base', () => {
   it('composes profile-defined servers and exposes them through the settings section', async () => {
     vi.clearAllMocks()
-    instances.length = 0
-    mockConnect.mockResolvedValue(undefined)
-    mockClose.mockImplementation(function (this: { onclose?: () => void }) {
-      this.onclose?.()
-      return Promise.resolve()
-    })
-    mockListTools.mockResolvedValue(listing('remote'))
+    resetFake()
     const { ctx } = await boot({
       servers: [{
         transport: 'stdio', serverName: 'profile-server', enabled: true,
@@ -201,13 +149,7 @@ describe('mcp-manager composition', () => {
 
   beforeEach(async () => {
     vi.clearAllMocks()
-    instances.length = 0
-    mockConnect.mockResolvedValue(undefined)
-    mockClose.mockImplementation(function (this: { onclose?: () => void }) {
-      this.onclose?.()
-      return Promise.resolve()
-    })
-    mockListTools.mockResolvedValue(listing('remote'))
+    resetFake()
     ;({ ctx, managerFiber } = await boot())
   })
 
@@ -220,7 +162,7 @@ describe('mcp-manager composition', () => {
       ])
     })
     expect(ctx.tools.get('mcp__srv__remote')).toBeDefined()
-    expect(instances).toHaveLength(1)
+    expect(connections).toHaveLength(1)
     await ctx.fiber.dispose()
   })
 
@@ -232,7 +174,7 @@ describe('mcp-manager composition', () => {
         { serverName: 'srv', transport: 'stdio', enabled: false, connection: null, toolCount: 0 },
       ])
     })
-    expect(instances).toHaveLength(0)
+    expect(connections).toHaveLength(0)
     expect(ctx.tools.get('mcp__srv__remote')).toBeUndefined()
     await ctx.fiber.dispose()
   })
@@ -254,7 +196,7 @@ describe('mcp-manager composition', () => {
 
     await writeServers(ctx, [stdioEntry('srv', { command: 'echo2' })])
 
-    await vi.waitFor(() => { expect(instances).toHaveLength(2) })
+    await vi.waitFor(() => { expect(connections).toHaveLength(2) })
     await vi.waitFor(() => {
       expect(ctx.mcpManager.snapshot()).toEqual([
         { serverName: 'srv', transport: 'stdio', enabled: true, connection: 'connected', toolCount: 1 },
@@ -265,11 +207,11 @@ describe('mcp-manager composition', () => {
 
   it('keeps an unchanged entry on its live fiber across unrelated edits', async () => {
     await writeServers(ctx, [stdioEntry('one'), stdioEntry('two')])
-    await vi.waitFor(() => { expect(instances).toHaveLength(2) })
+    await vi.waitFor(() => { expect(connections).toHaveLength(2) })
 
     await writeServers(ctx, [stdioEntry('one'), stdioEntry('two', { command: 'echo2' })])
 
-    await vi.waitFor(() => { expect(instances).toHaveLength(3) })
+    await vi.waitFor(() => { expect(connections).toHaveLength(3) })
     // 'one' kept its fiber; only 'two' was re-spawned.
     await vi.waitFor(() => {
       expect(ctx.mcpManager.snapshot().map(row => row.serverName)).toEqual(['one', 'two'])
@@ -290,7 +232,7 @@ describe('mcp-manager composition', () => {
         expect(row.toolCount).toBe(0)
       }
     })
-    expect(instances).toHaveLength(0)
+    expect(connections).toHaveLength(0)
     await writeServers(ctx, [])
     await vi.waitFor(() => { expect(ctx.mcpManager.snapshot()).toEqual([]) })
     await ctx.fiber.dispose()
@@ -314,7 +256,7 @@ describe('mcp-manager composition', () => {
     await writeServers(ctx, [stdioEntry('srv')])
     await vi.waitFor(() => { expect(ctx.mcpManager.snapshot()[0]?.connection).toBe('connected') })
 
-    instances[0]!.onclose?.()
+    connections[0]!.drop()
 
     await vi.waitFor(() => { expect(ctx.mcpManager.snapshot()[0]?.connection).toBe('reconnecting') })
     await ctx.fiber.dispose()
@@ -343,10 +285,8 @@ describe('mcp-manager composition', () => {
     }])
 
     await vi.waitFor(() => { expect(ctx.mcpManager.snapshot()[0]?.connection).toBe('connected') })
-    expect(vi.mocked(StreamableHTTPClientTransport)).toHaveBeenCalledWith(
-      new URL('https://example.test/mcp'),
-      { requestInit: { headers: { 'X-Test': 'present', Authorization: 'Bearer secret-value' } } },
-    )
+    const composed = receivedConfigs.find(config => config.serverName === 'http-auth')
+    expect(composed?.headers).toEqual({ 'X-Test': 'present', Authorization: 'Bearer secret-value' })
     await ctx.fiber.dispose()
   })
 
@@ -357,9 +297,8 @@ describe('mcp-manager composition', () => {
     })])
 
     await vi.waitFor(() => { expect(ctx.mcpManager.snapshot()[0]?.connection).toBe('connected') })
-    expect(vi.mocked(StdioClientTransport)).toHaveBeenCalledWith(expect.objectContaining({
-      env: expect.objectContaining({ STATIC: 'present', Z_AI_API_KEY: 'secret-value' }),
-    }))
+    const composed = receivedConfigs.find(config => config.serverName === 'stdio-auth')
+    expect(composed?.env).toMatchObject({ STATIC: 'present', Z_AI_API_KEY: 'secret-value' })
     await ctx.fiber.dispose()
   })
 
@@ -396,11 +335,9 @@ describe('mcp-manager composition', () => {
 
     await ctx.credentials.set(ref, 'second-value')
 
-    await vi.waitFor(() => { expect(vi.mocked(StreamableHTTPClientTransport)).toHaveBeenCalledTimes(2) })
-    expect(vi.mocked(StreamableHTTPClientTransport)).toHaveBeenLastCalledWith(
-      new URL('https://example.test/mcp'),
-      { requestInit: { headers: { Authorization: 'Bearer second-value' } } },
-    )
+    await vi.waitFor(() => { expect(connections).toHaveLength(2) })
+    const last = receivedConfigs.filter(config => config.serverName === 'http-auth').at(-1)
+    expect(last?.headers).toEqual({ Authorization: 'Bearer second-value' })
     await ctx.fiber.dispose()
   })
 
@@ -431,15 +368,13 @@ describe('mcp-manager composition', () => {
     }] })
     await vi.waitFor(() => { expect(late.mcpManager.snapshot()[0]?.connection).toBe('failed') })
     expect(errors.some(line => line.includes('no credentials service is mounted'))).toBe(true)
-    expect(vi.mocked(StreamableHTTPClientTransport)).not.toHaveBeenCalled()
+    expect(receivedConfigs).toHaveLength(0)
 
     await late.plugin(SeededCredentials)
 
     await vi.waitFor(() => { expect(late.mcpManager.snapshot()[0]?.connection).toBe('connected') })
-    expect(vi.mocked(StreamableHTTPClientTransport)).toHaveBeenCalledWith(
-      new URL('https://example.test/mcp'),
-      { requestInit: { headers: { Authorization: 'Bearer secret-value' } } },
-    )
+    const composed = receivedConfigs.find(config => config.serverName === 'http-auth')
+    expect(composed?.headers).toEqual({ Authorization: 'Bearer secret-value' })
     await late.fiber.dispose()
   })
 
@@ -455,7 +390,7 @@ describe('mcp-manager composition', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(vi.mocked(StdioClientTransport)).not.toHaveBeenCalled()
+    expect(receivedConfigs).toHaveLength(0)
     expect(ctx.get('mcpManager')).toBeUndefined()
     await ctx.fiber.dispose()
   })

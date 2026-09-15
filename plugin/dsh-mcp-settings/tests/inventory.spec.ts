@@ -8,29 +8,8 @@ import { remoteMethods } from '@deepseek-ai/dsh-typert-protocol'
 import McpManagerService, { MCP_SETTINGS_NAMESPACE } from '../src/manager.ts'
 import McpInventoryGateway from '../src/inventory.ts'
 
-// vi.mock factories are hoisted above every import/const, so the mock class
-// must be created inside vi.hoisted to exist when the factory runs.
-const { MockClient, instances } = vi.hoisted(() => {
-  class MockClient {
-    onclose: (() => void) | undefined
-    async connect(): Promise<void> {}
-    async close(): Promise<void> { this.onclose?.() }
-    async request(request: { method: string }): Promise<unknown> {
-      if (request.method === 'tools/list') {
-        return { tools: [{ name: 'remote', inputSchema: { type: 'object' } }], nextCursor: undefined }
-      }
-      throw new Error(`unexpected MCP request: ${request.method}`)
-    }
-    setNotificationHandler = vi.fn()
-    constructor() { instances.push(this) }
-  }
-  const instances: MockClient[] = []
-  return { MockClient, instances }
-})
-
-vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({ Client: MockClient }))
-vi.mock('@modelcontextprotocol/sdk/client/stdio.js', () => ({ StdioClientTransport: vi.fn() }))
-vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({ StreamableHTTPClientTransport: vi.fn() }))
+// The mcp-client package is replaced by a config-aliased stand-in (tests/mcp-client-fake.ts).
+import { connections, resetFake } from './mcp-client-fake.ts'
 
 const contexts: Context[] = []
 
@@ -91,7 +70,7 @@ describe('McpInventoryGateway', () => {
       ],
     })
 
-    await vi.waitFor(() => { expect(instances).toHaveLength(1) })
+    await vi.waitFor(() => { expect(connections).toHaveLength(1) })
     await vi.waitFor(() => {
       expect(inventory.list()).toEqual({
         servers: [

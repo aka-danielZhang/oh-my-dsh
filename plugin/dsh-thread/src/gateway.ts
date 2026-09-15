@@ -155,7 +155,9 @@ export class ThreadGateway extends TypertRemoteService {
         this.ctx.logger('dsh-thread').error('failed to persist Thread projection', error)
       })
     })
-    this.ctx.on('agent/session-start', ({ agent }) => {
+    // 0.1.6 retired `agent/session-start`; `agent/created` is its superset
+    // (fresh creation, resume, clear, compaction) and reconcile is idempotent.
+    this.ctx.on('agent/created', ({ agent }) => {
       void this.enqueue(() => this.reconcileDrafts(agent.session)).catch((error) => {
         this.ctx.logger('dsh-thread').error('failed to reconcile Thread drafts', error)
       })

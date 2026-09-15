@@ -33,7 +33,9 @@
 1. 在本仓建 worktree（§0，与 fork 同 topic）。
 2. 更新 `runtime/revision.json` 钉新 fork tag 与 sha。
 3. 按 AGENTS.md「npm 依赖纪律」bump 各插件 devDeps 的 `@deepseek-ai/*` 基线：fork 修改面走 `@crazx` npm alias 指向新 zw 版；非 fork 面钉 fork manifest 声明的版本，禁止 `^range` 漂移。
-4. 对照上游 changelog/diff 逐插件排查 breaking change（slot、ctx 服务、类型、client bundle 构建契约、settings API），逐一做兼容修复；新 Slot 注册必须 try/catch 降级，保证「新插件 + 旧 runtime」组合下每个插件完整存活。
+4. 对照上游 changelog/diff 逐插件排查 breaking change（slot、ctx 服务、类型、client bundle 构建契约、settings API、**事件表增删**——0.1.6 实例：`agent/session-start` 被移除并入 serial 的 `agent/created`），逐一做兼容修复；新 Slot 注册必须 try/catch 降级，保证「新插件 + 旧 runtime」组合下每个插件完整存活。
+4b. 上游包新增 peer 时（0.1.6 实例：`dsh-tools` 新增 `dsh-sandbox` peer），`autoInstallPeers: false` 下**所有锁了该包的插件都要显式 devDep 供出**，逐个补齐再跑门；症状是插件测试 ERR_MODULE_NOT_FOUND。
+4c. 上游换外部依赖包名时（0.1.6 实例：MCP SDK 换成 `@modelcontextprotocol/client`），externalized CJS 的旧 mock 全部失效且 vi.mock/alias/noExternal 均不可达——在 importer 边界 alias 替换整个包（见 `docs/notes/2026-09-16-harness-0.1.6-alpha.1-sync.md` 结论二）。
 5. worktree 内 `pnpm run plugins:check` 全树 typecheck/test/build 通过；`node scripts/prepare-runtime.mjs` 重组装 runtime 并验证（内置漂移/重复/基线扫描必须全过）；desktop:typecheck / desktop:test / desktop:smoke 按改动面取舍。
 6. 有改动的插件在本 worktree 内一并 bump version；决策记入 worktree 内 `docs/harness-bump/<新基线>/README.md` 与 `docs/notes/<日期>-*.md`（随分支合并进 main）。
 
