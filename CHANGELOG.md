@@ -2,6 +2,12 @@
 
 Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的，不在这里重复。发版时 `scripts/release-notes.mjs` 抽取对应 `## [version]`（没有则回退 `## [Unreleased]
 
+## [0.3.1-rc.5] - 2026-09-16
+
+### Fixed
+
+- 修复 rc.4 桌面无法启动的回归：上游 0.1.6 的 typert-loader 新增 manifest 归属校验，fork 代发的 `@crazx/dsh-api-session-controller` 包内生成产物仍声明 `@deepseek-ai` 名字导致 sidecar 启动即崩。runtime 基线改钉 `v0.1.6-alpha.1+zw.3`（publish-fork 现于发布时重写 typert 产物所有权），已通过 17 插件 × 4 preset 双次启动冒烟验证。
+
 ## [0.3.1-rc.4] - 2026-09-16
 
 ### Changed
