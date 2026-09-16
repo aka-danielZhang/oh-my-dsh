@@ -44,3 +44,7 @@
 - 插件逻辑零改动；两个插件因 vitest inline 正则修复 bump（见 §4.5）。
 - `dsh-ohmymemo` devDeps 补 `@deepseek-ai/dsh-sandbox`（0.1.6 的 dsh-tools 新增该 peer，autoInstallPeers off 下必须显式供，与 mcp-settings 同款）。
 - 桌面发版：`v0.3.1-rc.4`。
+
+## 6. 追加修复（2026-09-16 下午）：rc.4 sidecar 启动回归
+
+`v0.3.1-rc.4` 装机即崩：0.1.6 typert-loader 新增 manifest 归属校验，`@crazx/dsh-api-session-controller` 的生成产物 `lib/typert.host.js`/`typert.remote-client.js` 内嵌 `@deepseek-ai` 名字被拒 → 31 条目激活失败 → HMR 缺失 → app-boot 退出。根因、修复（fork `v0.1.6-alpha.1+zw.3`：publish-fork staging 重写 typert 所有权）与「smoke 必跑」教训见 `docs/notes/2026-09-16-rc4-typert-ownership-regression.md`；桌面修复版 `v0.3.1-rc.5`。
