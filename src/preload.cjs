@@ -45,7 +45,14 @@ async function assertDesktopToolbar(toolbar) {
   const bar = toolbar.getBoundingClientRect()
   if (bar.height < 36 || bar.height > 40) throw new Error(`toolbar height ${bar.height} != 38`)
   const buttons = [...toolbar.querySelectorAll('button')]
-  if (buttons.length < 4) {
+  // The updater control is conditional (UpdateControl renders null until the
+  // coordinator has state), so the standing row is toggle + bell + collapsed-only
+  // New Session = 3; the sidebar toggle is mandatory — the collapse cycle below
+  // drives it. The stale >=4 gate aborted the probe before that cycle ever ran
+  // (0.3.1-rc.6: the collapsed lane's drag region swallowed the toggle and the
+  // e2e never saw it).
+  const toggleRequired = buttons.find((button) => /侧边栏|sidebar/i.test(button.getAttribute('aria-label') || ''))
+  if (buttons.length < 3 || !toggleRequired) {
     const layout = buttons
       .map((button) => {
         const rect = button.getBoundingClientRect()
@@ -53,14 +60,17 @@ async function assertDesktopToolbar(toolbar) {
         return `${label}@${Math.round(rect.left)},${Math.round(rect.top)} ${Math.round(rect.width)}x${Math.round(rect.height)}${rect.width === 0 ? ' (hidden)' : ''}`
       })
       .join(' | ')
-    throw new Error(`toolbar buttons ${buttons.length} < 4: ${layout}`)
+    throw new Error(`toolbar buttons ${buttons.length} < 3 or sidebar toggle missing: ${layout}`)
   }
-  const rects = buttons.map((button) => button.getBoundingClientRect())
+  // State-conditional buttons (collapsed-only New Session) collapse to a 0x0
+  // rect at the origin while hidden — geometry assertions must run over the
+  // VISIBLE buttons only.
+  const rects = buttons.map((button) => button.getBoundingClientRect()).filter((rect) => rect.width > 0)
   const left = Math.min(...rects.map((rect) => rect.left))
   if (left < 80) {
     const layout = buttons
-      .map((button, index) => {
-        const rect = rects[index]
+      .map((button) => {
+        const rect = button.getBoundingClientRect()
         const label = button.getAttribute('aria-label') || button.textContent?.trim().slice(0, 24) || '<unlabeled>'
         return `${label}@${Math.round(rect.left)},${Math.round(rect.top)} ${Math.round(rect.width)}x${Math.round(rect.height)}${rect.width === 0 ? ' (hidden)' : ''}`
       })
@@ -82,8 +92,10 @@ async function assertDesktopToolbar(toolbar) {
 
 /**
  * Collapse/expand cycle driven through the toolbar's own sidebar toggle
- * (a real click, so the whole ctx.layout → inline-grid reconciliation chain
- * runs). Asserts the sidebar actually collapses, the collapsed first track
+ * (a DOM click, so the whole ctx.layout → inline-grid reconciliation chain
+ * runs; NOTE a DOM click bypasses Electron's drag-region hit-test — the
+ * drag-coverage class of regression is asserted geometrically inside).
+ * Asserts the sidebar actually collapses, the collapsed first track
  * is reconciled to 0px by the rail hider, and the toolbar's own geometry
  * does not drift while collapsed — then expands back.
  */
@@ -108,6 +120,24 @@ async function assertCollapsedCycle(toolbar) {
   if (firstTrack !== '0px') {
     throw new Error(`collapsed first track "${firstTrack}" != 0px (rail hider not reconciling)`)
   }
+  // Drag-region overlap invariant (0.3.1-rc.6): `-webkit-app-region` combines
+  // by paint order, so a collapsed main lane whose BOX starts inside the
+  // controls cluster covers the rail buttons' no-drag holes — native clicks
+  // then start a window drag and the sidebar can never expand again. This
+  // synthetic click bypasses the drag hit-test, so the cycle asserts the
+  // GEOMETRY instead: the lane's box must start at or past the cluster's
+  // right edge, and every rail button must keep its computed no-drag hole.
+  const controls = toolbar.querySelector('[data-desktop-toolbar-controls]')
+  const main = toolbar.querySelector('[data-desktop-toolbar-main]')
+  if (controls && main) {
+    const clusterRight = controls.getBoundingClientRect().right
+    const laneLeft = main.getBoundingClientRect().left
+    if (laneLeft < clusterRight) {
+      throw new Error(`collapsed main lane box starts at ${Math.round(laneLeft)} inside the controls cluster (right edge ${Math.round(clusterRight)}) — its inherited drag region covers the no-drag rail buttons`)
+    }
+  }
+  const region = getComputedStyle(toggle).webkitAppRegion
+  if (region !== 'no-drag') throw new Error(`toggle app-region ${region} != no-drag while collapsed`)
   const bar = toolbar.getBoundingClientRect()
   if (bar.height < 36 || bar.height > 40) throw new Error(`toolbar height drifted to ${bar.height} while collapsed`)
   toggle.click()

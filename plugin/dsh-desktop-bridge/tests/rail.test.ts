@@ -71,7 +71,7 @@ describe('railCss', () => {
     assert.ok(!css.includes('[data-desktop-toolbar-controls]{position:absolute'), 'the cluster is never absolutely positioned (v1 hit-test regression)')
     assert.ok(css.includes('[data-desktop-toolbar-main]{grid-column:2/-1;grid-row:1;'), 'the main lane starts at the conversation column edge')
     assert.ok(css.includes('padding-left:12px;'), 'the expanded title insets 12px from the conversation column edge')
-    assert.ok(css.includes('pointer-events:none;transition:padding-left'), 'the main lane never wins the hit test over the collapsed cluster')
+    assert.ok(css.includes('pointer-events:none;transition:margin-left'), 'the main lane never wins the hit test over the collapsed cluster')
     assert.ok(css.includes('[data-desktop-toolbar-center]{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:8px;pointer-events:auto;}'), 'the center host owns the flexible middle space while re-enabling pointer events')
   })
   it('reveals New Session only while the sidebar is collapsed (immune to the rail reset)', () => {
@@ -88,11 +88,12 @@ describe('railCss', () => {
     assert.ok(css.includes('[data-desktop-toolbar-end] [data-conversation-header-corner]{margin:0;}'), 'the rightbar corner follows the utilities at the main lane gap')
     assert.ok(!css.includes('space-between'), 'the middle space belongs to the host, not distributed between every control')
   })
-  it('clears the actual collapsed control cluster without a phantom updater gap', () => {
+  it('clears the collapsed control cluster with a margin, never a covering drag box', () => {
     const css = railCss()
-    assert.ok(css.includes('[data-sidebar-collapsed] [data-desktop-toolbar-main]{padding-left:176px;}'), 'idle clearance = 86px lights + three 26px controls + gaps + 8px')
-    assert.ok(css.includes('[data-sidebar-collapsed] [data-desktop-toolbar]:has([data-desktop-update-button]) [data-desktop-toolbar-main]{padding-left:204px;}'), 'the conditional updater expands clearance by exactly one 26px control plus its 2px gap')
-    assert.ok(css.includes('transition:padding-left var(--ds-transition-duration-slow) var(--ds-ease-in-out);'), 'the clearance rides the frame track curve')
+    assert.ok(css.includes('[data-sidebar-collapsed] [data-desktop-toolbar-main]{padding-left:0;margin-left:176px;}'), 'idle clearance = 86px lights + three 26px controls + gaps + 8px, as a BOX margin so the lane starts past the cluster')
+    assert.ok(css.includes('[data-sidebar-collapsed] [data-desktop-toolbar]:has([data-desktop-update-button]) [data-desktop-toolbar-main]{margin-left:204px;}'), 'the conditional updater expands clearance by exactly one 26px control plus its 2px gap')
+    assert.ok(!css.includes('padding-left:176px') && !css.includes('padding-left:204px'), 'collapsed clearance must never be a padding: a padded lane box still starts at x=0, and its inherited drag region covers the rail buttons\' no-drag holes — native clicks become window drags and the sidebar cannot expand (0.3.1-rc.6 regression)')
+    assert.ok(css.includes('transition:margin-left var(--ds-transition-duration-slow) var(--ds-ease-in-out),padding-left var(--ds-transition-duration-slow) var(--ds-ease-in-out);'), 'the clearance rides the frame track curve')
     assert.ok(css.includes('@media (prefers-reduced-motion:reduce){[data-desktop-toolbar-main]{transition:none;}}'), 'reduced motion disables the clearance transition')
   })
   it('lets every interactive child opt out of the drag region (immune to all:unset)', () => {

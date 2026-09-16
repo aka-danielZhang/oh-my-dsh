@@ -77,10 +77,22 @@ export function restoreRailTemplate(current: string, owned: string, original: st
  *   absolutely positioned: the v1 overlay cluster lost click hit-testing
  *   against the main lane's box. Collapsed, the zero-width first track
  *   lets the cluster's min-content box overflow rightward past the lights;
- *   the main lane yields content-aware clearance: 176px for the normal
+ *   the main lane yields clearance via MARGIN (176px for the normal
  *   toggle / bell / New Session trio, promoted to 204px only while the
- *   conditional updater button exists. Both leave 8px after the actual last
- *   control, ride the frame's track curve, and disable under reduced motion.
+ *   conditional updater button exists — padding-left drops to 0 so the
+ *   portalled header keeps its exact pre-fix inset). The clearance MUST be
+ *   a margin, never a padding: `-webkit-app-region` combines by paint
+ *   order, and the main lane (a later sibling inheriting the row's drag)
+ *   covers the rail buttons' no-drag holes whenever its box starts inside
+ *   the cluster — exactly the collapsed state, where track 2 begins at
+ *   x=0 — so native clicks on the toggle start a window drag instead of
+ *   expanding the sidebar (the 0.3.1-rc.6 regression; synthesized clicks —
+ *   the e2e probe's element.click(), CDP input — bypass the drag
+ *   hit-test, so only real pointers hit it). Both values leave 8px after
+ *   the actual last control, ride the frame's track curve (margin-left and
+ *   padding-left transition with the same curve, so the summed inset
+ *   animates exactly like the old single-padding slide), and disable under
+ *   reduced motion.
  *   New Session is revealed only while collapsed —
  *   expanded, the sidebar's own primary button owns that action. Both state
  *   rules carry `!important`: the rail-button reset later in this sheet
@@ -118,9 +130,9 @@ export function railCss(): string {
     '[data-desktop-toolbar-controls]{grid-column:1;grid-row:1;justify-self:start;z-index:1;display:flex;align-items:center;gap:2px;padding-left:86px;}',
     '[data-desktop-toolbar] [data-desktop-toolbar-new]{display:none!important;}',
     '[data-sidebar-collapsed] [data-desktop-toolbar] [data-desktop-toolbar-new]{display:inline-flex!important;}',
-    '[data-desktop-toolbar-main]{grid-column:2/-1;grid-row:1;display:flex;align-items:center;gap:2px;min-width:0;padding-left:12px;padding-right:8px;pointer-events:none;transition:padding-left var(--ds-transition-duration-slow) var(--ds-ease-in-out);}',
-    '[data-sidebar-collapsed] [data-desktop-toolbar-main]{padding-left:176px;}',
-    '[data-sidebar-collapsed] [data-desktop-toolbar]:has([data-desktop-update-button]) [data-desktop-toolbar-main]{padding-left:204px;}',
+    '[data-desktop-toolbar-main]{grid-column:2/-1;grid-row:1;display:flex;align-items:center;gap:2px;min-width:0;padding-left:12px;padding-right:8px;pointer-events:none;transition:margin-left var(--ds-transition-duration-slow) var(--ds-ease-in-out),padding-left var(--ds-transition-duration-slow) var(--ds-ease-in-out);}',
+    '[data-sidebar-collapsed] [data-desktop-toolbar-main]{padding-left:0;margin-left:176px;}',
+    '[data-sidebar-collapsed] [data-desktop-toolbar]:has([data-desktop-update-button]) [data-desktop-toolbar-main]{margin-left:204px;}',
     '[data-desktop-toolbar-center]{flex:1 1 0;min-width:0;display:flex;align-items:center;gap:8px;pointer-events:auto;}',
     '[data-desktop-toolbar-center]>*{min-width:0;gap:8px;margin:0;}',
     '[data-desktop-toolbar-center]>:first-child{flex:0 1 auto;}',
