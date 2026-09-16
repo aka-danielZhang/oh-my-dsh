@@ -1,6 +1,6 @@
 {
   "name": "oh-my-dsh",
-  "version": "0.3.1-rc.5",
+  "version": "0.3.1-rc.6",
   "private": true,
   "type": "module",
   "main": "dist-electron/main.cjs",
@@ -27,8 +27,8 @@
   "devDependencies": {
     "@electron/rebuild": "^4.0.1",
     "@types/node": "^24.3.0",
-    "electron": "^37.2.6",
-    "electron-builder": "^26.0.12",
+    "electron": "44.0.0",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.25.8",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2"

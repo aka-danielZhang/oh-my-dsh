@@ -36,7 +36,7 @@
 4. 对照上游 changelog/diff 逐插件排查 breaking change（slot、ctx 服务、类型、client bundle 构建契约、settings API、**事件表增删**——0.1.6 实例：`agent/session-start` 被移除并入 serial 的 `agent/created`），逐一做兼容修复；新 Slot 注册必须 try/catch 降级，保证「新插件 + 旧 runtime」组合下每个插件完整存活。
 4b. 上游包新增 peer 时（0.1.6 实例：`dsh-tools` 新增 `dsh-sandbox` peer），`autoInstallPeers: false` 下**所有锁了该包的插件都要显式 devDep 供出**，逐个补齐再跑门；症状是插件测试 ERR_MODULE_NOT_FOUND。
 4c. 上游换外部依赖包名时（0.1.6 实例：MCP SDK 换成 `@modelcontextprotocol/client`），externalized CJS 的旧 mock 全部失效且 vi.mock/alias/noExternal 均不可达——在 importer 边界 alias 替换整个包（见 `docs/notes/2026-09-16-harness-0.1.6-alpha.1-sync.md` 结论二）。
-5. worktree 内 `pnpm run plugins:check` 全树 typecheck/test/build 通过；`node scripts/prepare-runtime.mjs` 重组装 runtime 并验证（内置漂移/重复/基线扫描必须全过）；desktop:typecheck / desktop:test 必跑；**`desktop:smoke` 在基线升级轮为必跑项**（rc.4 事故，2026-09-16：跳过 smoke 放行了 typert manifest 归属校验炸掉的 runtime——其余门全绿但打包 profile 实启即崩）。
+5. （先决）若插件经 `dsh` 符号链接解析到 fork 主 checkout，**先在主 checkout `pnpm run build` 重建 lib**——陈旧 lib 会让门对 0.1.6 类型/行为漂移假绿（rc.6 轮实案）；worktree 内 `pnpm run plugins:check` 全树 typecheck/test/build 通过；`node scripts/prepare-runtime.mjs` 重组装 runtime 并验证（内置漂移/重复/基线扫描必须全过）；desktop:typecheck / desktop:test 必跑；**`desktop:smoke` 在基线升级轮为必跑项**（rc.4 事故，2026-09-16：跳过 smoke 放行了 typert manifest 归属校验炸掉的 runtime——其余门全绿但打包 profile 实启即崩）；smoke/e2e 之外还须**用打包 Electron 的 `ELECTRON_RUN_AS_NODE` 实启一次 sidecar**（rc.5 事故：Electron 指纹拒绝只在 Electron 内嵌 node 显形，系统 node 下全绿）。壳的 Electron 钉**精确**上游桌面同款（0.1.6 起 = 44.0.0；`^` 会解析到 44.3.0 同样被 addon 拒绝），基线升级随上游 apps/desktop lockfile 同步。
 6. 有改动的插件在本 worktree 内一并 bump version；决策记入 worktree 内 `docs/harness-bump/<新基线>/README.md` 与 `docs/notes/<日期>-*.md`（随分支合并进 main）。
 
 ## 4. 合并回 main + 发版

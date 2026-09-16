@@ -45,7 +45,16 @@ async function assertDesktopToolbar(toolbar) {
   const bar = toolbar.getBoundingClientRect()
   if (bar.height < 36 || bar.height > 40) throw new Error(`toolbar height ${bar.height} != 38`)
   const buttons = [...toolbar.querySelectorAll('button')]
-  if (buttons.length < 4) throw new Error(`toolbar buttons ${buttons.length} < 4`)
+  if (buttons.length < 4) {
+    const layout = buttons
+      .map((button) => {
+        const rect = button.getBoundingClientRect()
+        const label = button.getAttribute('aria-label') || button.textContent?.trim().slice(0, 24) || '<unlabeled>'
+        return `${label}@${Math.round(rect.left)},${Math.round(rect.top)} ${Math.round(rect.width)}x${Math.round(rect.height)}${rect.width === 0 ? ' (hidden)' : ''}`
+      })
+      .join(' | ')
+    throw new Error(`toolbar buttons ${buttons.length} < 4: ${layout}`)
+  }
   const rects = buttons.map((button) => button.getBoundingClientRect())
   const left = Math.min(...rects.map((rect) => rect.left))
   if (left < 80) {

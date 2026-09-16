@@ -125,7 +125,7 @@ function fixture(
   const agent = {
     session,
     options: { provider: PROVIDER, model: MODEL },
-  } as Agent
+  } as unknown as Agent
   return { adapter, agent, engine, session }
 }
 
@@ -286,7 +286,7 @@ test('oversized input maps chunks, reduces them, and aggregates usage honestly',
   assert.equal(result.model, MODEL)
   assert.equal(result.maxTokens, 256)
   assert.ok(adapter.calls.every(call => call.purpose === 'compaction'))
-  assert.ok(adapter.calls.every(call => call.sessionId === session.id))
+  assert.ok(adapter.calls.every(call => String(call.sessionId) === String(session.id)))
   assert.ok(adapter.calls.some(call => call.messages.some(message => (
     message.content.some(block => block.type === 'text' && block.text.includes('<partial-summary'))
   ))))
@@ -374,7 +374,7 @@ test('output reserve incompatible with the summary model fails before streaming'
   const agent = {
     session: Session.create(SessionId('bad-reserve')),
     options: { provider: PROVIDER, model: MODEL },
-  } as Agent
+  } as unknown as Agent
   await assert.rejects(engine.run([user('large')], agent), /output reserve/)
   assert.equal(adapter.calls.length, 0)
 })
@@ -397,7 +397,7 @@ test('a single map result does not require an unused reduce reserve', async () =
   const agent = {
     session: Session.create(SessionId('single-map-reserve')),
     options: { provider: PROVIDER, model: MODEL },
-  } as Agent
+  } as unknown as Agent
   const result = await engine.run([user('small')], agent)
   assert.equal(adapter.calls.length, 1)
   assert.equal(result.llmStreamCall, true)
@@ -423,7 +423,7 @@ test('a model-specific one-shot cap that cannot fit routes directly to hierarchy
   const agent = {
     session: Session.create(SessionId('model-policy-reserve')),
     options: { provider: PROVIDER, model: MODEL },
-  } as Agent
+  } as unknown as Agent
   const result = await engine.run([user('small')], agent)
   assert.equal(adapter.calls.length, 1)
   assert.equal(result.llmStreamCall, true)
