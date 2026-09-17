@@ -17,6 +17,18 @@
  * search control with the row's own measured gap, so every icon in the group
  * stays equidistant. Anchors missing ⇒ nothing is drawn (fail invisible).
  *
+ * Row qualification must not count buttons that live inside the search control
+ * itself: upstream mounts a transient clear button there while search is
+ * expanded, and this plugin's own entry can end up there too (that is the
+ * regression this excludes — both made the clipped search box qualify as the
+ * row, re-parenting the entry behind its `overflow: hidden`).
+ *
+ * While search is expanded the box sweeps across the whole row, so the entry
+ * steps aside (visibility hidden) exactly like upstream's own header actions,
+ * and only re-anchors once the collapse transition has settled: a scan that
+ * ran mid-transition would freeze the entry at stale geometry, because CSS
+ * transitions fire no mutations for the observer to see.
+ *
  * Clicking toggles the main panel: the same button returns to the Conversation,
  * which is why it also mirrors its pressed state from the document marker the
  * panel sets while mounted.
@@ -41,6 +53,11 @@ const BUTTON_SIZE = 28
 const FALLBACK_GAP = 8
 /** Coalescing window for DOM mutations, in ms. */
 const SCAN_DEBOUNCE = 60
+/**
+ * Wait for the search box's width transition (180ms upstream) to finish
+ * before re-anchoring after a collapse — mid-transition geometry freezes.
+ */
+const EXPAND_SETTLE_MS = 260
 /** Walk-up budget when looking for the header row above a control. */
 const MAX_ROW_HOPS = 6
 
@@ -62,16 +79,70 @@ function buttonByLabels(labels: readonly string[]): HTMLButtonElement | null {
   return null
 }
 
+/** One button of a candidate row, classified for row qualification. */
+export interface RowButtonCensus {
+  /** The control the row walk started from (the search/add anchor). */
+  readonly isAnchor: boolean
+  /** This plugin's own entry button. */
+  readonly isOwn: boolean
+  /** Inside the search control cluster (e.g. the transient clear button). */
+  readonly inSearchCluster: boolean
+}
+
+/**
+ * How many buttons of a candidate container count toward "this is the header
+ * row": the anchor plus at least one genuinely separate control (2+). The
+ * entry's own button never counts — a container that already swallowed the
+ * entry must not keep qualifying as the row — and neither do the search
+ * cluster's other buttons: the clear button exists only while search is
+ * expanded, and counting it re-parented the entry into the clipped search box.
+ * Pure so the expansion regression stays unit-tested without a DOM.
+ */
+export function qualifyingRowButtons(buttons: readonly RowButtonCensus[]): number {
+  let count = 0
+  for (const button of buttons) {
+    if (button.isOwn) continue
+    if (!button.isAnchor && button.inSearchCluster) continue
+    count += 1
+  }
+  return count
+}
+
+/**
+ * The search control cluster: the anchor's nearest ancestor that holds the
+ * search input as a DIRECT child (upstream renders `search > button + input`).
+ * Direct-child matters: the header row also contains the input transitively,
+ * and treating it as the cluster would read every other control as "search is
+ * expanded" and hide the entry for good. Null when no such ancestor exists —
+ * the add-workspace fallback path — leaving the census unfiltered.
+ */
+function clusterOf(anchor: HTMLElement): HTMLElement | null {
+  let node: HTMLElement | null = anchor
+  for (let hop = 0; hop < MAX_ROW_HOPS && node !== null; hop++) {
+    node = node.parentElement
+    if (node === null) break
+    for (const child of node.children) {
+      if (child instanceof HTMLInputElement) return node
+    }
+  }
+  return null
+}
+
 /**
  * Walk up from a control to the header row that holds it: the nearest
- * ancestor containing at least one other button (the row always holds the
- * search and add controls together; a Tooltip wrapper or icon span in between
- * must not win). Returns null past the hop budget.
+ * ancestor holding the anchor plus at least one other qualifying button (a
+ * Tooltip wrapper or icon span in between must not win). Returns null past
+ * the hop budget.
  */
-function rowOf(control: HTMLElement): HTMLElement | null {
+function rowOf(control: HTMLElement, cluster: HTMLElement | null): HTMLElement | null {
   let row: HTMLElement | null = control
   for (let hop = 0; hop < MAX_ROW_HOPS && row !== null; hop++) {
-    if (row.querySelectorAll('button').length >= 2) return row
+    const census = Array.from(row.querySelectorAll('button')).map(button => ({
+      isAnchor: button === control,
+      isOwn: button.hasAttribute(MARK),
+      inSearchCluster: cluster !== null && cluster.contains(button),
+    }))
+    if (qualifyingRowButtons(census) >= 2) return row
     row = row.parentElement
   }
   return null
@@ -97,6 +168,21 @@ function rowBySectionLabel(): { row: HTMLElement, anchor: HTMLButtonElement } | 
     }
   }
   return null
+}
+
+/**
+ * True while the search control holds a button that is neither the anchor nor
+ * this plugin's entry — the transient clear button upstream mounts only while
+ * search is expanded (DOM truth, immune to locale and class names). The
+ * entry's own button is excluded so a pre-fix install with a swallowed entry
+ * cannot read as expanded forever.
+ */
+function searchExpanded(cluster: HTMLElement | null, anchor: HTMLElement): boolean {
+  if (cluster === null) return false
+  for (const button of cluster.querySelectorAll('button')) {
+    if (button !== anchor && !button.hasAttribute(MARK)) return true
+  }
+  return false
 }
 
 /** Coalesce a burst of mutations into one scan. */
@@ -143,20 +229,59 @@ class Scanner {
  * @returns the disposer.
  */
 export function installEntry(layout: LayoutFace, label: () => string): () => void {
+  // Entry stepped aside for the expanded search: hidden now, and until the
+  // collapse transition has settled (a mid-transition scan would freeze
+  // stale geometry — transitions fire no mutations for the observer).
+  let steppedAside = false
+  let settleTimer: number | null = null
   const scan = (): void => {
+    const existing = document.querySelector<HTMLButtonElement>(`[${MARK}]`)
     // Primary: the search/add controls by accessible label. Fallback: the
     // section label text — the previewed injector's proven path, kept for
     // forks or locales where the rendered control lost the expected label.
     const byLabel = buttonByLabels(SEARCH_LABELS) ?? buttonByLabels(ADD_LABELS)
-    const located = byLabel !== null && byLabel.parentElement !== null
-      ? { row: rowOf(byLabel), anchor: byLabel }
-      : rowBySectionLabel()
-    const anchor = located?.anchor ?? null
-    const row = located?.row ?? null
-    const existing = document.querySelector<HTMLButtonElement>(`[${MARK}]`)
-    if (anchor === null || row === null) {
+    const anchor = byLabel !== null && byLabel.parentElement !== null
+      ? byLabel
+      : rowBySectionLabel()?.anchor ?? null
+    if (anchor === null) {
       // Anchor absent (sidebar collapsed to its rail, or a composition without
       // the session browser): withdraw rather than draw in the wrong place.
+      existing?.remove()
+      steppedAside = false
+      if (settleTimer !== null) {
+        window.clearTimeout(settleTimer)
+        settleTimer = null
+      }
+      return
+    }
+    const cluster = clusterOf(anchor)
+
+    // Expanded search owns the whole row — the same treatment upstream gives
+    // its own header actions. Step aside; the collapse path re-anchors.
+    if (searchExpanded(cluster, anchor)) {
+      if (settleTimer !== null) {
+        window.clearTimeout(settleTimer)
+        settleTimer = null
+      }
+      if (existing !== null) existing.style.visibility = 'hidden'
+      steppedAside = true
+      return
+    }
+    if (steppedAside) {
+      // Just collapsed: stay hidden until the width transition has settled,
+      // then one settle scan re-anchors at final geometry and shows the entry.
+      if (settleTimer === null) {
+        settleTimer = window.setTimeout(() => {
+          settleTimer = null
+          steppedAside = false
+          scan()
+        }, EXPAND_SETTLE_MS)
+      }
+      return
+    }
+    steppedAside = false
+    const row = rowOf(anchor, cluster)
+    if (row === null) {
       existing?.remove()
       return
     }
@@ -177,10 +302,19 @@ export function installEntry(layout: LayoutFace, label: () => string): () => voi
       })
     }
     if (button.parentElement !== row) {
+      // One marked row at a time: clear a stale mark (e.g. an install that ran
+      // the mis-anchoring regression and marked the search box) so its inline
+      // position does not outlive the move.
+      for (const marked of document.querySelectorAll<HTMLElement>(`[${ROW_MARK}]`)) {
+        if (marked === row) continue
+        marked.style.position = ''
+        marked.removeAttribute(ROW_MARK)
+      }
       if (row.style.position === '') row.style.position = 'relative'
       row.setAttribute(ROW_MARK, 'true')
       row.appendChild(button)
     }
+    button.style.visibility = ''
     const name = label()
     button.title = name
     button.setAttribute('aria-label', name)
@@ -200,6 +334,7 @@ export function installEntry(layout: LayoutFace, label: () => string): () => voi
   scanner.start()
   return () => {
     scanner.stop()
+    if (settleTimer !== null) window.clearTimeout(settleTimer)
     document.querySelector<HTMLButtonElement>(`[${MARK}]`)?.remove()
     for (const row of document.querySelectorAll<HTMLElement>(`[${ROW_MARK}]`)) {
       row.style.position = ''
