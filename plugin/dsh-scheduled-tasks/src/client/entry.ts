@@ -24,10 +24,10 @@
  * row, re-parenting the entry behind its `overflow: hidden`).
  *
  * While search is expanded the box sweeps across the whole row, so the entry
- * steps aside (visibility hidden) exactly like upstream's own header actions,
- * and only re-anchors once the collapse transition has settled: a scan that
- * ran mid-transition would freeze the entry at stale geometry, because CSS
- * transitions fire no mutations for the observer to see.
+ * steps aside (a 120ms fade, the stock headerActions material — see
+ * styles.ts) and only re-anchors once the collapse transition has settled: a
+ * scan that ran mid-transition would freeze the entry at stale geometry,
+ * because CSS transitions fire no mutations for the observer to see.
  *
  * Clicking toggles the main panel: the same button returns to the Conversation,
  * which is why it also mirrors its pressed state from the document marker the
@@ -47,6 +47,8 @@ const SECTION_LABELS = ['会话', 'Sessions', '工作区', 'Workspaces']
 
 const MARK = 'data-dsh-stask-entry'
 const ROW_MARK = 'data-dsh-stask-entry-row'
+/** Stepped-aside marker (see styles.ts: drives the 120ms fade, not a pop). */
+const HIDDEN_MARK = 'data-dsh-stask-hidden'
 /** Panel-mounted marker published by the page (never another plugin's state). */
 const PANEL_FLAG = 'dshStaskPanel'
 const BUTTON_SIZE = 28
@@ -257,13 +259,14 @@ export function installEntry(layout: LayoutFace, label: () => string): () => voi
     const cluster = clusterOf(anchor)
 
     // Expanded search owns the whole row — the same treatment upstream gives
-    // its own header actions. Step aside; the collapse path re-anchors.
+    // its own header actions. Step aside with a fade; the collapse path
+    // re-anchors.
     if (searchExpanded(cluster, anchor)) {
       if (settleTimer !== null) {
         window.clearTimeout(settleTimer)
         settleTimer = null
       }
-      if (existing !== null) existing.style.visibility = 'hidden'
+      if (existing !== null) existing.setAttribute(HIDDEN_MARK, 'true')
       steppedAside = true
       return
     }
@@ -314,7 +317,7 @@ export function installEntry(layout: LayoutFace, label: () => string): () => voi
       row.setAttribute(ROW_MARK, 'true')
       row.appendChild(button)
     }
-    button.style.visibility = ''
+    button.removeAttribute(HIDDEN_MARK)
     const name = label()
     button.title = name
     button.setAttribute('aria-label', name)

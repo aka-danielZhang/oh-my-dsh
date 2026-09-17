@@ -318,15 +318,24 @@ const CSS = `
 /* Sidebar entry: the clock button beside the session browser's search control.
    Absolutely positioned inside the (React-owned) header row so no foreign child
    lands in that subtree's reconciliation; geometry is measured and reapplied by
-   ./entry.ts. */
+   ./entry.ts. Stepping aside for the expanded search fades (120ms, the stock
+   headerActions material) instead of popping: the hidden state delays the
+   visibility flip until the fade-out has played, and the return fades back in
+   after the collapse settles. */
 .dsh-stask-entry {
   position: absolute; display: inline-flex; width: 28px; height: 28px; padding: 0;
   align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent;
   color: var(--dsw-alias-label-secondary); cursor: pointer; z-index: 5;
+  transition: opacity 120ms ease, visibility 0s linear;
+}
+.dsh-stask-entry[data-dsh-stask-hidden='true'] {
+  opacity: 0; visibility: hidden;
+  transition: opacity 120ms ease, visibility 0s linear 120ms;
 }
 .dsh-stask-entry:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .dsh-stask-entry[aria-pressed="true"] { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .dsh-stask-entry svg { display: block; }
+@media (prefers-reduced-motion: reduce) { .dsh-stask-entry { transition: none; } }
 
 @container (max-width: 760px) {
   .dsh-stask-grid { grid-template-columns: minmax(0, 1fr); }
