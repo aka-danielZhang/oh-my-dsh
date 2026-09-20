@@ -2,6 +2,12 @@
 
 Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的，不在这里重复。发版时 `scripts/release-notes.mjs` 抽取对应 `## [version]`（没有则回退 `## [Unreleased]
 
+## [Unreleased]
+
+### Changed
+
+- 模型档位编辑弹层（dsh-model-efforts-editor 0.1.5）：对齐 stock 语义 token 与 sibling 图片输入菜单。去掉系统原生勾选框、默认按钮字体和无效的 `--dsw-text-*` 回退色，改成主题分段控件、自定义勾选、线值输入和 Z.ai 开关。刷新设置页即生效；随下一次桌面 `v*` 进安装包。
+
 ## [0.3.1-rc.8] - 2026-09-17
 
 ### Fixed

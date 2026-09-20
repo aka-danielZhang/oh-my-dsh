@@ -35,4 +35,4 @@ dsh plugin --profile web add <repo>/plugin/dsh-model-efforts-editor
 pnpm install && pnpm run typecheck && pnpm run test && pnpm run build
 ```
 
-决策记录：仓根 `docs/notes/2026-08-27-dsh-model-efforts-editor.md`。
+决策记录：仓根 `docs/notes/2026-08-27-dsh-model-efforts-editor.md`（行为）、`docs/notes/2026-09-20-model-efforts-editor-restyle.md`（弹层视觉）。

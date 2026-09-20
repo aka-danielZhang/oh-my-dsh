@@ -53,7 +53,7 @@ export interface InjectionDeps {
   onStoredChange(listener: () => void): () => void
 }
 
-const CHECK_SVG = '<svg class="mee-check" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+const CHECK_SVG = '<svg viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M2.5 7.5l3 3 6-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
 /** OFF state: neutral dial glyph. */
 const DIAL_OFF = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="5.6" stroke="currentColor" stroke-width="1.5"/><path d="M8 4.9V8l2.2 1.7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>'
@@ -71,6 +71,7 @@ function messageOf(cause: unknown): string {
 interface LevelDraft {
   readonly level: Level
   input: HTMLInputElement
+  check: HTMLInputElement
 }
 
 /**
@@ -228,10 +229,16 @@ export function startInjection(deps: InjectionDeps): () => void {
     const syncModes = (): void => {
       for (const button of modeButtons) {
         const on = button.dataset.meeMode === mode
-        if (on) button.setAttribute('data-on', '1')
-        else button.removeAttribute('data-on')
+        if (on) {
+          button.setAttribute('data-on', '1')
+          button.setAttribute('aria-pressed', 'true')
+        } else {
+          button.removeAttribute('data-on')
+          button.setAttribute('aria-pressed', 'false')
+        }
       }
       levelsBox.style.display = mode === 'levels' ? '' : 'none'
+      place()
     }
 
     for (const candidate of ['inherit', 'false', 'levels'] as const) {
@@ -252,16 +259,25 @@ export function startInjection(deps: InjectionDeps): () => void {
     for (const level of LEVELS) {
       const line = document.createElement('div')
       line.className = 'mee-level'
-      const label = document.createElement('label')
+      const hit = document.createElement('label')
+      hit.className = 'mee-level-hit'
       const check = document.createElement('input')
       check.type = 'checkbox'
       check.checked = seeds[level] !== undefined
-      label.appendChild(check)
+      const box = document.createElement('span')
+      box.className = 'mee-tick-box'
+      box.setAttribute('aria-hidden', 'true')
+      box.innerHTML = CHECK_SVG
       const name = document.createElement('span')
+      name.className = 'mee-level-name'
       name.textContent = level
-      label.appendChild(name)
+      hit.appendChild(check)
+      hit.appendChild(box)
+      hit.appendChild(name)
       const wire = document.createElement('input')
       wire.type = 'text'
+      wire.autocomplete = 'off'
+      wire.spellcheck = false
       const seed = seeds[level]
       wire.placeholder = t('wirePlaceholder')
       wire.value = typeof seed === 'string' ? seed : ''
@@ -274,26 +290,39 @@ export function startInjection(deps: InjectionDeps): () => void {
         if (!check.checked) wire.value = ''
         else if (wire.value.length === 0 && level !== 'off') wire.value = level
       })
-      line.appendChild(label)
+      line.appendChild(hit)
       line.appendChild(wire)
       levelsBox.appendChild(line)
-      drafts.push({ level, input: wire })
+      drafts.push({ level, input: wire, check })
     }
     pop.appendChild(levelsBox)
 
     // --- zai compat toggle --------------------------------------------------
     const compatLabel = document.createElement('label')
     compatLabel.className = 'mee-compat'
+    const compatCopy = document.createElement('span')
+    compatCopy.className = 'mee-compat-copy'
+    const compatTitle = document.createElement('span')
+    compatTitle.className = 'mee-compat-title'
+    compatTitle.textContent = t('compatZai')
+    const compatHint = document.createElement('span')
+    compatHint.className = 'mee-compat-hint'
+    compatHint.textContent = t('compatZaiHint')
+    compatCopy.appendChild(compatTitle)
+    compatCopy.appendChild(compatHint)
+    const compatSwitch = document.createElement('span')
+    compatSwitch.className = 'mee-switch'
     const compatCheck = document.createElement('input')
     compatCheck.type = 'checkbox'
     compatCheck.checked = compatZai
     compatCheck.addEventListener('change', () => {
       compatZai = compatCheck.checked
     })
-    compatLabel.appendChild(compatCheck)
-    const compatText = document.createElement('span')
-    compatText.textContent = t('compatZai')
-    compatLabel.appendChild(compatText)
+    const compatTrack = document.createElement('span')
+    compatSwitch.appendChild(compatCheck)
+    compatSwitch.appendChild(compatTrack)
+    compatLabel.appendChild(compatCopy)
+    compatLabel.appendChild(compatSwitch)
     pop.appendChild(compatLabel)
 
     // --- footer -------------------------------------------------------------
@@ -347,8 +376,7 @@ export function startInjection(deps: InjectionDeps): () => void {
       const levels: Partial<Record<Level, string | null>> = {}
       let offered = false
       for (const draft of levelDrafts) {
-        const box = draft.input.parentElement?.querySelector('input[type="checkbox"]')
-        if (!(box instanceof HTMLInputElement) || box.checked !== true) continue
+        if (draft.check.checked !== true) continue
         const raw = draft.input.value.trim()
         if (raw.length === 0 && draft.level !== 'off') return 'invalid'
         offered = true
