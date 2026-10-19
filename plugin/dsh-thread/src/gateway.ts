@@ -12,6 +12,14 @@ import type { KvTable } from '@deepseek-ai/dsh-storage-domain'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import z from '@deepseek-ai/schemastery'
+import type { ContextFormed } from '@deepseek-ai/dsh-llm'
+import type { ThreadSettingsFace } from './index.ts'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'dsh-thread': { kind: 'dsh-thread' } & ContextFormed
+  }
+}
 import { randomBytes } from 'node:crypto'
 import { threadDomainSpec } from './domain.ts'
 import { isFinalThreadDraftReason, sealThreadDraftBoundary, type ThreadHandoffDraft } from './draft.ts'
@@ -129,11 +137,10 @@ export class ThreadGateway extends TypertRemoteService {
     // The master switch lives in the settings document so the browser row and
     // every Host consumer share one durable fact. Without a settings provider
     // (headless compositions) the feature stays on.
-    const settings = this.ctx.get('settings')
-    if (settings !== undefined) {
-      const scope = settings.register(THREAD_SETTINGS_NAMESPACE as SettingsNamespace, ThreadSettingsSchema)
-      this.enabled = scope.get().enabled
-      this.ctx.effect(() => scope.watch(next => { this.setEnabled(next.enabled) }), 'dsh-thread: settings watch')
+    const face = this.ctx.get('threadSettings') as ThreadSettingsFace | undefined
+    if (face !== undefined) {
+      this.enabled = face.read().enabled
+      this.ctx.effect(() => face.subscribe(() => { this.setEnabled(face.read().enabled) }), 'dsh-thread: settings watch')
     }
     const domain = await this.ctx.storageDomain.open(threadDomainSpec)
     this.draftTable = domain.table('drafts')
@@ -557,8 +564,7 @@ export class ThreadGateway extends TypertRemoteService {
       const handoff = presence.handoffPresent ? null : createUserMessage({
         content: [{ type: 'text', text: this.renderHandoff(link) }],
         source: {
-          kind: 'plugin',
-          plugin: 'dsh-thread',
+          kind: 'dsh-thread',
           form: 'snapshot',
           sections: [
             { name: '目标', text: link.handoff.objective },

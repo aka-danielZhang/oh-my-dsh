@@ -2,7 +2,14 @@ import type { ReactNode } from 'react'
 import type { McpInventorySnapshot } from '../inventory-types.ts'
 import type { McpServerEntry } from './drafts.ts'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+/** Structural subset of the ui-settings ConfigForm face this tab binds. */
+interface SettingsScope<T> {
+  getSnapshot(): { value?: T, revision?: number, status?: string, writable?: boolean }
+  subscribe(listener: () => void): () => void
+  set(field: string, value: unknown): Promise<boolean>
+  unset(field: string): Promise<boolean>
+  mutate(ops: readonly { op: 'set' | 'unset', path: (string | number)[], value?: unknown }[], expectedRevision?: number): Promise<boolean>
+}
 import type { McpSettingsLocaleKey } from './locales.ts'
 import { McpServersTab } from './McpServersTab.tsx'
 import css from './McpSettingsSection.module.css'

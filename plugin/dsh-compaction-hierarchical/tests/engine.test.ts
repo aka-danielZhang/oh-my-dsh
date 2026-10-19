@@ -356,7 +356,7 @@ test('an oversized partial identifies the reduce round that cannot consume it', 
   await assert.rejects(engine.run(messages, agent), /reduce round 1:.*indivisible/)
 })
 
-test('output reserve incompatible with the summary model fails before streaming', async () => {
+test('clamps an oversized stage output reserve to the model context window', async () => {
   const ctx = testContext()
   void new LlmRuntime(ctx)
   void new TokenMeter(ctx)
@@ -375,8 +375,11 @@ test('output reserve incompatible with the summary model fails before streaming'
     session: Session.create(SessionId('bad-reserve')),
     options: { provider: PROVIDER, model: MODEL },
   } as unknown as Agent
-  await assert.rejects(engine.run([user('large')], agent), /output reserve/)
-  assert.equal(adapter.calls.length, 0)
+  // The configured 200-token reserve cannot fit beside the 900-token input
+  // budget inside the 1000-token window; it clamps to 100 instead of
+  // refusing, and the single map stage runs with the clamped cap.
+  const result = await engine.run([user('small')], agent)
+  assert.equal(result.maxTokens, 100)
 })
 
 test('a single map result does not require an unused reduce reserve', async () => {

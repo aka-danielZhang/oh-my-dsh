@@ -1,4 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis'
+import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@deepseek-ai/dsh-api-gateway/client'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/remote'
@@ -9,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
-import { Button, IconBranchOutline16, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconBranchOutlineRegular, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
@@ -26,7 +27,7 @@ import { createThreadPanelVisibility } from './panel-visibility.ts'
 import { THREAD_SETTINGS_ROW_CSS, ThreadSettingsRow } from './settings-row.tsx'
 import { THREAD_SIDEBAR_CSS, ThreadSidebarView } from './sidebar-view.tsx'
 
-export const inject = ['slots', 'locale', 'sessions', 'remote', 'remote.session', 'settingsScope']
+export const inject = ['slots', 'locale', 'sessions', 'remote', 'remote.session', 'configForms', 'uiWorkspace']
 
 /** Dictionary namespace owned by this plugin. */
 const LOCALE_NS = 'dsh-thread'
@@ -285,7 +286,7 @@ function ContinueButton(props: {
         <Button
           variant="primary"
           size="sm"
-          icon={<IconBranchOutline16 />}
+          icon={<IconBranchOutlineRegular />}
           style={styles.actionButton}
           disabled={busy}
           onClick={() => void runAction(primary)}
@@ -359,7 +360,7 @@ function ThreadHandoffCard(props: ToolCallViewProps & { threadFace: ThreadFace }
   return (
     <div style={styles.cardRoot}>
       <div style={styles.summary}>
-        <span style={styles.threadLabel}><IconBranchOutline16 />Thread 交接</span>
+        <span style={styles.threadLabel}><IconBranchOutlineRegular />Thread 交接</span>
         <span style={styles.objective}>{draft.objective}</span>
         <span style={styles.secondary}>
           {enabled
@@ -403,7 +404,7 @@ function HeaderUtility(props: HeaderUtilityProps): React.ReactElement | null {
       <Button
         variant="ghost"
         size="sm"
-        icon={<IconBranchOutline16 />}
+        icon={<IconBranchOutlineRegular />}
         style={{
           ...styles.headerButton,
           ...(panelOpen ? { background: 'var(--dsw-alias-bg-layer-2)' } : {}),
@@ -430,12 +431,15 @@ function ThreadCapsuleOverlay(props: ThreadOverlayProps): React.ReactElement | n
     props.threadFace.isPanelOpen,
     props.threadFace.isPanelOpen,
   )
-  const sessionId = props.useSessions((state) => state.current)
+  const sessionId = props.useSessions((state) => Object.values(state.byId)
+    .find(session => (session.retainedBy.mainView ?? 0) > 0)?.id)
   // Blank (not-yet-started) Sessions never show the capsule: the store may
   // stay open across navigation, but rendering and placement both gate on a
   // started Session so a fresh chat never gets the empty Thread surface.
-  const currentBlank = props.useSessions((state) =>
-    state.current === undefined ? true : (state.byId[state.current]?.blank ?? true))
+  const currentBlank = props.useSessions((state) => {
+    const current = Object.values(state.byId).find(session => (session.retainedBy.mainView ?? 0) > 0)?.id
+    return current === undefined ? true : (state.byId[current]?.blank ?? true)
+  })
   // The master switch hides the capsule without disturbing the open state.
   const enabled = React.useSyncExternalStore(
     props.threadFace.enabled.subscribe,
@@ -500,8 +504,8 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
   const panelVisibility = createThreadPanelVisibility()
   // The master switch mirrors the Host `dsh-thread` settings namespace; the
   // settings row is its home, the rest of the surface subscribes read-only.
-  const settingsScope = ctx.settingsScope.bind<ThreadSettings>({ namespace: THREAD_SETTINGS_NAMESPACE })
-  const threadEnabled = bindThreadEnabled(settingsScope)
+  const settingsForm = ctx.configForms.get<ThreadSettings>(THREAD_SETTINGS_NAMESPACE)
+  const threadEnabled = bindThreadEnabled(settingsForm)
 
   async function readLink(linkId: string): Promise<ThreadLink> {
     const state = await loadState()
@@ -664,7 +668,7 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
       return await loadState()
     },
     openSession(sessionId) {
-      clientSessions.open(sessionId)
+      ctx.uiWorkspace.openSession(sessionId)
     },
     subscribePanel: panelVisibility.subscribe,
     togglePanel: panelVisibility.toggle,
@@ -684,7 +688,7 @@ export async function apply(ctx: Context): Promise<() => Promise<void>> {
       inject: () => ({
         threadEnabled,
         setThreadEnabled: (enabled: boolean) => {
-          void settingsScope.set('enabled', enabled).catch(() => {})
+          void settingsForm.set('enabled', enabled).catch(() => {})
         },
       }),
     }, ThreadSettingsRow))

@@ -61,7 +61,7 @@ const RECONNECT_DEFAULTS: Required<ReconnectConfig> = {
 /** Mirrors mcp-client's `serverName` contract (kept below the public tool-name budget). */
 const SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/
 
-const Reconnect: z<ReconnectConfig> = z.object({
+const Reconnect = z.object({
   enabled: z.boolean().default(RECONNECT_DEFAULTS.enabled),
   initialDelayMs: z.number().min(1).max(MAX_TIMER_DELAY_MS).default(RECONNECT_DEFAULTS.initialDelayMs),
   maxDelayMs: z.number().min(1).max(MAX_TIMER_DELAY_MS).default(RECONNECT_DEFAULTS.maxDelayMs),
@@ -99,7 +99,7 @@ export const Config: z<McpSettings> = z.object({
       toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
       reconnect: Reconnect,
     }),
-  ])).default([]),
+  ])).default([]).volatile(),
 }) as unknown as z<McpSettings>
 
 /** Composition entry: the fallback when no settings provider is mounted. */
@@ -233,12 +233,25 @@ export class McpManagerService extends Service {
     // established connections are untouched.
     ctx.inject(['credentials'], () => { this.enqueueResync() })
 
-    ctx.inject(['settings'], (settingsCtx) => {
-      settingsCtx.settings.installSection(ctx, MCP_SETTINGS_NAMESPACE, Config, config, {
-        setSource: (read) => { this.readSettings = read },
-        onChange: () => { this.enqueueResync() },
-      })
+    // The servers list is this entry's own configuration: the volatile
+    // object is the live read (profile writes re-resolve it in place), and
+    // document updates are the resync signal. Without a config document
+    // (headless) the composition entry stands.
+    this.readSettings = () => {
+      // Schema resolution hands volatile fields over as live references;
+      // plain mounts (tests, direct compositions) carry the raw array.
+      const raw = (config as { servers?: unknown }).servers
+      const servers = typeof (raw as { get?: unknown } | undefined)?.get === 'function'
+        ? (raw as unknown as { get(): McpServerEntry[] }).get()
+        : raw
+      return { servers: (servers ?? []) as McpServerEntry[] }
+    }
+    ctx.on('settings/document-updated', (ns: string) => {
+      if (ns === MCP_SETTINGS_NAMESPACE) this.enqueueResync()
     })
+    // Compose whatever the entry configuration already carries; later
+    // document updates resync through the listener above.
+    this.enqueueResync()
 
     // Child fibers ride this service's fiber as effects; mark disposal before
     // the first await so in-flight credential resolution cannot spawn later.

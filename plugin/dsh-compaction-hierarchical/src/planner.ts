@@ -35,24 +35,18 @@ export function toolBalancedUnits(messages: readonly Message[]): Message[][] {
 
   for (const message of messages) {
     current.push(message)
-    for (const block of message.content) {
-      switch (block.type) {
-        case 'tool-call':
-          if (pending.has(block.id)) {
-            throw new Error(`hierarchical compaction: duplicate tool call id ${block.id}`)
-          }
-          pending.add(block.id)
-          break
-        case 'tool-result':
-          if (!pending.delete(block.toolCallId)) {
-            throw new Error(
-              `hierarchical compaction: tool result ${block.toolCallId} has no call in the selected input`,
-            )
-          }
-          break
-        default:
-          break
+    if (message.role === 'assistant') {
+      for (const block of message.content) {
+        if (block.type !== 'tool-call') continue
+        if (pending.has(block.id)) {
+          throw new Error(`hierarchical compaction: duplicate tool call id ${block.id}`)
+        }
+        pending.add(block.id)
       }
+    } else if (message.role === 'tool' && !pending.delete(message.toolCallId)) {
+      throw new Error(
+        `hierarchical compaction: tool result ${message.toolCallId} has no call in the selected input`,
+      )
     }
     if (pending.size === 0) {
       units.push(current)

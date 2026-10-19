@@ -2,9 +2,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import {
   Button,
-  IconCheckOutline16,
-  IconDownloadOutline16,
-  IconLoadingOutline16,
+  IconCheckOutlineRegular,
+  IconDownloadOutlineRegular,
+  IconLoadingOutlineRegular,
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
@@ -261,10 +261,10 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement | null 
             ? t('update.installing')
             : t('update.preparing')
   const icon = status.phase === 'ready'
-    ? <IconCheckOutline16 />
+    ? <IconCheckOutlineRegular />
     : busy
-      ? <span data-desktop-update-spinner=""><IconLoadingOutline16 /></span>
-      : <IconDownloadOutline16 />
+      ? <span data-desktop-update-spinner=""><IconLoadingOutlineRegular /></span>
+      : <IconDownloadOutlineRegular />
 
   const dialogVisible = dialogOpen
     && (status.phase === 'preparing' || status.phase === 'downloading' || status.phase === 'ready'

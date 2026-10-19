@@ -66,6 +66,7 @@ docs/                        权威契约文档 + packaging-playbook.md + notes/
 | `dsh-send-while-running` | browser-only | running 且有草稿时渲染补位红色 Stop；全局 Stop 染主题红 |
 | `dsh-model-efforts-editor` | browser-only | 模型设置行内推理档位三态编辑 + Z.ai compat 勾选 |
 | `dsh-thread` | dual | Thread 模式跨会话 Handoff Draft（preset-owned，设置总开关门控） |
+| `dsh-todo-completion-guard` | host-only | 回合收尾待办守卫：未完成 todo 列表上的回合结束前注入一次建议性提醒 |
 | `dsh-ohmymemo` | dual | OhMyMemo 用户长期记忆（一条记忆一个 md，tools + capsule + 梦境提取） |
 | `dsh-usage-stats` | dual | 设置页「使用统计」：JSONL 事实源 + 手写 SVG 图表 |
 | `dsh-copy-session-id` | browser-only | 会话头「⋯」菜单加「复制会话 ID」并重渲染下载日志项 |

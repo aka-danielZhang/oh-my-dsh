@@ -29,7 +29,7 @@ export const TYPERT = {
     result: {
       mode: 'strict',
       typeSymbol: 'dsh-mcp-settings/inventory-types#McpInventorySnapshot',
-      schema: resultSchema,
+      create: () => resultSchema,
     },
     sourceLocation: { file: 'src/inventory.ts', line: 31, column: 3 },
   }],

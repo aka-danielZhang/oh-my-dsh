@@ -156,7 +156,7 @@ export function apply(ctx: Context, rawConfig: unknown): void {
   }
   ctx.timeout(attempt, 0)
 
-  ctx.on('settings/updated', (ns: string) => {
+  ctx.on('settings/document-updated', (ns: string) => {
     if (ns === NS) enqueueFill()
   })
 }

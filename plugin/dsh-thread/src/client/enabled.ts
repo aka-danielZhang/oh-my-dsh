@@ -1,4 +1,8 @@
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+/** Structural subset of the ui-settings ConfigForm face this store binds. */
+interface SettingsScope<T> {
+  getSnapshot(): { value?: T }
+  subscribe(listener: () => void): () => void
+}
 import { DEFAULT_THREAD_SETTINGS, type ThreadSettings } from '../thread-types.ts'
 
 /**

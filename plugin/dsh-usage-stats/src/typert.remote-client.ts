@@ -122,7 +122,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
       result: {
         mode: 'strict',
         typeSymbol: 'dsh-usage-stats/types#UsageStatsSummary',
-        schema: summarySchema,
+        create: () => summarySchema,
       },
       sourceLocation: { file: 'src/gateway.ts', line: 1, column: 3 },
     },
@@ -139,13 +139,13 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         codec: {
           mode: 'strict',
           typeSymbol: 'dsh-usage-stats/types#UsageStatsRangeParams',
-          schema: rangeParamsSchema,
+          create: () => rangeParamsSchema,
         },
       }],
       result: {
         mode: 'strict',
         typeSymbol: 'dsh-usage-stats/types#UsageStatsDaily',
-        schema: dailySchema,
+        create: () => dailySchema,
       },
       sourceLocation: { file: 'src/gateway.ts', line: 1, column: 3 },
     },
@@ -162,13 +162,13 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         codec: {
           mode: 'strict',
           typeSymbol: 'dsh-usage-stats/types#UsageStatsActivityParams',
-          schema: activityParamsSchema,
+          create: () => activityParamsSchema,
         },
       }],
       result: {
         mode: 'strict',
         typeSymbol: 'dsh-usage-stats/types#UsageStatsActivity',
-        schema: activitySchema,
+        create: () => activitySchema,
       },
       sourceLocation: { file: 'src/gateway.ts', line: 1, column: 3 },
     },
@@ -185,13 +185,13 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         codec: {
           mode: 'strict',
           typeSymbol: 'dsh-usage-stats/types#UsageStatsQualityParams',
-          schema: rangeParamsSchema,
+          create: () => rangeParamsSchema,
         },
       }],
       result: {
         mode: 'strict',
         typeSymbol: 'dsh-usage-stats/types#UsageStatsQuality',
-        schema: qualitySchema,
+        create: () => qualitySchema,
       },
       sourceLocation: { file: 'src/gateway.ts', line: 1, column: 3 },
     },
@@ -208,13 +208,13 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         codec: {
           mode: 'strict',
           typeSymbol: 'dsh-usage-stats/types#UsageStatsBreakdownParams',
-          schema: breakdownParamsSchema,
+          create: () => breakdownParamsSchema,
         },
       }],
       result: {
         mode: 'strict',
         typeSymbol: 'dsh-usage-stats/types#UsageStatsBreakdown',
-        schema: breakdownSchema,
+        create: () => breakdownSchema,
       },
       sourceLocation: { file: 'src/gateway.ts', line: 1, column: 3 },
     },

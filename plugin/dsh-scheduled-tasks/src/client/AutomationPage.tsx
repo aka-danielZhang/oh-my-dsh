@@ -19,13 +19,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   Button,
-  IconClockOutline16,
-  IconEditOutline16,
-  IconEllipsisOutline16,
-  IconPauseOutline16,
-  IconPlayOutline16,
-  IconRefreshOutline16,
-  IconTrashOutline16,
+  IconClockOutlineRegular,
+  IconEditOutlineRegular,
+  IconEllipsisOutlineRegular,
+  IconPauseOutlineRegular,
+  IconPlayOutlineRegular,
+  IconRefreshOutlineRegular,
+  IconTrashOutlineRegular,
   Modal,
   Switch,
   Tooltip,
@@ -154,7 +154,7 @@ function TaskCardMenu({ row, busy, labels, onRun, onToggle, onEdit, onRequestDel
         onMouseDown={event => { event.stopPropagation() }}
         onClick={() => { setOpen(!open) }}
       >
-        <IconEllipsisOutline16 size={16} />
+        <IconEllipsisOutlineRegular size={16} />
       </button>
       {open
         ? (
@@ -164,7 +164,7 @@ function TaskCardMenu({ row, busy, labels, onRun, onToggle, onEdit, onRequestDel
               <MenuItem
                 label={labels.remove}
                 danger
-                icon={<IconTrashOutline16 size={16} />}
+                icon={<IconTrashOutlineRegular size={16} />}
                 disabled={busy}
                 onPick={() => { setOpen(false); onRequestDelete() }}
               />
@@ -172,19 +172,19 @@ function TaskCardMenu({ row, busy, labels, onRun, onToggle, onEdit, onRequestDel
           >
             <MenuItem
               label={labels.runNow}
-              icon={<IconPlayOutline16 size={16} />}
+              icon={<IconPlayOutlineRegular size={16} />}
               disabled={busy}
               onPick={() => { setOpen(false); onRun() }}
             />
             <MenuItem
               label={row.enabled ? labels.pause : labels.resume}
-              icon={row.enabled ? <IconPauseOutline16 size={16} /> : <IconPlayOutline16 size={16} />}
+              icon={row.enabled ? <IconPauseOutlineRegular size={16} /> : <IconPlayOutlineRegular size={16} />}
               disabled={busy}
               onPick={() => { setOpen(false); onToggle(!row.enabled) }}
             />
             <MenuItem
               label={labels.edit}
-              icon={<IconEditOutline16 size={16} />}
+              icon={<IconEditOutlineRegular size={16} />}
               disabled={busy}
               onPick={() => { setOpen(false); onEdit() }}
             />
@@ -224,7 +224,7 @@ function RunRowMenu({ labels, jumpDisabled, onJump, onDelete }: {
         aria-expanded={open}
         onClick={event => { event.stopPropagation(); setOpen(!open) }}
       >
-        <IconEllipsisOutline16 size={16} />
+        <IconEllipsisOutlineRegular size={16} />
       </button>
       {open && (
         <MenuCard align="right">
@@ -237,7 +237,7 @@ function RunRowMenu({ labels, jumpDisabled, onJump, onDelete }: {
           <MenuItem
             label={labels.deleteRecord}
             danger
-            icon={<IconTrashOutline16 size={16} />}
+            icon={<IconTrashOutlineRegular size={16} />}
             onPick={() => { setOpen(false); onDelete() }}
           />
         </MenuCard>
@@ -736,7 +736,7 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
         <p className="dsh-stask-task-desc">{row.instruction}</p>
         <div className="dsh-stask-task-foot">
           <span className={`dsh-stask-when${row.enabled ? '' : ' dsh-stask-when-off'}`}>
-            <IconClockOutline16 size={12} />
+            <IconClockOutlineRegular size={12} />
             {`${scheduleText(row.schedule, t)}${row.enabled && row.nextRunAt !== null ? ` · ${t('card.nextRun', { when: untilText(row.nextRunAt) })}` : ''}`}
           </span>
           <span className="dsh-stask-pill">{t('card.runs', { count: row.runCount })}</span>
@@ -776,7 +776,7 @@ export function AutomationPage({ face, t }: AutomationPageProps): ReactNode {
               aria-label={t('action.refresh')}
               onClick={() => { void refresh() }}
             >
-              <IconRefreshOutline16 className={refreshing ? 'dsh-stask-spin' : undefined} />
+              <IconRefreshOutlineRegular className={refreshing ? 'dsh-stask-spin' : undefined} />
             </Button>
           </Tooltip>
           <Button variant="primary" size="md" onClick={() => { beginCreate() }}>

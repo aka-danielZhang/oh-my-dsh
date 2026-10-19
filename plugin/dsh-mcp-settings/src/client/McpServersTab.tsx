@@ -1,18 +1,25 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { McpInventorySnapshot, McpServerStatus } from '../inventory-types.ts'
-import type { SettingsScope } from '@deepseek-ai/dsh-client-ui-settings/client'
+/** Structural subset of the ui-settings ConfigForm face this tab binds. */
+interface SettingsScope<T> {
+  getSnapshot(): { value?: T, revision?: number, status?: string, writable?: boolean }
+  subscribe(listener: () => void): () => void
+  set(field: string, value: unknown): Promise<boolean>
+  unset(field: string): Promise<boolean>
+  mutate(ops: readonly { op: 'set' | 'unset', path: (string | number)[], value?: unknown }[], expectedRevision?: number): Promise<boolean>
+}
 import {
   Button,
-  IconChevronDownOutline14,
-  IconChevronLeftOutline14,
-  IconCodeOutline16,
-  IconEditOutline16,
-  IconGlobeOutline14,
-  IconLoadingOutline16,
-  IconPlusOutline16,
-  IconRefreshOutline16,
-  IconSearchOutline16,
-  IconTrashOutline16,
+  IconChevronDownOutlineRegular,
+  IconChevronLeftOutlineRegular,
+  IconCodeOutlineRegular,
+  IconEditOutlineRegular,
+  IconGlobeOutlineRegular,
+  IconLoadingOutlineRegular,
+  IconPlusOutlineRegular,
+  IconRefreshOutlineRegular,
+  IconSearchOutlineRegular,
+  IconTrashOutlineRegular,
   Menu,
   Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -352,7 +359,7 @@ export function McpServersTab(props: {
       <div className={css.editor}>
         <div className={css.editorHeader}>
           <button type="button" className={css.back} onClick={() => { setEditor(null) }}>
-            <IconChevronLeftOutline14 size={14} />
+            <IconChevronLeftOutlineRegular size={14} />
             {t('back')}
           </button>
           <div className={css.editorHeading}>
@@ -390,8 +397,8 @@ export function McpServersTab(props: {
                   className={css.transportMenu!}
                   selectedId={editor.draft.transport}
                   items={[
-                    { id: 'stdio', label: t('transportStdio'), icon: <IconCodeOutline16 size={14} /> },
-                    { id: 'streamable-http', label: t('transportHttp'), icon: <IconGlobeOutline14 size={14} /> },
+                    { id: 'stdio', label: t('transportStdio'), icon: <IconCodeOutlineRegular size={14} /> },
+                    { id: 'streamable-http', label: t('transportHttp'), icon: <IconGlobeOutlineRegular size={14} /> },
                   ]}
                   onClose={() => { setTransportMenuOpen(false) }}
                   onSelect={(id) => {
@@ -413,12 +420,12 @@ export function McpServersTab(props: {
                       }}
                     >
                       <span className={css.transportIcon} aria-hidden="true">
-                        {editor.draft.transport === 'stdio' ? <IconCodeOutline16 size={14} /> : <IconGlobeOutline14 size={14} />}
+                        {editor.draft.transport === 'stdio' ? <IconCodeOutlineRegular size={14} /> : <IconGlobeOutlineRegular size={14} />}
                       </span>
                       <span className={css.transportValue}>
                         {editor.draft.transport === 'stdio' ? t('transportStdio') : t('transportHttp')}
                       </span>
-                      <IconChevronDownOutline14 className={css.transportChevron} size={14} />
+                      <IconChevronDownOutlineRegular className={css.transportChevron} size={14} />
                     </button>
                   )}
                 />
@@ -462,16 +469,16 @@ export function McpServersTab(props: {
     <div className={css.pane}>
       <div className={css.toolbar}>
         <label className={css.search}>
-          <IconSearchOutline16 aria-hidden="true" />
+          <IconSearchOutlineRegular aria-hidden="true" />
           <span className={css.visuallyHidden}>{t('searchServers')}</span>
           <input type="search" value={query} placeholder={t('searchServers')} onChange={(event) => { setQuery(event.currentTarget.value) }} />
         </label>
         <Tooltip label={t('refresh')} side="top">
           <button type="button" className={css.iconButton} aria-label={t('refresh')} disabled={statusLoading} onClick={refreshStatus}>
-            <IconRefreshOutline16 size={15} />
+            <IconRefreshOutlineRegular size={15} />
           </button>
         </Tooltip>
-        <Button variant="toolbar" size="sm" icon={<IconPlusOutline16 size={14} />} onClick={() => { openEditor(null) }}>{t('addServer')}</Button>
+        <Button variant="toolbar" size="sm" icon={<IconPlusOutlineRegular size={14} />} onClick={() => { openEditor(null) }}>{t('addServer')}</Button>
       </div>
       <div className={css.listHeading}>
         <h3>{t('configuredServers')}</h3><span>{t('serverCount', { count: String(servers.length) })}</span>
@@ -496,7 +503,7 @@ export function McpServersTab(props: {
                 <div className={css.serverMain}>
                   <div className={css.serverTitle}>
                     {connectionPending
-                      ? <span className={css.connectionSpinner} role="status" aria-label={connectionText}><IconLoadingOutline16 size={13} /></span>
+                      ? <span className={css.connectionSpinner} role="status" aria-label={connectionText}><IconLoadingOutlineRegular size={13} /></span>
                       : <span className={css.connectionDot} role="status" aria-label={connectionText} />}
                     <strong>{server.serverName}</strong>
                     <span className={css.transportTag}>{server.transport === 'stdio' ? t('transportStdio') : t('transportHttp')}</span>
@@ -510,8 +517,8 @@ export function McpServersTab(props: {
                     <input type="checkbox" checked={server.enabled} aria-label={t('toggleServer', { name: server.serverName })} onChange={() => { persist(servers.map((item, itemIndex) => itemIndex === index ? { ...item, enabled: !item.enabled } : item), !server.enabled) }} />
                     <span />
                   </label>
-                  <Tooltip label={t('editServer')} side="top"><button type="button" className={css.iconButton} aria-label={t('editServer')} onClick={() => { openEditor(index) }}><IconEditOutline16 size={15} /></button></Tooltip>
-                  <Tooltip label={t('removeServer')} side="top"><button type="button" className={`${css.iconButton} ${css.iconButtonDanger}`} aria-label={t('removeServer')} onClick={() => { persist(servers.filter((_item, itemIndex) => itemIndex !== index)) }}><IconTrashOutline16 size={15} /></button></Tooltip>
+                  <Tooltip label={t('editServer')} side="top"><button type="button" className={css.iconButton} aria-label={t('editServer')} onClick={() => { openEditor(index) }}><IconEditOutlineRegular size={15} /></button></Tooltip>
+                  <Tooltip label={t('removeServer')} side="top"><button type="button" className={`${css.iconButton} ${css.iconButtonDanger}`} aria-label={t('removeServer')} onClick={() => { persist(servers.filter((_item, itemIndex) => itemIndex !== index)) }}><IconTrashOutlineRegular size={15} /></button></Tooltip>
                 </div>
               </li>
             )

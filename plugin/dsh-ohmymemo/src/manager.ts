@@ -14,8 +14,14 @@ import type {} from '@deepseek-ai/cordis-plugin-timer'
 import { foldConsumedWork, installModelSelection } from '@deepseek-ai/dsh-agent'
 import type { ModelSelection } from '@deepseek-ai/dsh-agent'
 import type { JobId, JobOutcome } from '@deepseek-ai/dsh-jobs'
-import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { createUserMessage , type ContextFormed } from '@deepseek-ai/dsh-llm'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'dsh-ohmymemo': { kind: 'dsh-ohmymemo' } & ContextFormed
+  }
+}
 import type { Session, SessionEvent, SessionId } from '@deepseek-ai/dsh-session'
 import type { Domain, KvTable } from '@deepseek-ai/dsh-storage-domain'
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
@@ -668,8 +674,7 @@ export class OhMyMemoManager extends TypertRemoteService {
         handle.agent.followup(createUserMessage({
           content: [{ type: 'text', text: promptInput.prompt }],
           source: {
-            kind: 'plugin',
-            plugin: name,
+            kind: 'dsh-ohmymemo',
             form: 'notice',
             summary: 'bounded dream-memory extraction batch',
           },
@@ -838,8 +843,7 @@ export class OhMyMemoManager extends TypertRemoteService {
       handle.agent.followup(createUserMessage({
         content: [{ type: 'text', text: prompt }],
         source: {
-          kind: 'plugin',
-          plugin: name,
+          kind: 'dsh-ohmymemo',
           form: 'notice',
           summary: 'bounded memory curator batch',
         },
@@ -1031,7 +1035,7 @@ export class OhMyMemoManager extends TypertRemoteService {
     return {
       status: summary.status === 'success' ? 'completed' : 'killed',
       detail: `${summary.memoriesCreated} memor(y/ies) created`,
-      output: JSON.stringify({ runId: summary.runId, memoriesCreated: summary.memoriesCreated }),
+      result: JSON.stringify({ runId: summary.runId, memoriesCreated: summary.memoriesCreated }),
     }
   }
 

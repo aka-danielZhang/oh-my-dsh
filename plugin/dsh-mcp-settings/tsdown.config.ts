@@ -43,7 +43,6 @@ const host = {
   name: PACKAGE_ID,
   entry: {
     index: 'src/index.ts',
-    invariant: 'src/invariant.ts',
     manager: 'src/manager.ts',
     'manager-types': 'src/manager-types.ts',
     inventory: 'src/inventory.ts',

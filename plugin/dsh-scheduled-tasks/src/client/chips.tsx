@@ -23,10 +23,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import {
-  IconChevronDownOutline14,
-  IconCheckOutline16,
-  IconFolderOpenOutline16,
-  IconPlusOutline16,
+  IconChevronDownOutlineRegular,
+  IconCheckOutlineRegular,
+  IconFolderOpenOutlineRegular,
+  IconPlusOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 
 /** One selectable row of a dropdown. */
@@ -96,7 +96,7 @@ export function MenuItem({ label, icon, active, disabled, danger, onPick }: {
     >
       {icon === undefined ? null : <span className="dsh-stask-menu-item-icon">{icon}</span>}
       <span className="dsh-stask-menu-item-label">{label}</span>
-      {active === true ? <span className="dsh-stask-menu-item-check"><IconCheckOutline16 size={16} /></span> : null}
+      {active === true ? <span className="dsh-stask-menu-item-check"><IconCheckOutlineRegular size={16} /></span> : null}
     </button>
   )
 }
@@ -134,7 +134,7 @@ export function Chip({ value, options, icon, align, title, placeholder, onChange
           className={`dsh-stask-chip-caret${open ? ' dsh-stask-chip-open' : ''}`}
           aria-hidden="true"
         >
-          <IconChevronDownOutline14 size={14} />
+          <IconChevronDownOutlineRegular size={14} />
         </span>
       </button>
       {open
@@ -186,13 +186,13 @@ export function WorkspaceChip({ value, options, emptyLabel, chooseLabel, addLabe
         onMouseDown={swallow}
         onClick={() => { if (disabled !== true) setOpen(!open) }}
       >
-        <span className="dsh-stask-ws-folder"><IconFolderOpenOutline16 size={16} /></span>
+        <span className="dsh-stask-ws-folder"><IconFolderOpenOutlineRegular size={16} /></span>
         <span className="dsh-stask-ws-label">{label}</span>
         <span
           className={`dsh-stask-chip-caret${open ? ' dsh-stask-chip-open' : ''}`}
           aria-hidden="true"
         >
-          <IconChevronDownOutline14 size={12} />
+          <IconChevronDownOutlineRegular size={12} />
         </span>
       </button>
       {open
@@ -201,7 +201,7 @@ export function WorkspaceChip({ value, options, emptyLabel, chooseLabel, addLabe
             footer={(
               <MenuItem
                 label={addLabel}
-                icon={<IconPlusOutline16 size={16} />}
+                icon={<IconPlusOutlineRegular size={16} />}
                 onPick={() => { setOpen(false); onAdd() }}
               />
             )}
@@ -212,7 +212,7 @@ export function WorkspaceChip({ value, options, emptyLabel, chooseLabel, addLabe
                 <MenuItem
                   key={option.value}
                   label={option.label}
-                  icon={<IconFolderOpenOutline16 size={16} />}
+                  icon={<IconFolderOpenOutlineRegular size={16} />}
                   active={option.value === value}
                   onPick={() => { setOpen(false); onChange(option.value) }}
                 />
@@ -290,7 +290,7 @@ export function ModelChip({ value, effort, models, defaultModel, labels, effortL
     >
       <span className="dsh-stask-menu-cell-label">{label}</span>
       <span className="dsh-stask-menu-cell-value">{cellValue}</span>
-      <span className="dsh-stask-menu-cell-chevron" aria-hidden="true"><IconChevronDownOutline14 size={14} /></span>
+      <span className="dsh-stask-menu-cell-chevron" aria-hidden="true"><IconChevronDownOutlineRegular size={14} /></span>
     </button>
   )
   const option = (item: ChipOption, active: boolean, onPick: () => void): ReactNode => (
@@ -304,7 +304,7 @@ export function ModelChip({ value, effort, models, defaultModel, labels, effortL
       onClick={onPick}
     >
       <span className="dsh-stask-menu-item-label">{item.label}</span>
-      {active ? <span className="dsh-stask-menu-item-check"><IconCheckOutline16 size={16} /></span> : null}
+      {active ? <span className="dsh-stask-menu-item-check"><IconCheckOutlineRegular size={16} /></span> : null}
     </button>
   )
   // 跟随默认 first, then one row per route under a provider section header
@@ -354,7 +354,7 @@ export function ModelChip({ value, effort, models, defaultModel, labels, effortL
           className={`dsh-stask-chip-caret${open ? ' dsh-stask-chip-open' : ''}`}
           aria-hidden="true"
         >
-          <IconChevronDownOutline14 size={14} />
+          <IconChevronDownOutlineRegular size={14} />
         </span>
       </button>
       {open

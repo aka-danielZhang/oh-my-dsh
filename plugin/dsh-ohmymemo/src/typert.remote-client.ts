@@ -52,7 +52,7 @@ function parameter(name: string, schema: { parse(value: unknown): unknown }, typ
     name,
     wire: name,
     source: 'json' as const,
-    codec: { mode: 'strict' as const, typeSymbol, schema },
+    codec: { mode: 'strict' as const, typeSymbol, create: () => schema },
   }]
 }
 
@@ -63,45 +63,45 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
     {
       id: 'dsh-ohmymemo#ohMyMemoUi/overview', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'overview',
       invocation: direct, parameters: noParameters,
-      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#MemoryOverview', schema: memoryOverviewSchema },
+      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#MemoryOverview', create: () => memoryOverviewSchema },
       sourceLocation: { file: 'src/manager.ts', line: 248, column: 3 },
     },
     {
       id: 'dsh-ohmymemo#ohMyMemoUi/updateDreamSettings', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'updateDreamSettings',
       invocation: direct,
       parameters: parameter('request', updateDreamSettingsRequestSchema, 'dsh-ohmymemo/manager-contract#UpdateDreamSettingsRequest'),
-      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#MemoryOverview', schema: memoryOverviewSchema },
+      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#MemoryOverview', create: () => memoryOverviewSchema },
       sourceLocation: { file: 'src/manager.ts', line: 281, column: 3 },
     },
     {
       id: 'dsh-ohmymemo#ohMyMemoUi/models', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'models',
       invocation: direct, parameters: noParameters,
-      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#DreamModelsSnapshot', schema: dreamModelsSchema },
+      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#DreamModelsSnapshot', create: () => dreamModelsSchema },
       sourceLocation: { file: 'src/manager.ts', line: 298, column: 3 },
     },
     {
       id: 'dsh-ohmymemo#ohMyMemoUi/tree', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'tree',
       invocation: direct, parameters: noParameters,
-      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#MemoryTreeSnapshot', schema: memoryTreeSchema },
+      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#MemoryTreeSnapshot', create: () => memoryTreeSchema },
       sourceLocation: { file: 'src/manager.ts', line: 335, column: 3 },
     },
     {
       id: 'dsh-ohmymemo#ohMyMemoUi/read', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'read',
       invocation: direct,
       parameters: parameter('request', readMemoryFileRequestSchema, 'dsh-ohmymemo/manager-contract#ReadMemoryFileRequest'),
-      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#MemoryDocument', schema: memoryDocumentSchema },
+      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#MemoryDocument', create: () => memoryDocumentSchema },
       sourceLocation: { file: 'src/manager.ts', line: 340, column: 3 },
     },
     {
       id: 'dsh-ohmymemo#ohMyMemoUi/runNow', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'runNow',
       invocation: direct, parameters: noParameters,
-      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#RunNowResult', schema: runNowResultSchema },
+      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#RunNowResult', create: () => runNowResultSchema },
       sourceLocation: { file: 'src/manager.ts', line: 348, column: 3 },
     },
     {
       id: 'dsh-ohmymemo#ohMyMemoUi/cancelRun', service: 'ohMyMemoUi', namespace: 'ohMyMemoUi', method: 'cancelRun',
       invocation: direct, parameters: noParameters,
-      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#CancelRunResult', schema: cancelRunResultSchema },
+      result: { mode: 'strict', typeSymbol: 'dsh-ohmymemo/manager-contract#CancelRunResult', create: () => cancelRunResultSchema },
       sourceLocation: { file: 'src/manager.ts', line: 362, column: 3 },
     },
   ],

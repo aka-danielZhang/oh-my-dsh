@@ -1,5 +1,5 @@
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { IconBranchOutline16, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconBranchOutlineRegular, StateDot } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { StateDotState } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import React from 'react'
@@ -92,7 +92,7 @@ function SessionRow(props: {
 export function ThreadSidebarView(props: ThreadSidebarViewProps): React.ReactElement {
   const [links, setLinks] = React.useState<readonly ThreadLink[] | null>(null)
   const byId = props.useSessions((state) => state.byId)
-  const currentId = props.useSessions((state) => state.current)
+  const currentId = props.useSessions((state) => Object.values(state.byId).find(session => (session.retainedBy.mainView ?? 0) > 0)?.id)
   const archived = props.useWorkspaces((state) => state.archivedSessionIds)
 
   React.useEffect(() => {
@@ -169,7 +169,7 @@ export function ThreadSidebarView(props: ThreadSidebarViewProps): React.ReactEle
               disabled={rootSummary === undefined}
               onClick={() => props.threadFace.openSession(group.rootSessionId as SessionId)}
             >
-              <span style={styles.groupIcon}><IconBranchOutline16 /></span>
+              <span style={styles.groupIcon}><IconBranchOutlineRegular /></span>
               <span style={styles.groupTitle}>{groupTitle}</span>
               <span style={styles.groupCount}>{group.visibleIds.length}</span>
             </button>

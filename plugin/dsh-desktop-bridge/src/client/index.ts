@@ -93,13 +93,20 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => installSurfaceMenu(document, invoke, logger), 'desktop-bridge: surface menu')
   const inbox = createNotifyInbox()
   const openSession = (sessionId: string): void => {
-    ctx.sessions.open(sessionId as Parameters<typeof ctx.sessions.open>[0])
+    ctx.uiWorkspace.openSession(sessionId as Parameters<typeof ctx.uiWorkspace.openSession>[0])
   }
   ctx.effect(() => {
     const t = ctx.locale.bind(NS)
     return installNotifications({
       list: ctx.sessions.list,
-      pending: ctx.uiSession.pendingInteractions,
+      // The await-input authority is per-session status now; the notification
+      // scan wants the subset with a live interaction, as a plain id map.
+      pending: {
+        getSnapshot: () => new Map([...ctx.uiSession.sessionStatus.getSnapshot()]
+          .filter(([, status]) => status.pendingInteraction !== undefined)
+          .map(([id, status]) => [id as string, status.pendingInteraction])),
+        subscribe: (listener: () => void) => ctx.uiSession.sessionStatus.subscribe(listener),
+      },
       invoke,
       logger,
       copy: () => ({ turnDone: t('notify.turnDone'), awaitInput: t('notify.awaitInput') }),

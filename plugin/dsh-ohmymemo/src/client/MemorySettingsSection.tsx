@@ -3,18 +3,18 @@
 import React from 'react'
 import {
   Button,
-  IconCheckOutline16,
-  IconChevronDownOutline14,
-  IconChevronLeftOutline14,
-  IconChevronRightOutline14,
-  IconDatabaseOutline16,
-  IconFolderClose16,
-  IconFolderOpen16,
-  IconLoadingOutline16,
-  IconRefreshOutline16,
-  IconSparkle16,
-  IconStopFill16,
-  IconWarningOutline16,
+  IconCheckOutlineRegular,
+  IconChevronDownOutlineRegular,
+  IconChevronLeftOutlineRegular,
+  IconChevronRightOutlineRegular,
+  IconDatabaseOutlineRegular,
+  IconFolderCloseRegular,
+  IconFolderOpenRegular,
+  IconLoadingOutlineRegular,
+  IconRefreshOutlineRegular,
+  IconSparkleRegular,
+  IconStopFillRegular,
+  IconWarningOutlineRegular,
   MarkdownText,
   Tooltip,
   type MarkdownLabels,
@@ -66,7 +66,7 @@ export function MemorySettingsSection(props: MemorySettingsSectionProps): React.
               disabled={state.operation !== null}
               onClick={() => { void props.controller.load() }}
             >
-              <IconRefreshOutline16 className={state.operation === 'refresh' ? 'omm-spin' : undefined} />
+              <IconRefreshOutlineRegular className={state.operation === 'refresh' ? 'omm-spin' : undefined} />
             </Button>
           </Tooltip>
         </div>
@@ -91,7 +91,7 @@ export function MemorySettingsSection(props: MemorySettingsSectionProps): React.
       </div>
       {state.error !== null && (
         <div className="omm-error" role="alert">
-          <IconWarningOutline16 />
+          <IconWarningOutlineRegular />
           <span>{state.error}</span>
         </div>
       )}
@@ -100,7 +100,7 @@ export function MemorySettingsSection(props: MemorySettingsSectionProps): React.
         {state.status === 'loading' && <LoadingState t={props.t} />}
         {state.status === 'error' && state.overview === null && (
           <div className="omm-empty">
-            <IconWarningOutline16 />
+            <IconWarningOutlineRegular />
             <span>{props.t('loadFailed')}</span>
             <Button variant="outline" size="sm" onClick={() => { void props.controller.load() }}>{props.t('retry')}</Button>
           </div>
@@ -134,7 +134,7 @@ export function MemorySettingsSection(props: MemorySettingsSectionProps): React.
 function LoadingState(props: { t: (key: MemoryLocaleKey) => string }): React.ReactElement {
   return (
     <div className="omm-loading">
-      <IconLoadingOutline16 className="omm-spin" />
+      <IconLoadingOutlineRegular className="omm-spin" />
       <span>{props.t('loading')}</span>
     </div>
   )
@@ -173,7 +173,7 @@ function ModelPicker(props: {
                 onClick={() => { close(); props.onPickModel(option.key) }}
               >
                 <span className="omm-ms-option-copy"><span className="omm-ms-option-name">{option.name}</span></span>
-                {option.key === props.value ? <span className="omm-ms-check"><IconCheckOutline16 /></span> : null}
+                {option.key === props.value ? <span className="omm-ms-check"><IconCheckOutlineRegular /></span> : null}
               </button>
             ))}
           </section>
@@ -194,7 +194,7 @@ function ModelPicker(props: {
           <span className="omm-ms-option-copy">
             <span className="omm-ms-option-name">{option.key === 'default' ? props.t('followDefault') : option.label}</span>
           </span>
-          {option.key === props.effortValue ? <span className="omm-ms-check"><IconCheckOutline16 /></span> : null}
+          {option.key === props.effortValue ? <span className="omm-ms-check"><IconCheckOutlineRegular /></span> : null}
         </button>
       ))}
       {props.efforts.length <= 1 ? <div className="omm-ms-empty">{props.t('noEffortLevels')}</div> : null}
@@ -213,7 +213,7 @@ function ModelPicker(props: {
       >
         <span className="omm-ms-label">{props.modelLabel}</span>
         {props.effortLabel === null ? null : <span className="omm-ms-effort">· {props.effortLabel}</span>}
-        <IconChevronDownOutline14 className={open ? 'omm-ms-caret omm-ms-caret-open' : 'omm-ms-caret'} />
+        <IconChevronDownOutlineRegular className={open ? 'omm-ms-caret omm-ms-caret-open' : 'omm-ms-caret'} />
       </button>
       {open ? <div className="omm-ms-backdrop" onClick={close} /> : null}
       {open ? (
@@ -223,12 +223,12 @@ function ModelPicker(props: {
               <button type="button" className="omm-ms-cell" role="menuitem" onClick={() => { setPane('model') }}>
                 <span className="omm-ms-cell-label">{props.t('extractModel')}</span>
                 <span className="omm-ms-cell-value">{props.modelLabel}</span>
-                <IconChevronRightOutline14 className="omm-ms-cell-chevron" />
+                <IconChevronRightOutlineRegular className="omm-ms-cell-chevron" />
               </button>
               <button type="button" className="omm-ms-cell" role="menuitem" onClick={() => { setPane('effort') }}>
                 <span className="omm-ms-cell-label">{props.t('extractEffort')}</span>
                 <span className="omm-ms-cell-value">{props.effortLabel === null ? props.t('followDefault') : props.effortLabel}</span>
-                <IconChevronRightOutline14 className="omm-ms-cell-chevron" />
+                <IconChevronRightOutlineRegular className="omm-ms-cell-chevron" />
               </button>
             </>
           ) : pane === 'model' ? modelPane : effortPane}
@@ -352,7 +352,7 @@ function Overview(props: {
       <section className="omm-card">
         <div className="omm-card-head">
           <div className="omm-card-text">
-            <span className="omm-card-name"><IconSparkle16 />{t('dreamTitle')}</span>
+            <span className="omm-card-name"><IconSparkleRegular />{t('dreamTitle')}</span>
             <span className="omm-card-desc">{overview.dream.enabled ? t('dreamCardOn') : t('dreamCardOff')}</span>
           </div>
           <button
@@ -410,7 +410,7 @@ function Overview(props: {
               <Button
                 variant="outline"
                 size="sm"
-                icon={<IconStopFill16 />}
+                icon={<IconStopFillRegular />}
                 disabled={props.operation === 'cancel'}
                 onClick={props.onCancel}
               >
@@ -420,7 +420,7 @@ function Overview(props: {
               <Button
                 variant="primary"
                 size="sm"
-                icon={props.operation === 'run' ? <IconLoadingOutline16 className="omm-spin" /> : <IconSparkle16 />}
+                icon={props.operation === 'run' ? <IconLoadingOutlineRegular className="omm-spin" /> : <IconSparkleRegular />}
                 disabled={!overview.dream.enabled || busy}
                 onClick={props.onRun}
               >
@@ -435,7 +435,7 @@ function Overview(props: {
         <section className="omm-card">
           <div className="omm-card-head">
             <div className="omm-card-text">
-              <span className="omm-card-name"><IconDatabaseOutline16 />{t('lastRunTitle')}</span>
+              <span className="omm-card-name"><IconDatabaseOutlineRegular />{t('lastRunTitle')}</span>
               <span className="omm-card-desc">
                 {`${t('sourceMessages')} ${lastResult.sourceMessages} · ${t('memoriesCreated')} ${lastResult.memoriesCreated} · ${t('memoriesRejected')} ${lastResult.memoriesRejected}`}
               </span>
@@ -461,7 +461,7 @@ function Overview(props: {
       <section className="omm-card">
         <div className="omm-card-head">
           <div className="omm-card-text">
-            <span className="omm-card-name"><IconDatabaseOutline16 />{t('inventoryTitle')}</span>
+            <span className="omm-card-name"><IconDatabaseOutlineRegular />{t('inventoryTitle')}</span>
           </div>
         </div>
         <div className="omm-card-body">
@@ -544,7 +544,7 @@ function MemorySpace(props: {
             className="omm-mobile-back"
             variant="toolbar"
             size="sm"
-            icon={<IconChevronLeftOutline14 />}
+            icon={<IconChevronLeftOutlineRegular />}
             onClick={() => { setMobileView('tree') }}
           >
             {props.t('backToFiles')}
@@ -573,8 +573,8 @@ function TreeRow(props: {
       <>
         <button className="omm-tree-row" type="button" aria-expanded={open} onClick={() => { props.onToggle(props.node.path) }}>
           {indentation}
-          <span className="omm-disclosure" data-open={open}><IconChevronRightOutline14 /></span>
-          {open ? <IconFolderOpen16 /> : <IconFolderClose16 />}
+          <span className="omm-disclosure" data-open={open}><IconChevronRightOutlineRegular /></span>
+          {open ? <IconFolderOpenRegular /> : <IconFolderCloseRegular />}
           <span className="omm-tree-label">{folderLabel(props.node.path, props.node.name, props.t)}</span>
         </button>
         {open && props.node.children.map(child => (
@@ -617,11 +617,11 @@ function DocumentViewer(props: {
     footnotes: props.t('footnotes'),
   }), [props.t])
   if (props.reading) return <LoadingState t={props.t} />
-  if (props.document === null) return <div className="omm-empty"><IconDatabaseOutline16 /><span>{props.t('selectFile')}</span></div>
+  if (props.document === null) return <div className="omm-empty"><IconDatabaseOutlineRegular /><span>{props.t('selectFile')}</span></div>
   if (props.document.redacted) {
     return (
       <div className="omm-redacted">
-        <IconWarningOutline16 />
+        <IconWarningOutlineRegular />
         <strong>{props.t('sensitiveTitle')}</strong>
         <span>{props.t('sensitiveBody')}</span>
       </div>

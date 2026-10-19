@@ -3,7 +3,7 @@
  * attention events. Clicking a row opens that session.
  */
 import { useEffect, useRef, useState, type ReactElement } from 'react'
-import { IconQueueOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconQueueOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { formatInboxAge, unreadBadge, type NotifyInbox } from './notify-inbox.ts'
 
@@ -76,7 +76,7 @@ export function NotifyCenter(props: NotifyCenterProps): ReactElement {
         title={t('notify.center')}
         onClick={() => { setOpen((value) => !value) }}
       >
-        <IconQueueOutline14 size={16} />
+        <IconQueueOutlineRegular size={16} />
         {badge !== '' ? <span data-desktop-notify-dot="" aria-hidden="true" /> : null}
       </button>
       {open && (

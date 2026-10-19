@@ -123,7 +123,10 @@ export class WebSearchToggleGateway extends TypertRemoteService {
 
   /** Resolve the search credential the provider would use, mirroring its order. */
   private async keyState(): Promise<Pick<WebSearchToggleSnapshot, 'keyConfigured' | 'keyRef'>> {
-    const section = this.ctx.settings.get(WEB_SEARCH_NS) as
+    // Settings sections are live config entries now: the shared describe
+    // projection is the read path for another plugin's namespace.
+    const section = this.ctx.settings.describe()
+      .find(descriptor => descriptor.ns === WEB_SEARCH_NS)?.value as
       | { apiKey?: unknown; apiKeyEnv?: unknown }
       | undefined
     const literal = typeof section?.apiKey === 'string' && section.apiKey.length > 0

@@ -24,6 +24,12 @@ import type {
   TokenUsage,
   ToolSchema,
 } from '@deepseek-ai/dsh-llm'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'compaction-hierarchical': { kind: 'compaction-hierarchical' }
+  }
+}
 import type {} from '@deepseek-ai/dsh-token-meter'
 import { basicConfig, basicSupportsHierarchy, Config, resolveHierarchyConfig } from './config.ts'
 import type { HierarchicalCompactionConfig, ResolvedHierarchyConfig } from './config.ts'
@@ -153,10 +159,15 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
       )
     }
     const inputBudget = Math.floor(contextWindow * this.hierarchy.chunkInputRatio)
+    // A generation cap larger than the window minus the input budget is
+    // meaningless on small-context models: clamp the configured reserve
+    // instead of refusing to run at all.
+    const mapReserveCap = Math.max(1, Math.min(this.hierarchy.mapMaxTokens, contextWindow - inputBudget))
+    const reduceReserveCap = Math.max(1, Math.min(this.hierarchy.reduceMaxTokens, contextWindow - inputBudget))
     this.assertStageOutputReserve(
       contextWindow,
       inputBudget,
-      this.hierarchy.mapMaxTokens,
+      mapReserveCap,
       'map',
     )
 
@@ -205,7 +216,7 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
           { ...input, messages: span.messages },
           mapInstruction(span.start, span.end, totalUnits),
           target,
-          this.hierarchy.mapMaxTokens,
+          mapReserveCap,
           agent,
           signal,
         )
@@ -232,7 +243,7 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
       this.assertStageOutputReserve(
         contextWindow,
         inputBudget,
-        this.hierarchy.reduceMaxTokens,
+        reduceReserveCap,
         'reduce',
       )
     }
@@ -285,7 +296,7 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
             { ...input, messages: span.messages },
             reduceInstruction(round, span.start, span.end, totalUnits),
             target,
-            this.hierarchy.reduceMaxTokens,
+            reduceReserveCap,
             agent,
             signal,
           )
@@ -338,7 +349,7 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
       rawOutput: final.result.rawOutput,
       provider: target.provider,
       model: target.model,
-      maxTokens: usedReduce ? this.hierarchy.reduceMaxTokens : this.hierarchy.mapMaxTokens,
+      maxTokens: usedReduce ? reduceReserveCap : mapReserveCap,
       ...(usage === undefined ? {} : { usage }),
     }
     if (!hadFailedLlmAttempt && calls.length === 1) {
@@ -545,7 +556,7 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
     return {
       message: createUserMessage({
         content: [{ type: 'text', text: framePartialSummary(text, start, end) }],
-        source: { kind: 'plugin', plugin: PLUGIN_ID },
+        source: { kind: 'compaction-hierarchical' },
       }),
       result,
       start,
@@ -557,7 +568,7 @@ export class HierarchicalCompactionEngine extends BasicCompactionEngine {
   private instructionMessage(text: string): Message {
     return createUserMessage({
       content: [{ type: 'text', text }],
-      source: { kind: 'plugin', plugin: PLUGIN_ID },
+      source: { kind: 'compaction-hierarchical' },
     })
   }
 }

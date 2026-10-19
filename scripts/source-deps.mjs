@@ -73,10 +73,23 @@ const REGISTRY_OVERRIDES = {
  * inventory to the baseline (fork packages to the fork layer) through
  * `pnpm.overrides`, making the install hermetic against registry drift.
  */
-function dshOverrides(sources, plugin) {
+function dshOverrides(sources, plugin, link) {
   const overrides = {}
+  const anchorVersions = sources?.versions
   for (const [name, _subpath] of sources) {
     if (!name.startsWith('@deepseek-ai/dsh-') && name !== '@deepseek-ai/dsh') continue
+    // Link posture pins every @deepseek-ai/* to the ANCHOR's own manifest
+    // version: the hardcoded registry baseline below describes the last
+    // published fork release, which would drag the resolved instances back
+    // off the source tree under evaluation.
+    if (link && _subpath !== undefined && _subpath !== '') {
+      // Link posture pins by SOURCE PATH, not version: a version-string
+      // override would redirect even the link: devDep edges to the registry
+      // build (official copies lack fork patches and, for some packages,
+      // the published sourcemaps the vite test loader expects).
+      overrides[name] = `link:../deepseek-harness/${_subpath}`
+      continue
+    }
     // The official-baseline exception wins over the fork alias: a plugin
     // that deliberately tests against the stock package (hierarchical's
     // dsh-compaction-basic) stays on the official release even though the
@@ -108,6 +121,7 @@ function registryVersion(name, plugin) {
 /** Discover source owners from package manifests in the selected Harness. */
 function sourcePackages(root) {
   const packages = new Map()
+  const anchorVersions = new Map()
   const visit = (dir) => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (entry.name === 'node_modules' || entry.name === 'lib') continue
@@ -125,6 +139,7 @@ function sourcePackages(root) {
         throw new Error(`duplicate Harness package ${manifest.name}: ${previous}, ${subpath}`)
       }
       packages.set(manifest.name, subpath)
+      anchorVersions.set(manifest.name, manifest.version)
     }
   }
   visit(resolve(root, 'packages'))
@@ -132,6 +147,7 @@ function sourcePackages(root) {
   // CLI/web app entries and the native addon family own their own manifests.
   visit(resolve(root, 'apps'))
   visit(resolve(root, 'native/system'))
+  packages.versions = anchorVersions
   return packages
 }
 
@@ -199,7 +215,12 @@ for (const name of fixed) {
     const keepOfficial = OFFICIAL_BASELINE_DEPS.get(name)?.has(dep) === true
     const source = link && !keepOfficial ? sources?.get(dep) : undefined
     if (link && !keepOfficial && source === undefined) {
-      throw new Error(`selected Harness does not provide ${dep}`)
+      // The anchor no longer ships this package (retired upstream). The dep
+      // stays on its registry version — stale by construction — and the
+      // consumer's port drops it; failing the whole tree here would block
+      // every other plugin's source validation.
+      console.warn(`source-deps: ${name}: ${dep} not in the selected Harness; keeping registry spec (port pending)`)
+      continue
     }
     const next = link && !keepOfficial ? `link:../deepseek-harness/${source}` : registry
     if (deps[dep] === next) continue
@@ -218,15 +239,20 @@ for (const name of fixed) {
   const overrideBlock = ['autoInstallPeers: false', 'minimumReleaseAge: 0', 'allowBuilds:',
     '  esbuild: true', '  koffi: true', '  node-pty: true',
     'overrides:',
-    ...Object.entries(dshOverrides(sources ?? new Map(), name)).map(([dep, version]) => `  '${dep}': ${version}`),
+    ...Object.entries(dshOverrides(sources ?? new Map(), name, link)).map(([dep, version]) => `  '${dep}': ${version}`),
   ].join('\n')
   if (existsSync(workspacePath)) {
     const text = readFileSync(workspacePath, 'utf8')
-    if (/^overrides:\n/m.test(text)) {
-      writeFileSync(workspacePath, text.replace(/^overrides:\n(?:  .*\n?)*/m, `${overrideBlock}\n`))
-    } else {
-      writeFileSync(workspacePath, `${text.replace(/\n*$/, '\n')}\n${overrideBlock}\n`)
-    }
+    // Idempotent rewrite: strip every fragment this script has ever written
+    // (preamble keys, allowBuilds, overrides) so re-running link/unlink can
+    // never stack a second copy — the malformed-yaml failure mode where a
+    // prior file without a clean `overrides:` anchor hit the append branch.
+    const cleaned = text
+      .replace(/^(autoInstallPeers|minimumReleaseAge):[^\n]*\n?/gm, '')
+      .replace(/^overrides:\n(?:[ \t]+.*\n?)*/gm, '')
+      .replace(/^allowBuilds:\n(?:[ \t]+.*\n?)*/gm, '')
+    const rest = cleaned.replace(/\n{2,}/g, '\n').trim()
+    writeFileSync(workspacePath, rest === '' ? `${overrideBlock}\n` : `${rest}\n\n${overrideBlock}\n`)
   } else {
     writeFileSync(workspacePath, `${overrideBlock}\n`)
   }

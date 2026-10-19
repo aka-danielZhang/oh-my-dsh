@@ -44,7 +44,7 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
       result: {
         mode: 'strict',
         typeSymbol: 'dsh-web-search-toggle/toggle-types#WebSearchToggleSnapshot',
-        schema: snapshotSchema,
+        create: () => snapshotSchema,
       },
       sourceLocation: { file: 'src/gateway.ts', line: 64, column: 3 },
     },
@@ -65,13 +65,13 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
         codec: {
           mode: 'strict',
           typeSymbol: 'dsh-web-search-toggle/toggle-types#WebSearchToggleSetParams',
-          schema: setParamsSchema,
+          create: () => setParamsSchema,
         },
       }],
       result: {
         mode: 'strict',
         typeSymbol: 'dsh-web-search-toggle/toggle-types#WebSearchToggleSnapshot',
-        schema: snapshotSchema,
+        create: () => snapshotSchema,
       },
       sourceLocation: { file: 'src/gateway.ts', line: 77, column: 3 },
     },

@@ -2,7 +2,22 @@ import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { runInNewContext } from 'node:vm'
 import { afterEach, beforeEach, vi } from 'vitest'
-import type { SettingsScope, SettingsScopeSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
+/** Structural stand-in for the ui-settings ConfigForm face this plugin consumes. */
+interface SettingsScope<T> {
+  getSnapshot(): SettingsScopeSnapshot<T>
+  subscribe(listener: () => void): () => void
+  set(field: string, value: unknown): Promise<boolean>
+  unset(field: string): Promise<boolean>
+  mutate(ops: readonly { op: 'set' | 'unset', path: (string | number)[], value?: unknown }[], expectedRevision?: number): Promise<boolean>
+}
+interface SettingsScopeSnapshot<T> {
+  status: string
+  value?: T
+  base?: unknown
+  user?: unknown
+  revision?: number
+  writable: boolean
+}
 
 /** Execute the published browser factory with the same explicit imports as the loader. */
 export function loadBrowserModule(specifier: string, imports: Record<string, unknown>): Record<string, unknown> {
@@ -34,13 +49,13 @@ export function usePinnedBrowserLanguages(primary: string): void {
 export function stubSettingsScope<T>(): { scope: SettingsScope<T> } {
   const snapshot: SettingsScopeSnapshot<T> = {
     status: 'loading', value: undefined, base: undefined, user: undefined,
-    revision: undefined, writable: false, mode: 'host',
+    revision: undefined, writable: false,
   }
   return { scope: {
     getSnapshot: () => snapshot,
     subscribe: () => () => {},
-    set: vi.fn(async () => {}),
-    mutate: vi.fn(async () => {}),
-    unset: vi.fn(async () => {}),
+    set: vi.fn(async () => true),
+    mutate: vi.fn(async () => true),
+    unset: vi.fn(async () => true),
   } }
 }

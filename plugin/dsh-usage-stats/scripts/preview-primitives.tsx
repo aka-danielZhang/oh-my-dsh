@@ -1,6 +1,6 @@
 /**
  * Preview-only local stand-ins for the four ui-primitives the settings page
- * uses (Button / Pill / Tooltip / IconRefreshOutline16). Geometry and tokens
+ * uses (Button / Pill / Tooltip / IconRefreshOutlineRegular). Geometry and tokens
  * mirror the real components closely enough for the dynamic-plugin preview;
  * the SHIPPED plugin keeps importing the real primitives (see charts/section).
  * This module exists only so the preview bundle stays a few dozen KB instead
@@ -113,7 +113,7 @@ export function Tooltip({ label, side, children }: {
   )
 }
 
-export function IconRefreshOutline16({ size, className }: { size?: number, className?: string }): ReactNode {
+export function IconRefreshOutlineRegular({ size, className }: { size?: number, className?: string }): ReactNode {
   return React.createElement('svg', {
     width: size ?? 16,
     height: size ?? 16,

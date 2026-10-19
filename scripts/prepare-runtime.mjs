@@ -105,15 +105,10 @@ const skipped = []
 // 「发布纪律」); the runtime consumes those published versions instead of
 // packing the clone — same bytes the world can install, one provenance.
 // Source of truth: fork repo FORK.md (`node scripts/publish-fork.mjs --list`).
-// The 0.1.6-alpha.1 set restores the unified desktop toolbar dropped from the
-// old release-only lineage: `dsh-client-ui-layout` (shell.toolbar seat +
-// host registry), `dsh-client-ui-conversation` (session-header portal), and
-// `dsh-client-test-runtime` (its test support) join here, as does
-// `dsh-llm-pi-ai` (route-level session-affinity headers for affinity
-// gateways like OpenCode Go). Retired earlier:
-// `dsh-client-ui-settings-models` (revert ffffaf39, 2026-08-20). In 0.1.5
-// the upstream lifetime write lease replaces the retired fork persistence
-// coordinator, so session-persistence rides the official package set.
+// Slimmed 2026-10-19 (fork 5f23a53e51): `dsh-compaction-basic` returned to
+// the pristine upstream tree — hierarchy ships as the desktop plugin
+// `dsh-compaction-hierarchical` — and `dsh-todo-completion-guard` moved to
+// this repo's plugin tree as `dsh-todo-completion-guard`.
 const FORK_MODIFIED = new Set([
   '@deepseek-ai/dsh-agent-default-model',
   '@deepseek-ai/dsh-api-session-controller',
@@ -122,24 +117,28 @@ const FORK_MODIFIED = new Set([
   '@deepseek-ai/dsh-client-ui-conversation',
   '@deepseek-ai/dsh-client-ui-layout',
   '@deepseek-ai/dsh-client-ui-model-selection',
-  '@deepseek-ai/dsh-compaction-basic',
   '@deepseek-ai/dsh-host-frontend-static',
   '@deepseek-ai/dsh-llm-pi-ai',
   '@deepseek-ai/dsh-mcp-client',
-  '@deepseek-ai/dsh-todo-completion-guard',
   '@deepseek-ai/dsh-tool-cordis',
   '@deepseek-ai/dsh',
 ])
 const FORK_NPM_SCOPE = process.env.FORK_NPM_SCOPE ?? '@crazx'
+// Local-fork posture (DSH_RUNTIME_LOCAL_FORK=1): evaluate a merged-but-
+// unpublished fork branch. The zw regex and the @crazx npm resolution do not
+// apply — every @deepseek-ai/* package, fork-modified or not, packs from the
+// cloned tree and resolves through file: overrides. The npm provenance path
+// stays the default for assembled releases.
+const LOCAL_FORK = process.env.DSH_RUNTIME_LOCAL_FORK === '1'
 // revision.ref spells v<upstream-baseline>+zw.<N>; npm versions are
 // <upstream-baseline>.zw.<N>.
-const zwMatch = /^(v[^+]+)\+zw\.(\d+)$/.exec(revision.ref)
-if (zwMatch === null) {
+const zwMatch = LOCAL_FORK ? null : /^(v[^+]+)\+zw\.(\d+)$/.exec(revision.ref)
+if (zwMatch === null && !LOCAL_FORK) {
   console.error(`prepare-runtime: revision.ref carries no zw layer: ${revision.ref}`)
   process.exit(1)
 }
-const forkBaseVersion = zwMatch[1].slice(1)
-const wantedZw = Number(zwMatch[2])
+const forkBaseVersion = LOCAL_FORK ? '' : zwMatch[1].slice(1)
+const wantedZw = LOCAL_FORK ? 0 : Number(zwMatch[2])
 function resolveForkNpmVersion(forkName) {
   // Exact release only: letting each package descend to an older .zw layer
   // assembles a mixed fork release — the failure mode the single-version
@@ -160,13 +159,17 @@ function resolveForkNpmVersion(forkName) {
 }
 const forkNpmOf = {}
 for (const name of FORK_MODIFIED) {
+  if (LOCAL_FORK) break
   const forkName = `${FORK_NPM_SCOPE}/${name.slice('@deepseek-ai/'.length)}`
   const ver = resolveForkNpmVersion(forkName)
   forkNpmOf[name] = ver
   overrides[name] = `npm:${forkName}@${ver}`
 }
-console.log(`prepare-runtime: fork-modified set -> npm ${FORK_NPM_SCOPE}/*`)
+console.log(LOCAL_FORK
+  ? 'prepare-runtime: local-fork posture — every @deepseek-ai/* packs from the clone'
+  : `prepare-runtime: fork-modified set -> npm ${FORK_NPM_SCOPE}/*`)
 for (const name of FORK_MODIFIED) {
+  if (LOCAL_FORK) break
   console.log(`  ${name} -> ${forkNpmOf[name]}`)
 }
 
@@ -189,7 +192,7 @@ for (const pkg of packages) {
 }
 for (const pkg of packages) {
   if (!pkg.name?.startsWith('@deepseek-ai/')) continue
-  if (FORK_MODIFIED.has(pkg.name)) continue // consumed from npm via overrides
+  if (!LOCAL_FORK && FORK_MODIFIED.has(pkg.name)) continue // consumed from npm via overrides
   const manifestPath = resolve(pkg.path, 'package.json')
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
   if (manifest.private === true) {
@@ -205,22 +208,25 @@ for (const pkg of packages) {
   // `@deepseek-ai/*` key and pin the exact fork version — the same policy
   // publish-fork.mjs applies — because peers require semver, not npm
   // aliases, and the overrides map re-points the original name at the
-  // @crazx instance for the install.
+  // @crazx instance for the install. Local-fork posture skips the rewrite:
+  // every package resolves through the file: overrides as its packed self.
   let rewrote = false
-  for (const field of ['dependencies', 'optionalDependencies']) {
-    const deps = manifest[field]
-    if (deps === undefined) continue
-    for (const name of Object.keys(deps)) {
-      if (!FORK_MODIFIED.has(name)) continue
-      deps[name] = `npm:${FORK_NPM_SCOPE}/${name.slice('@deepseek-ai/'.length)}@${forkNpmOf[name]}`
-      rewrote = true
+  if (!LOCAL_FORK) {
+    for (const field of ['dependencies', 'optionalDependencies']) {
+      const deps = manifest[field]
+      if (deps === undefined) continue
+      for (const name of Object.keys(deps)) {
+        if (!FORK_MODIFIED.has(name)) continue
+        deps[name] = `npm:${FORK_NPM_SCOPE}/${name.slice('@deepseek-ai/'.length)}@${forkNpmOf[name]}`
+        rewrote = true
+      }
     }
-  }
-  if (manifest.peerDependencies !== undefined) {
-    for (const name of Object.keys(manifest.peerDependencies)) {
-      if (!FORK_MODIFIED.has(name)) continue
-      manifest.peerDependencies[name] = forkNpmOf[name]
-      rewrote = true
+    if (manifest.peerDependencies !== undefined) {
+      for (const name of Object.keys(manifest.peerDependencies)) {
+        if (!FORK_MODIFIED.has(name)) continue
+        manifest.peerDependencies[name] = forkNpmOf[name]
+        rewrote = true
+      }
     }
   }
   if (manifest.private === false || rewrote) {
@@ -300,9 +306,11 @@ for (const [name, spec] of Object.entries(overrides)) {
   }
 }
 const forkDirectDeps = {}
-for (const name of FORK_MODIFIED) {
-  const forkName = `${FORK_NPM_SCOPE}/${name.slice('@deepseek-ai/'.length)}`
-  forkDirectDeps[name] = `npm:${forkName}@${forkNpmOf[name]}`
+if (!LOCAL_FORK) {
+  for (const name of FORK_MODIFIED) {
+    const forkName = `${FORK_NPM_SCOPE}/${name.slice('@deepseek-ai/'.length)}`
+    forkDirectDeps[name] = `npm:${forkName}@${forkNpmOf[name]}`
+  }
 }
 // EVERY packed tarball rides as a direct dependency too. Overrides reach only
 // ordinary dependency edges: host packages expose their seams as
@@ -326,7 +334,7 @@ writeFileSync(resolve(runtimeDir, 'package.json'), JSON.stringify({
   dependencies: {
     ...forkDirectDeps,
     ...tarballDirectDeps,
-    '@deepseek-ai/dsh': `npm:${FORK_NPM_SCOPE}/dsh@${forkNpmOf['@deepseek-ai/dsh']}`,
+    ...(LOCAL_FORK ? {} : { '@deepseek-ai/dsh': `npm:${FORK_NPM_SCOPE}/dsh@${forkNpmOf['@deepseek-ai/dsh']}` }),
     tsx: '^4.19.2',
   },
 }, null, 2) + '\n')
@@ -423,9 +431,13 @@ execPnpm(['install', '--no-frozen-lockfile'], { cwd: runtimeDir, stdio: 'inherit
       // sha prefix; only registry copies spell a real version. The expected
       // version per package is the fork tree's own manifest (BASELINE_PIN), so
       // vendored framework lines (schemastery 3.x) and natives (landlock 0.1.1)
-      // compare against themselves, not the dsh rc cadence.
-      if (!version.includes('file+') && version !== (BASELINE_PIN[pkg] ?? forkBaseVersion) && !version.endsWith(`.zw.${zwMatch[2]}`)) {
-        offBaseline.push(`${pkg}@${version} (expected ${BASELINE_PIN[pkg] ?? forkBaseVersion})`)
+      // compare against themselves, not the dsh rc cadence. An @deepseek-ai/*
+      // name absent from BASELINE_PIN is an EXTERNAL npm dep of a workspace
+      // package (libreoffice-kit et al.): it rides its dependent's declared
+      // range, which is its own version line by construction.
+      if (!version.includes('file+') && BASELINE_PIN[pkg] !== undefined
+        && version !== BASELINE_PIN[pkg] && !version.endsWith(`.zw.${LOCAL_FORK ? "" : zwMatch[2]}`)) {
+        offBaseline.push(`${pkg}@${version} (expected ${BASELINE_PIN[pkg]})`)
       }
     }
   } else {
@@ -444,8 +456,9 @@ execPnpm(['install', '--no-frozen-lockfile'], { cwd: runtimeDir, stdio: 'inherit
         const manifest = resolve(scopeDir, name, 'package.json')
         if (!existsSync(manifest)) continue
         const version = JSON.parse(readFileSync(manifest, 'utf8')).version ?? ''
-        if (version !== (BASELINE_PIN[pkg] ?? forkBaseVersion) && !version.endsWith(`.zw.${zwMatch[2]}`)) {
-          offBaseline.push(`${pkg}@${version} (expected ${BASELINE_PIN[pkg] ?? forkBaseVersion})`)
+        if (BASELINE_PIN[pkg] !== undefined
+          && version !== BASELINE_PIN[pkg] && !version.endsWith(`.zw.${LOCAL_FORK ? "" : zwMatch[2]}`)) {
+          offBaseline.push(`${pkg}@${version} (expected ${BASELINE_PIN[pkg]})`)
         }
       }
     }

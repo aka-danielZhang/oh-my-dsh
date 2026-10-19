@@ -27,7 +27,7 @@ export const NS = 'settings.mcp'
 export const MCP_SETTINGS_NS = 'mcp'
 
 /** Services required by the Settings registration, the settings transport, and the status Remote. */
-export const inject = ['slots', 'locale', 'remote', 'settingsScope']
+export const inject = ['slots', 'locale', 'remote', 'configForms']
 
 /** Contribute the MCP server manager to the Settings panel. */
 export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
@@ -49,7 +49,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     const t = ctx.locale.bind(NS)
     // Bound eagerly on this plugin's fiber: the scope's listeners and invalidation
     // subscriptions unload with the contribution, not with a component unmount.
-    const scope = ctx.settingsScope.bind<{ servers: McpServerEntry[] }>({ namespace: MCP_SETTINGS_NS })
+    const scope = ctx.configForms.get<{ servers: McpServerEntry[] }>(MCP_SETTINGS_NS)
     const injected = (): McpSettingsSectionInjected => ({
       scope,
       listStatus: async () => {

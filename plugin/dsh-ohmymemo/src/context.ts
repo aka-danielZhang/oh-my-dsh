@@ -37,7 +37,13 @@
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
-import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import type { UserMessage , ContextFormed } from '@deepseek-ai/dsh-llm'
+
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    'dsh-ohmymemo-context': { kind: 'dsh-ohmymemo-context' } & ContextFormed
+  }
+}
 import { composeCapsule, digestFromText, replacementPreface } from './capsule.ts'
 import { DREAM_MAINTENANCE_SESSION_PREFIX } from './dream.ts'
 import type { OhMyMemoService } from './service.ts'
@@ -54,7 +60,7 @@ export function createCapsuleMessage(text: string): UserMessage {
     id: randomUUID(),
     role: 'user',
     content: [{ type: 'text', text }],
-    source: { kind: 'plugin', plugin: 'dsh-ohmymemo-context', form: 'snapshot', sections: [{ name: 'memory-capsule', text }] },
+    source: { kind: 'dsh-ohmymemo-context', form: 'snapshot', sections: [{ name: 'memory-capsule', text }] },
   } as unknown as UserMessage
 }
 
@@ -76,7 +82,7 @@ function lastDigestFromSurface(events: readonly SurfaceEventView[]): string | un
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
     if (event?.type !== 'user/message') continue
-    if (event.data?.source?.plugin !== name) continue
+    if (event.data?.source?.kind !== name) continue
     const text = (event.data.content ?? []).filter((block) => block.type === 'text').map((block) => block.text ?? '').join('\n')
     const digest = digestFromText(text)
     if (digest !== undefined) return digest

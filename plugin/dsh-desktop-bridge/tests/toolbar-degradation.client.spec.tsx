@@ -51,7 +51,7 @@ function makeCtx(options: { rejectToolbarSlot: boolean }) {
       open: () => {},
     },
     uiSession: {
-      pendingInteractions: { getSnapshot: () => new Map(), subscribe: () => () => {} },
+      sessionStatus: { getSnapshot: () => new Map(), subscribe: () => () => {} },
     },
     uiWorkspace: { startSession: () => {} },
     slots: {

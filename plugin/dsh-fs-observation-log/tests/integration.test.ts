@@ -50,6 +50,13 @@ async function boot(home: string): Promise<Context> {
   await ctx.plugin(ToolRuntime)
   await ctx.plugin(FsLocal)
   await ctx.plugin(FsPolicy)
+  // tool-fs's cwd resolution is scope furniture here, not under test: a
+  // stub satisfies its inject without the real per-Session directory stack.
+  ctx.provide('workingDirectory', {
+    ensure: async () => scratchRoots[0] ?? process.cwd(),
+    get: () => scratchRoots[0] ?? process.cwd(),
+    directory: async () => scratchRoots[0] ?? process.cwd(),
+  })
   await ctx.plugin(ToolFs)
   await ctx.plugin(ObservationLog)
   return ctx

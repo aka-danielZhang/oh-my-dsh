@@ -15,7 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
-import { Button, IconRefreshOutline16, Pill, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Button, IconRefreshOutlineRegular, Pill, Tooltip } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   UsageStatsActivity,
   UsageStatsBreakdown,
@@ -246,7 +246,7 @@ export function UsageStatsSection({ face, t, lang }: UsageStatsSectionProps): Re
         aria-label={t('action.refresh')}
         onClick={() => { void loadAll({ announce: true }) }}
       >
-        <IconRefreshOutline16 className={refreshing ? styles.spin : undefined} />
+        <IconRefreshOutlineRegular className={refreshing ? styles.spin : undefined} />
       </Button>
     </Tooltip>
   )

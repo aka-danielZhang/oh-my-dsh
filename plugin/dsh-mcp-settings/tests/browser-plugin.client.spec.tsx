@@ -61,9 +61,9 @@ async function bench(provideInventory = true) {
   if (provideInventory) ctx.provide('remote.mcpInventory', { list })
   ctx.provide('connection', { api: {}, isLoopback: true })
   const stub = stubSettingsScope<{ servers: never[] }>()
-  const bind = vi.fn(() => stub.scope)
-  ctx.provide('settingsScope', { bind } as never)
-  return { ctx, slots: ctx.get('slots') as SlotRegistry, locale, list, bind, mount }
+  const get = vi.fn(() => stub.scope)
+  ctx.provide('configForms', { get } as never)
+  return { ctx, slots: ctx.get('slots') as SlotRegistry, locale, list, bind: get, mount }
 }
 
 function declare(slots: SlotRegistry): () => void {
@@ -75,7 +75,7 @@ function declare(slots: SlotRegistry): () => void {
 
 describe('ui-settings-mcp browser plugin', () => {
   it('declares only the services used by the Settings contribution', () => {
-    expect(inject).toEqual(['slots', 'locale', 'remote', 'settingsScope'])
+    expect(inject).toEqual(['slots', 'locale', 'remote', 'configForms'])
   })
 
   it('mounts its inventory Remote when the standard assembly has not selected it', async () => {
@@ -116,7 +116,7 @@ describe('ui-settings-mcp browser plugin', () => {
     declare(b.slots)
     const fiber = b.ctx.plugin({ inject: [...inject], apply })
     await fiber.await()
-    expect(b.bind).toHaveBeenCalledExactlyOnceWith({ namespace: 'mcp' })
+    expect(b.bind).toHaveBeenCalledExactlyOnceWith('mcp')
     expect(b.slots.entries('settings.section').some(item => item.options.id === 'mcp')).toBe(true)
 
     await fiber.dispose()

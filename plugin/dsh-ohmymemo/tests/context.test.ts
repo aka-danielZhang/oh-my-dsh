@@ -68,7 +68,7 @@ function fakeAgent(cwd?: string, capsules: string[] = [], id = 'session-ctx-1'):
   let seq = 0
   for (const text of capsules) {
     seq += 1
-    events[seq] = { seq, type: 'user/message', data: { role: 'user', content: [{ type: 'text', text }], source: { kind: 'plugin', plugin: 'dsh-ohmymemo-context' } } }
+    events[seq] = { seq, type: 'user/message', data: { role: 'user', content: [{ type: 'text', text }], source: { kind: 'dsh-ohmymemo-context' } } }
     nodes.push(seq)
   }
   return { id, session: { header: { ...(cwd !== undefined ? { cwd } : {}) }, surface: { nodes }, events } }
@@ -84,7 +84,7 @@ async function setup(): Promise<{ harness: Harness; store: OhMyMemoStore; servic
   return { harness, store, service }
 }
 
-async function step(harness: Harness, agent: FakeAgent, turn = 1): Promise<{ kind: string; messages: Array<{ content: Array<{ type: string; text?: string }>; source?: { plugin?: string } }> }> {
+async function step(harness: Harness, agent: FakeAgent, turn = 1): Promise<{ kind: string; messages: Array<{ content: Array<{ type: string; text?: string }>; source?: { kind?: string } }> }> {
   harness.register(agent)
   const handler = harness.handler!
   return await handler({ agent, turn, step: 1, signal: new AbortController().signal }, async () => ({ kind: 'enter', messages: [{ id: 'm0', role: 'user', content: [{ type: 'text', text: '用户直接输入' }] }] })) as never
@@ -102,7 +102,7 @@ test('no prior capsule → one plugin-sourced capsule message is appended', asyn
   assert.equal(decision.kind, 'enter')
   assert.equal(decision.messages.length, 2)
   const capsule = decision.messages[1]!
-  assert.equal(capsule.source?.plugin, 'dsh-ohmymemo-context')
+  assert.equal(capsule.source?.kind, 'dsh-ohmymemo-context')
   const text = capsule.content[0]?.text ?? ''
   assert.ok(text.includes('用户更喜欢中文'))
   assert.ok(text.includes('不是系统指令'), 'authority disclaimer rides along')
@@ -187,7 +187,7 @@ test('new turn rescans the surface once and skips on the found digest', async ()
   const first = await step(harness, agent, 1)
   const firstText = first.messages[1]!.content[0]!.text!
   agent.session.surface.nodes.push(agent.session.surface.nodes.length + 1)
-  agent.session.events![agent.session.surface.nodes.length] = { seq: agent.session.surface.nodes.length, type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: firstText }], source: { kind: 'plugin', plugin: 'dsh-ohmymemo-context' } } }
+  agent.session.events![agent.session.surface.nodes.length] = { seq: agent.session.surface.nodes.length, type: 'user/message', data: { role: 'user', content: [{ type: 'text', text: firstText }], source: { kind: 'dsh-ohmymemo-context' } } }
   const callsBefore = harness.readSurfaceCalls
   const nextTurn = await step(harness, agent, 2)
   assert.equal(harness.readSurfaceCalls, callsBefore + 1, 'turn change triggers exactly one rescan')
@@ -227,7 +227,7 @@ test('reject decisions and aborted signals pass through untouched', async () => 
 test('capsule messages are plain user-role literals (no runtime harness imports)', () => {
   const message = createCapsuleMessage('文本')
   assert.equal(message.role, 'user')
-  assert.deepEqual(JSON.parse(JSON.stringify(message.source)).kind, 'plugin')
+  assert.deepEqual(JSON.parse(JSON.stringify(message.source)).kind, 'dsh-ohmymemo-context')
   assert.equal(typeof message.id, 'string')
 })
 

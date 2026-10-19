@@ -13,7 +13,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { IconChevronDownOutline14 } from '@deepseek-ai/dsh-client-ui-primitives'
+import { IconChevronDownOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ScheduledTasksLocaleKey } from './locales.ts'
 
 export type Translate = (key: ScheduledTasksLocaleKey, params?: Record<string, string | number>) => string
@@ -100,7 +100,7 @@ function FieldSelect({ value, options, width, ariaLabel, onChange }: {
         onClick={() => { setOpen(!open) }}
       >
         <span className="dsh-stask-menu-item-label">{current?.label ?? value}</span>
-        <span className="dsh-stask-field-caret" aria-hidden="true"><IconChevronDownOutline14 size={12} /></span>
+        <span className="dsh-stask-field-caret" aria-hidden="true"><IconChevronDownOutlineRegular size={12} /></span>
       </button>
       {open
         ? (

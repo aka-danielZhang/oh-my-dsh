@@ -57,7 +57,6 @@ test('button is invisible on removed sessions', () => {
 function snapshotOf(facts: SessionFacts): SessionSnapshot {
   return {
     sessionId: 's1' as SessionSnapshot['sessionId'],
-    queue: [],
     pendingSubmissions: [],
     openState: 'open',
     openError: null,
@@ -93,13 +92,17 @@ function mountProps(session: SessionFacts, input: InputFacts): StopWhileRunningP
   const unused = (() => undefined) as never
   return {
     sessionId: snapshot.sessionId,
+    useAccess: unused as StopWhileRunningProps['useAccess'],
+    useRemoteAccess: unused as StopWhileRunningProps['useRemoteAccess'],
+    useSessionStatus: unused as StopWhileRunningProps['useSessionStatus'],
+    useSessionRetainInfo: unused as StopWhileRunningProps['useSessionRetainInfo'],
+    useSessionAccess: unused as StopWhileRunningProps['useSessionAccess'],
     useSession: selector => selector(snapshot),
     useInput: selector => selector(state),
     useProjection: unused as StopWhileRunningProps['useProjection'],
     useConversation: unused as StopWhileRunningProps['useConversation'],
     inputActions: {} as StopWhileRunningProps['inputActions'],
     useSessions: unused as StopWhileRunningProps['useSessions'],
-    useSessionPendingInteraction: unused as StopWhileRunningProps['useSessionPendingInteraction'],
     useWorkspaces: unused as StopWhileRunningProps['useWorkspaces'],
     interrupt: () => { /* the cancel path is exercised in the browser */ },
     t: (key => `t:${key}`) as StopWhileRunningProps['t'],

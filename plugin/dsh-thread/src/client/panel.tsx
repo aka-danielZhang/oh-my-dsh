@@ -1,10 +1,10 @@
 import {
-  IconBranchOutline16,
-  IconChevronLeftOutline14,
-  IconChevronRightOutline14,
-  IconCodeOutline16,
-  IconFolderOpenOutline16,
-  IconLinkOutline16,
+  IconBranchOutlineRegular,
+  IconChevronLeftOutlineRegular,
+  IconChevronRightOutlineRegular,
+  IconCodeOutlineRegular,
+  IconFolderOpenOutlineRegular,
+  IconLinkOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
@@ -105,9 +105,9 @@ const styles = {
 } as const
 
 function ArtifactIcon({ artifact }: { artifact: ThreadArtifact }): React.ReactElement {
-  if (artifact.kind === 'directory') return <IconFolderOpenOutline16 />
-  if (artifact.kind === 'url') return <IconLinkOutline16 />
-  return <IconCodeOutline16 />
+  if (artifact.kind === 'directory') return <IconFolderOpenOutlineRegular />
+  if (artifact.kind === 'url') return <IconLinkOutlineRegular />
+  return <IconCodeOutlineRegular />
 }
 
 function artifactOriginText(origin: 'produced' | 'carried' | 'none'): string {
@@ -134,7 +134,7 @@ function Pager(props: {
         aria-label="上一页"
         onClick={() => goTo(props.page - 1)}
       >
-        <IconChevronLeftOutline14 />
+        <IconChevronLeftOutlineRegular />
       </button>
       <span style={styles.pagerText} aria-live="polite">{props.page} / {props.pageCount}</span>
       <button
@@ -144,7 +144,7 @@ function Pager(props: {
         aria-label="下一页"
         onClick={() => goTo(props.page + 1)}
       >
-        <IconChevronRightOutline14 />
+        <IconChevronRightOutlineRegular />
       </button>
     </div>
   )
@@ -202,7 +202,7 @@ export function ThreadPanel(props: ThreadPanelProps): React.ReactElement {
         )}
         {state !== null && projection === null && (
           <div style={styles.emptyWrap}>
-            <div style={styles.emptyIcon}><IconBranchOutline16 /></div>
+            <div style={styles.emptyIcon}><IconBranchOutlineRegular /></div>
             <div style={styles.emptyTitle}>尚未加入 Thread</div>
             <div style={styles.emptyDesc}>完成一个独立阶段后，Thread 模式会在合适的边界提出新会话交接。</div>
           </div>

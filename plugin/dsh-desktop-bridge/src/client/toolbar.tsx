@@ -27,7 +27,7 @@
  */
 import type { ReactElement } from 'react'
 import {
-  IconNewChatOutline16, IconPanelLeftOutline16,
+  IconNewChatOutlineRegular, IconPanelLeftOutlineRegular,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { UpdateControl } from './update-indicator.tsx'
@@ -92,12 +92,12 @@ export function DesktopToolbar(props: DesktopToolbarProps): ReactElement {
     <div data-desktop-toolbar="" role="toolbar" aria-label={t('toolbar.label')}>
       <div data-desktop-toolbar-controls="">
         <ToolbarButton label={t('rail.toggle')} onClick={() => { toggleSidebar() }}>
-          <IconPanelLeftOutline16 size={16} />
+          <IconPanelLeftOutlineRegular size={16} />
         </ToolbarButton>
         <UpdateControl {...props} />
         <NotifyCenter {...props} />
         <ToolbarButton collapsedOnly label={t('rail.newSession')} onClick={() => { startSession() }}>
-          <IconNewChatOutline16 size={16} />
+          <IconNewChatOutlineRegular size={16} />
         </ToolbarButton>
       </div>
       <div data-desktop-toolbar-main="">
