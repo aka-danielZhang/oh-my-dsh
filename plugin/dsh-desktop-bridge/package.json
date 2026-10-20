@@ -1,7 +1,7 @@
 {
   "name": "dsh-desktop-bridge",
-  "version": "0.2.0-rc.21",
-  "description": "Desktop bridge for DeepSeek Harness: shell-gated OS integration, sidebar-foot update and notify entries, plus a host JSONL log sink",
+  "version": "0.2.0-rc.22",
+  "description": "Desktop bridge for DeepSeek Harness: shell-gated OS integration, sidebar-foot update entry, plus a host JSONL log sink",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",

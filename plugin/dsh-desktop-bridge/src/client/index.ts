@@ -3,9 +3,8 @@
  * plain browser (terminal `dsh web`) the probe is 'absent' and apply returns
  * with zero registrations, so the row is always safe to mount. Inside the
  * shell it installs external-link routing, download saving, native
- * notifications, an in-app notification center, the shell.overlay desktop
- * badge, and the sidebar-foot update/notify entries —
- * all as reversible effects collected by the plugin fiber.
+ * notifications, the shell.overlay desktop badge, and the sidebar-foot
+ * update entry — all as reversible effects collected by the plugin fiber.
  *
  * Chrome posture (0.2.1-rc.2 zw line): the shell marks
  * `data-platform=darwin` like the official desktop preload and configures
@@ -13,7 +12,7 @@
  * layout — conversation header at the top, right panel anchored at the frame
  * top, official shell.leading controls for the collapsed sidebar. The bridge
  * adds no chrome of its own: its only seats are the badge (shell.overlay)
- * and the two foot actions (sidebar.footer.action) next to Settings.
+ * and the update foot action (sidebar.footer.action) next to Settings.
  */
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 // Type-only: pulls ui-session's cordis Context merge (ctx.uiSession) and its
@@ -41,8 +40,6 @@ import { UpdateControl, type UpdateIndicatorInjected } from './update-indicator.
 import { createUpdateCoordinator } from './update-coordinator.ts'
 import { en, zh, type DesktopBridgeKey } from './locales.ts'
 import { installNotifications } from './notifications.ts'
-import { createNotifyInbox } from './notify-inbox.ts'
-import { NotifyCenter, type NotifyCenterInjected } from './notify-center.tsx'
 import { installSurfaceMenu } from './surface-menu.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -81,7 +78,6 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => installExternalLinks(document, invoke, logger), 'desktop-bridge: external links')
   ctx.effect(() => installDownloads(document, invoke, logger), 'desktop-bridge: downloads')
   ctx.effect(() => installSurfaceMenu(document, invoke, logger), 'desktop-bridge: surface menu')
-  const inbox = createNotifyInbox()
   const openSession = (sessionId: string): void => {
     ctx.uiWorkspace.openSession(sessionId as Parameters<typeof ctx.uiWorkspace.openSession>[0])
   }
@@ -101,10 +97,8 @@ export function apply(ctx: ClientContext): void {
       logger,
       copy: () => ({ turnDone: t('notify.turnDone'), awaitInput: t('notify.awaitInput') }),
       openSession,
-      record: (edge) => { inbox.push(edge) },
     })
   }, 'desktop-bridge: notifications')
-  const notifyInjected = (): NotifyCenterInjected => ({ inbox, openSession, direction: 'up' })
   const injected = (): BadgeInjected => ({
     openExternal: (url) => { void callOpenExternal(invoke, url, logger) },
   })
@@ -118,14 +112,13 @@ export function apply(ctx: ClientContext): void {
     const disposeBadge = ctx.slots.register({ name: 'shell.overlay', id: 'desktop-badge', order: 10, locale: NS, inject: injected }, DesktopBadge)
     return () => { disposeBadge() }
   })
-  // The bridge's two foot entries beside Settings: the update control and
-  // the notification center, on every platform (the official sidebar foot
-  // is the single shared home — no more per-platform overlay fallbacks).
-  // slots.inject waits on ui-sidebar's declaration the same way.
+  // The bridge's foot entry beside Settings: the update control, on every
+  // platform (the official sidebar foot is the single shared home — no more
+  // per-platform overlay fallbacks). slots.inject waits on ui-sidebar's
+  // declaration the same way.
   ctx.slots.inject('sidebar.footer.action', () => {
     const disposeUpdate = ctx.slots.register({ name: 'sidebar.footer.action', id: 'desktop-update', order: 20, locale: NS, inject: updateInjected }, UpdateControl)
-    const disposeNotify = ctx.slots.register({ name: 'sidebar.footer.action', id: 'desktop-notify', order: 21, locale: NS, inject: notifyInjected }, NotifyCenter)
-    return () => { disposeNotify(); disposeUpdate() }
+    return () => { disposeUpdate() }
   })
 }
 

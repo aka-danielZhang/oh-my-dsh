@@ -89,7 +89,6 @@ export function installNotifications(opts: {
   logger: NotifyLog
   copy: NotifyCopy | (() => NotifyCopy)
   openSession: (sessionId: string) => void
-  record?: (edge: AttentionEdge) => void
   surface?: () => NotifySurface
   /** Injected clock for birth-grace tests; defaults to `Date.now`. */
   now?: () => number
@@ -127,7 +126,6 @@ export function installNotifications(opts: {
     previous = next
     const surface: NotifySurface = { ...surfaceOf(), ...(current !== undefined ? { currentSessionId: current } : {}) }
     for (const edge of edges) {
-      opts.record?.(edge)
       if (shouldNotify(edge, surface)) notify(edge)
     }
   }

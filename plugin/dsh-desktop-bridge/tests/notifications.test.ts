@@ -10,6 +10,28 @@ import type { DesktopInvoke } from '../src/client/env.ts'
 
 const copy = { turnDone: '回合已完成', awaitInput: '等待你的输入' }
 
+/** One `dsh_desktop_notify` invocation captured off the fake IPC carrier. */
+interface NotifyCall {
+  cmd: string
+  title?: unknown
+  body?: unknown
+  sessionId?: unknown
+}
+
+/** Fake carrier recording every invocation; `on` subscriptions are optional. */
+function recordingInvoke(calls: NotifyCall[], listeners = new Map<string, (payload: unknown) => void>()): DesktopInvoke {
+  return {
+    invoke: async (cmd, args) => {
+      calls.push({ cmd, ...(args ?? {}) })
+      return undefined
+    },
+    on: (event, handler) => {
+      listeners.set(event, handler)
+      return () => { listeners.delete(event) }
+    },
+  }
+}
+
 /** Empty authority stub: no session has a live interaction. */
 const emptyPending = {
   getSnapshot: (): ReadonlyMap<string, unknown> => new Map(),
@@ -52,20 +74,10 @@ describe('bodyForEdge', () => {
 
 describe('installNotifications', () => {
   it('sends sessionId and opens that session on click', async () => {
-    const calls: Array<Record<string, unknown>> = []
+    const calls: NotifyCall[] = []
     const opened: string[] = []
-    let flush = (): void => {}
     const listeners = new Map<string, (payload: unknown) => void>()
-    const invoke: DesktopInvoke = {
-      invoke: async (cmd, args) => {
-        calls.push({ cmd, ...(args ?? {}) })
-        return undefined
-      },
-      on: (event, handler) => {
-        listeners.set(event, handler)
-        return () => { listeners.delete(event) }
-      },
-    }
+    let flush = (): void => {}
     const rows = {
       a: { id: 'a', displayTitle: 'Alpha', running: true },
     }
@@ -76,16 +88,14 @@ describe('installNotifications', () => {
         return () => {}
       },
     }
-    const recorded: string[] = []
     let now = 0
     const stop = installNotifications({
       list,
       pending: emptyPending,
-      invoke,
+      invoke: recordingInvoke(calls, listeners),
       logger: { warn: () => {} },
       copy,
       openSession: (id) => { opened.push(id) },
-      record: (edge) => { recorded.push(edge.sessionId) },
       surface: () => ({ hidden: true, focused: false }),
       now: () => now,
     })
@@ -93,18 +103,14 @@ describe('installNotifications', () => {
     rows.a = { id: 'a', displayTitle: 'Alpha', running: false }
     flush()
     await Promise.resolve()
-    assert.equal(calls.length, 1)
-    assert.equal(calls[0]?.cmd, 'dsh_desktop_notify')
-    assert.equal(calls[0]?.sessionId, 'a')
-    assert.equal(calls[0]?.body, '回合已完成')
-    assert.deepEqual(recorded, ['a'])
+    assert.deepEqual(calls, [{ cmd: 'dsh_desktop_notify', title: 'Alpha', body: '回合已完成', sessionId: 'a' }])
     listeners.get('dsh-desktop-notify-click')?.({ sessionId: 'a' })
     assert.deepEqual(opened, ['a'])
     stop()
   })
 
-  it('does not record a new-session running pulse inside the birth grace', () => {
-    const recorded: string[] = []
+  it('does not notify a new-session running pulse inside the birth grace', () => {
+    const calls: NotifyCall[] = []
     let now = 1_000
     const rows: Record<string, { id: string; displayTitle: string; running: boolean }> = {}
     let ids: string[] = []
@@ -118,11 +124,10 @@ describe('installNotifications', () => {
           return () => {}
         },
       },
-      invoke: { invoke: async () => undefined },
+      invoke: recordingInvoke(calls),
       logger: { warn: () => {} },
       copy,
       openSession: () => {},
-      record: (edge) => { recorded.push(`${edge.kind}:${edge.sessionId}`) },
       surface: () => ({ hidden: true, focused: false }),
       now: () => now,
     })
@@ -135,19 +140,19 @@ describe('installNotifications', () => {
     rows.a = { id: 'a', displayTitle: 'dsh-desktop', running: false }
     now = 1_100
     flush()
-    assert.deepEqual(recorded, [])
+    assert.equal(calls.length, 0)
     rows.a = { id: 'a', displayTitle: 'dsh-desktop', running: true }
     now = 3_000
     flush()
     rows.a = { id: 'a', displayTitle: 'dsh-desktop', running: false }
     now = 3_050
     flush()
-    assert.deepEqual(recorded, ['turn-done:a'])
+    assert.deepEqual(calls.map((call) => call.sessionId), ['a'])
     stop()
   })
 
-  it('does not record historical idle sessions when the list hydrates', () => {
-    const recorded: string[] = []
+  it('does not notify historical idle sessions when the list hydrates', () => {
+    const calls: NotifyCall[] = []
     let ids: string[] = []
     const byId: Record<string, { id: string; displayTitle: string; running: boolean }> = {}
     let flush = (): void => {}
@@ -160,11 +165,10 @@ describe('installNotifications', () => {
           return () => {}
         },
       },
-      invoke: { invoke: async () => undefined },
+      invoke: recordingInvoke(calls),
       logger: { warn: () => {} },
       copy,
       openSession: () => {},
-      record: (edge) => { recorded.push(edge.sessionId) },
       surface: () => ({ hidden: true, focused: false }),
     })
     ids = ['a', 'b', 'c']
@@ -172,12 +176,12 @@ describe('installNotifications', () => {
     byId.b = { id: 'b', displayTitle: 'yzj_advance_create', running: false }
     byId.c = { id: 'c', displayTitle: 'yzj_advance_scan', running: false }
     flush()
-    assert.deepEqual(recorded, [])
+    assert.deepEqual(calls, [])
     stop()
   })
 
-  it('raises await-input from the pending authority joined with the list', async () => {
-    const recorded: string[] = []
+  it('raises await-input from the pending authority joined with the list', () => {
+    const calls: NotifyCall[] = []
     const rows: Record<string, { id: string; displayTitle: string; running: boolean }> = {
       a: { id: 'a', displayTitle: 'Alpha', running: true },
     }
@@ -200,21 +204,20 @@ describe('installNotifications', () => {
           return () => { unsubscribed = true }
         },
       },
-      invoke: { invoke: async () => undefined },
+      invoke: recordingInvoke(calls),
       logger: { warn: () => {} },
       copy,
       openSession: () => {},
-      record: (edge) => { recorded.push(`${edge.kind}:${edge.sessionId}`) },
       surface: () => ({ hidden: true, focused: false }),
     })
     // The authority gains an interaction while the list row is unchanged.
     pendingMap = new Map([['a', { kind: 'question' }]])
     pendingFlush()
-    assert.deepEqual(recorded, ['await-input:a'])
+    assert.deepEqual(calls.map((call) => call.body), ['等待你的输入'])
     // Clearing it does not re-notify; the edge is none→present only.
     pendingMap = new Map()
     pendingFlush()
-    assert.deepEqual(recorded, ['await-input:a'])
+    assert.deepEqual(calls.map((call) => call.body), ['等待你的输入'])
     stop()
     assert.equal(unsubscribed, true)
   })
