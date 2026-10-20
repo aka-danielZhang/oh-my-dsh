@@ -40,10 +40,19 @@ export async function openMainWindow(url: string, e2e: boolean): Promise<void> {
     width: 1400,
     height: 900,
     show: true,
+    // Official-desktop darwin posture (harness apps/desktop main.ts): the
+    // web UI reads data-platform=darwin (marked by the preload) and renders
+    // its stock darwin layout — traffic lights over the vibrancy sidebar,
+    // conversation header owning the top strip, right panel at the frame
+    // top. 'active' keeps the vibrancy material stable when the window
+    // blurs ('followWindow' would wash the sidebar out unfocused).
     ...(process.platform === 'darwin'
       ? {
           titleBarStyle: 'hiddenInset' as const,
-          trafficLightPosition: { x: 16, y: 10 },
+          trafficLightPosition: { x: 16, y: 18 },
+          vibrancy: 'sidebar' as const,
+          visualEffectState: 'active' as const,
+          backgroundColor: '#00000000',
         }
       : {}),
     webPreferences: {
@@ -54,6 +63,36 @@ export async function openMainWindow(url: string, e2e: boolean): Promise<void> {
     },
   })
   setMainWindow(window)
+  if (process.platform === 'darwin') {
+    // Fullscreen hides the traffic lights; the preload mirrors the state
+    // onto html[data-fullscreen] so the web UI drops its top clearance.
+    // did-finish-load resends so a reload keeps the current state.
+    const sendFullscreen = (): void => {
+      if (!window.isDestroyed()) window.webContents.send('dsh-desktop-window-fullscreen', window.isFullScreen())
+    }
+    window.on('enter-full-screen', sendFullscreen)
+    window.on('leave-full-screen', sendFullscreen)
+    window.webContents.on('did-finish-load', sendFullscreen)
+    // Deminiaturize reattaches the NSVisualEffectView material late
+    // (electron/electron#25368), so a transparent window would show the
+    // desktop through the sidebar until then: paint an opaque base while
+    // minimized or hidden; restoring flips back and the null -> 'sidebar'
+    // transition forces the material to reattach.
+    const applyBackdrop = (): void => {
+      if (window.isDestroyed()) return
+      if (window.isMinimized() || !window.isVisible()) {
+        window.setVibrancy(null)
+        window.setBackgroundColor('#FFFFFF')
+      } else {
+        window.setVibrancy('sidebar')
+        window.setBackgroundColor('#00000000')
+      }
+    }
+    window.on('minimize', applyBackdrop)
+    window.on('hide', applyBackdrop)
+    window.on('restore', applyBackdrop)
+    window.on('show', applyBackdrop)
+  }
   window.on('close', (event) => {
     if (!shouldRetainBackground(process.platform, quitting)) return
     event.preventDefault()

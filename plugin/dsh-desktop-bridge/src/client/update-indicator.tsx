@@ -1,4 +1,4 @@
-/** Quiet updater control plus the download dialog shared by rail and fallback. */
+/** Quiet updater control (the sidebar-foot entry) plus its download dialog. */
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import {
   Button,
@@ -29,8 +29,9 @@ const UPDATE_CONTROL_CSS = [
   '@keyframes desktop-update-spin{to{transform:rotate(360deg)}}',
   '[data-desktop-update-spinner]{display:inline-flex;animation:desktop-update-spin .8s linear infinite}',
   '@media (prefers-reduced-motion:reduce){[data-desktop-update-spinner]{animation:none}}',
-  // Inline `all:unset` on this button wipes the rail sheet's no-drag; the
-  // 28px drag strip then steals clicks except the bottom ~2px of the icon.
+  // The button sizes itself inline (all:unset + 22px box); the sheet adds
+  // only the hover fill and the no-drag hole that survives the unset.
+  '[data-desktop-update-button]:hover{background:var(--dsw-alias-interactive-bg-hover);}',
   '[data-desktop-update-button]{-webkit-app-region:no-drag!important}',
   // Headless dialog card: wider than the 380px default, and the card's own
   // bottom padding is replaced by the dialog body's.
@@ -66,7 +67,7 @@ function statusVersionOf(status: DesktopUpdateStatus): string | undefined {
   return 'version' in status ? status.version : undefined
 }
 
-/** The compact updater button rendered beside the sidebar toggle. */
+/** The compact updater button seated in the sidebar foot. */
 export function UpdateControl(props: UpdateIndicatorProps): ReactElement | null {
   const { checkUpdate, getUpdateStatus, updateGeneration, downloadUpdate, cancelUpdate, installUpdate, t } = props
   const [status, setStatus] = useState<DesktopUpdateStatus>({ phase: 'idle' })
@@ -292,7 +293,6 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement | null 
       <style>{UPDATE_CONTROL_CSS}</style>
       <button
         type="button"
-        data-desktop-rail-button=""
         data-desktop-update-button=""
         aria-label={title}
         aria-busy={busy}
@@ -421,27 +421,5 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement | null 
         </div>
       </Modal>
     </>
-  )
-}
-
-/** Non-macOS fallback where no overlay-titlebar rail exists. */
-export function UpdateIndicator(props: UpdateIndicatorProps): ReactElement {
-  return (
-    <div
-      data-desktop-update-indicator=""
-      style={{
-        position: 'absolute',
-        top: '8px',
-        right: '14px',
-        height: '22px',
-        display: 'flex',
-        alignItems: 'center',
-        zIndex: 1,
-        color: 'var(--dsw-alias-label-primary)',
-        pointerEvents: 'none',
-      }}
-    >
-      <UpdateControl {...props} />
-    </div>
   )
 }

@@ -6,6 +6,29 @@ const platform = process.platform === 'darwin'
     ? 'windows'
     : 'linux'
 
+// Official-desktop platform marking (harness apps/desktop preload-platform):
+// `data-platform` on <html> scopes the web UI's darwin layout — vibrancy
+// sidebar, conversation header owning the top strip, right panel at the
+// frame top, official shell.leading controls for the collapsed sidebar.
+// The preload may run before the document root exists; defer to
+// DOMContentLoaded then.
+const markPlatform = () => { document.documentElement.dataset.platform = process.platform }
+const platformRoot = document.documentElement
+if (platformRoot === null || platformRoot === undefined) {
+  window.addEventListener('DOMContentLoaded', markPlatform)
+} else {
+  markPlatform()
+}
+
+// Fullscreen hides the native controls; main mirrors the state so the web
+// UI drops its top clearance (html[data-fullscreen]).
+ipcRenderer.on('dsh-desktop-window-fullscreen', (_event, fullscreen) => {
+  const root = document.documentElement
+  if (root === null || root === undefined) return
+  if (fullscreen) root.dataset.fullscreen = 'true'
+  else delete root.dataset.fullscreen
+})
+
 contextBridge.exposeInMainWorld('__DSH_DESKTOP__', Object.freeze({
   version: 1,
   shell: 'dsh-desktop',
@@ -29,82 +52,48 @@ function isHarnessPage() {
 }
 
 /**
- * Unified-toolbar assertions (macOS fusion, 0.2.0-rc.14): run before the IPC
- * round-trip so a layout regression fails the probe with a precise reason.
- * Covers the no-session automatable slice of the acceptance matrix — single
- * 38px row, buttons on one line clear of the traffic-light inset, drag
- * region on the row background, and the columns starting exactly at the
- * toolbar's bottom edge. Throws on the first violated invariant.
+ * Official-posture assertions (0.2.1-rc.2 zw line): the unified toolbar is
+ * retired and the web UI renders the stock darwin layout. Covers the
+ * no-session automatable slice — platform marked, no bridge chrome left,
+ * darwin drag rows active, and (with the sidebar open) the official strip
+ * toggle present. Throws on the first violated invariant.
  */
-async function assertDesktopToolbar(toolbar) {
+async function assertOfficialPosture() {
   if (platform !== 'macos') return
-  if (!toolbar || typeof toolbar.querySelectorAll !== 'function') {
-    throw new Error(`toolbar probe: matched node is ${String(toolbar && toolbar.constructor && toolbar.constructor.name || toolbar)}`)
+  const html = document.documentElement
+  if (html.dataset.platform !== 'darwin') {
+    throw new Error(`data-platform is "${String(html.dataset.platform ?? '')}" (darwin posture not marked)`)
   }
-  if (!toolbar) throw new Error('toolbar DOM missing (desktop-toolbar not mounted)')
-  const bar = toolbar.getBoundingClientRect()
-  if (bar.height < 36 || bar.height > 40) throw new Error(`toolbar height ${bar.height} != 38`)
-  const buttons = [...toolbar.querySelectorAll('button')]
-  // The updater control is conditional (UpdateControl renders null until the
-  // coordinator has state), so the standing row is toggle + bell + collapsed-only
-  // New Session = 3; the sidebar toggle is mandatory — the collapse cycle below
-  // drives it. The stale >=4 gate aborted the probe before that cycle ever ran
-  // (0.3.1-rc.6: the collapsed lane's drag region swallowed the toggle and the
-  // e2e never saw it).
-  const toggleRequired = buttons.find((button) => /侧边栏|sidebar/i.test(button.getAttribute('aria-label') || ''))
-  if (buttons.length < 3 || !toggleRequired) {
-    const layout = buttons
-      .map((button) => {
-        const rect = button.getBoundingClientRect()
-        const label = button.getAttribute('aria-label') || button.textContent?.trim().slice(0, 24) || '<unlabeled>'
-        return `${label}@${Math.round(rect.left)},${Math.round(rect.top)} ${Math.round(rect.width)}x${Math.round(rect.height)}${rect.width === 0 ? ' (hidden)' : ''}`
-      })
-      .join(' | ')
-    throw new Error(`toolbar buttons ${buttons.length} < 3 or sidebar toggle missing: ${layout}`)
+  if (document.querySelector('[data-desktop-toolbar]') !== null) {
+    throw new Error('desktop toolbar still mounted (retired with the official-posture adoption)')
   }
-  // State-conditional buttons (collapsed-only New Session) collapse to a 0x0
-  // rect at the origin while hidden — geometry assertions must run over the
-  // VISIBLE buttons only.
-  const rects = buttons.map((button) => button.getBoundingClientRect()).filter((rect) => rect.width > 0)
-  const left = Math.min(...rects.map((rect) => rect.left))
-  if (left < 80) {
-    const layout = buttons
-      .map((button) => {
-        const rect = button.getBoundingClientRect()
-        const label = button.getAttribute('aria-label') || button.textContent?.trim().slice(0, 24) || '<unlabeled>'
-        return `${label}@${Math.round(rect.left)},${Math.round(rect.top)} ${Math.round(rect.width)}x${Math.round(rect.height)}${rect.width === 0 ? ' (hidden)' : ''}`
-      })
-      .join(' | ')
-    throw new Error(`leading button at x=${left} overlaps the traffic lights (>=80 required): ${layout}`)
+  const drag = document.querySelector('[data-window-drag]')
+  if (drag === null) {
+    throw new Error('no [data-window-drag] row (darwin drag regions missing)')
   }
-  const tops = rects.map((rect) => rect.top)
-  const spread = Math.max(...tops) - Math.min(...tops)
-  if (spread > 2) throw new Error(`toolbar buttons span ${spread}px vertically (wrapped rows)`)
-  const region = getComputedStyle(toolbar).webkitAppRegion
-  if (region !== 'drag') throw new Error(`toolbar app-region ${region} != drag (window cannot be dragged)`)
-  const frame = document.querySelector('div:has(> [data-shell-overlay])')
-  const sidebar = frame?.children[1]
-  if (sidebar) {
-    const offset = sidebar.getBoundingClientRect().top - bar.bottom
-    if (Math.abs(offset) > 2) throw new Error(`columns start ${offset}px off the toolbar bottom edge`)
+  const region = getComputedStyle(drag).webkitAppRegion
+  if (region !== 'drag') {
+    throw new Error(`drag row app-region ${region} != drag (window cannot be dragged)`)
   }
 }
 
 /**
- * Collapse/expand cycle driven through the toolbar's own sidebar toggle
- * (a DOM click, so the whole ctx.layout → inline-grid reconciliation chain
- * runs; NOTE a DOM click bypasses Electron's drag-region hit-test — the
- * drag-coverage class of regression is asserted geometrically inside).
- * Asserts the sidebar actually collapses, the collapsed first track
- * is reconciled to 0px by the rail hider, and the toolbar's own geometry
- * does not drift while collapsed — then expands back.
+ * Collapse/expand cycle through the sidebar's OWN strip toggle (a DOM click,
+ * so the ctx.layout → grid reconciliation chain runs). Official darwin
+ * behavior: the column collapses to zero width and the frame's shell.leading
+ * seat mounts the reopen controls. Unknown dictionary labels skip the cycle
+ * rather than fail it.
  */
-async function assertCollapsedCycle(toolbar) {
-  const toggle = [...toolbar.querySelectorAll('button')].find((button) =>
-    /侧边栏|sidebar/i.test(button.getAttribute('aria-label') || ''))
-  if (!toggle) return // unknown dictionary: skip the cycle rather than fail it
+async function assertSidebarCycle() {
   const frame = document.querySelector('div:has(> [data-shell-overlay])')
-  if (!frame) return
+  if (frame === null) return
+  const stripToggle = [...frame.querySelectorAll('button')]
+    .find((button) => {
+      if (/侧边栏|sidebar/i.test(button.getAttribute('aria-label') || '') === false) return false
+      const rect = button.getBoundingClientRect()
+      return rect.width > 0 && rect.height > 0
+    })
+  if (stripToggle === undefined) return
   const waitFor = async (predicate) => {
     const deadline = Date.now() + 2000
     while (Date.now() < deadline) {
@@ -114,34 +103,22 @@ async function assertCollapsedCycle(toolbar) {
     return false
   }
   const collapsed = () => frame.hasAttribute('data-sidebar-collapsed')
-  toggle.click()
-  if (!(await waitFor(collapsed))) throw new Error('sidebar did not collapse after toolbar toggle click')
-  const firstTrack = (frame.style.gridTemplateColumns.match(/^\S+/) || [''])[0]
-  if (firstTrack !== '0px') {
-    throw new Error(`collapsed first track "${firstTrack}" != 0px (rail hider not reconciling)`)
+  stripToggle.click()
+  if (!(await waitFor(collapsed))) throw new Error('sidebar did not collapse after strip toggle click')
+  const leading = document.querySelector('[data-shell-leading]')
+  if (leading === null) {
+    throw new Error('collapsed sidebar mounted no [data-shell-leading] reopen controls')
   }
-  // Drag-region overlap invariant (0.3.1-rc.6): `-webkit-app-region` combines
-  // by paint order, so a collapsed main lane whose BOX starts inside the
-  // controls cluster covers the rail buttons' no-drag holes — native clicks
-  // then start a window drag and the sidebar can never expand again. This
-  // synthetic click bypasses the drag hit-test, so the cycle asserts the
-  // GEOMETRY instead: the lane's box must start at or past the cluster's
-  // right edge, and every rail button must keep its computed no-drag hole.
-  const controls = toolbar.querySelector('[data-desktop-toolbar-controls]')
-  const main = toolbar.querySelector('[data-desktop-toolbar-main]')
-  if (controls && main) {
-    const clusterRight = controls.getBoundingClientRect().right
-    const laneLeft = main.getBoundingClientRect().left
-    if (laneLeft < clusterRight) {
-      throw new Error(`collapsed main lane box starts at ${Math.round(laneLeft)} inside the controls cluster (right edge ${Math.round(clusterRight)}) — its inherited drag region covers the no-drag rail buttons`)
-    }
+  const reopen = [...leading.querySelectorAll('button')]
+    .find((button) => {
+      const rect = button.getBoundingClientRect()
+      return rect.width > 0 && /侧边栏|sidebar/i.test(button.getAttribute('aria-label') || '')
+    })
+  if (reopen === undefined) {
+    throw new Error('shell.leading seat mounted without a visible reopen toggle')
   }
-  const region = getComputedStyle(toggle).webkitAppRegion
-  if (region !== 'no-drag') throw new Error(`toggle app-region ${region} != no-drag while collapsed`)
-  const bar = toolbar.getBoundingClientRect()
-  if (bar.height < 36 || bar.height > 40) throw new Error(`toolbar height drifted to ${bar.height} while collapsed`)
-  toggle.click()
-  if (!(await waitFor(() => !collapsed()))) throw new Error('sidebar did not expand back after second toggle click')
+  reopen.click()
+  if (!(await waitFor(() => !collapsed()))) throw new Error('sidebar did not expand back after leading-seat toggle click')
 }
 
 function startE2eProbe() {
@@ -171,9 +148,8 @@ function startE2eProbe() {
         return
       }
       try {
-        const toolbar = document.querySelector('[data-desktop-toolbar]')
-        await assertDesktopToolbar(toolbar)
-        await assertCollapsedCycle(toolbar)
+        await assertOfficialPosture()
+        await assertSidebarCycle()
       } catch (error) {
         ipcRenderer
           .invoke('dsh_desktop_e2e_report', { verdict: `fail:${error.message}` })

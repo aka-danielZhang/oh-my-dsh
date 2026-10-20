@@ -54,7 +54,7 @@ docs/                        权威契约文档 + packaging-playbook.md + notes/
 
 | 插件 | 形态 | 职责（一句） |
 |---|---|---|
-| `dsh-desktop-bridge` | dual | 桌面门控桥：外链路由、原生注意力通知、下载桥、标题带更新入口、日志汇 |
+| `dsh-desktop-bridge` | dual | 桌面门控桥：外链路由、原生注意力通知、下载桥、侧栏底更新/通知入口、日志汇 |
 | `dsh-mcp-settings` | dual | 设置页 MCP 服务器管理（manager/inventory/ui 三行一包） |
 | `dsh-provider-balance` | browser-only | 供应商剩余额度可视化（纯 DOM 注入） |
 | `dsh-reasoning-efforts` | host-only | 给手写 llm-pi-ai 模型补 `reasoningEfforts` 声明与 compat 开关 |

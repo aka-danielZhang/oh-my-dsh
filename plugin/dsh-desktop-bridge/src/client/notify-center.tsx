@@ -7,14 +7,18 @@ import { IconQueueOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsLocale } from '@deepseek-ai/dsh-client-ui-slots'
 import { formatInboxAge, unreadBadge, type NotifyInbox } from './notify-inbox.ts'
 
-/** Injected face: the process inbox and the session opener. */
+/** Injected face: the process inbox, the session opener, and the panel side. */
 export interface NotifyCenterInjected {
   inbox: NotifyInbox
   openSession: (sessionId: string) => void
+  /** Panel open side: the sidebar foot sits at the screen bottom, so the
+   * foot entry opens the list UPWARD; 'down' stays the default for callers
+   * anchored high in the layout. */
+  direction?: 'down' | 'up'
 }
 
 export type NotifyCenterProps = NotifyCenterInjected & PropsLocale<'desktop-bridge'> & {
-  /** Dropdown alignment; rail uses start, the non-mac fallback uses end. */
+  /** Dropdown alignment against the trigger; the foot entry hugs the end. */
   align?: 'start' | 'end'
 }
 
@@ -24,6 +28,7 @@ const PANEL_CSS = [
   '[data-desktop-notify-button]:hover{background:var(--dsw-alias-interactive-bg-hover);}',
   '[data-desktop-notify-dot]{position:absolute;top:1px;right:1px;min-width:8px;height:8px;padding:0 2px;border-radius:8px;background:var(--dsw-alias-brand);color:var(--dsw-alias-brand-text);font-size:8px;line-height:8px;text-align:center;pointer-events:none;}',
   '[data-desktop-notify-panel]{position:absolute;top:calc(100% + 8px);left:0;z-index:20;width:280px;max-height:min(360px,50vh);display:flex;flex-direction:column;border:1px solid var(--dsw-alias-border-l);border-radius:10px;background:var(--dsw-alias-bg-overlay);box-shadow:0 8px 24px var(--dsw-alias-bg-mask-drop);color:var(--dsw-alias-label-primary);pointer-events:auto;-webkit-app-region:no-drag;}',
+  '[data-desktop-notify-panel][data-direction=up]{top:auto;bottom:calc(100% + 8px);box-shadow:0 -8px 24px var(--dsw-alias-bg-mask-drop);}',
   '[data-desktop-notify-panel][data-align=end]{left:auto;right:0;}',
   '[data-desktop-notify-head]{display:flex;align-items:center;gap:8px;padding:10px 12px 8px;font-size:12px;font-weight:600;}',
   '[data-desktop-notify-head] button{all:unset;cursor:pointer;margin-left:auto;font-size:11px;font-weight:500;color:var(--dsw-alias-label-secondary);}',
@@ -42,7 +47,7 @@ const PANEL_CSS = [
  * @param props - inbox, opener, locale.
  */
 export function NotifyCenter(props: NotifyCenterProps): ReactElement {
-  const { inbox, openSession, t, align = 'start' } = props
+  const { inbox, openSession, t, align = 'end', direction = 'down' } = props
   const [open, setOpen] = useState(false)
   const [tick, setTick] = useState(0)
   const rootRef = useRef<HTMLSpanElement>(null)
@@ -80,7 +85,7 @@ export function NotifyCenter(props: NotifyCenterProps): ReactElement {
         {badge !== '' ? <span data-desktop-notify-dot="" aria-hidden="true" /> : null}
       </button>
       {open && (
-        <div data-desktop-notify-panel="" data-align={align} role="dialog" aria-label={t('notify.center')}>
+        <div data-desktop-notify-panel="" data-align={align} data-direction={direction} role="dialog" aria-label={t('notify.center')}>
           <div data-desktop-notify-head="">
             <span>{t('notify.center')}</span>
             {snapshot.items.length > 0
@@ -124,27 +129,5 @@ export function NotifyCenter(props: NotifyCenterProps): ReactElement {
         </div>
       )}
     </span>
-  )
-}
-
-/** Non-macOS fallback: top-right, left of the updater. */
-export function NotifyIndicator(props: NotifyCenterProps): ReactElement {
-  return (
-    <div
-      data-desktop-notify-indicator=""
-      style={{
-        position: 'absolute',
-        top: '8px',
-        right: '44px',
-        height: '22px',
-        display: 'flex',
-        alignItems: 'center',
-        zIndex: 1,
-        color: 'var(--dsw-alias-label-primary)',
-        pointerEvents: 'none',
-      }}
-    >
-      <NotifyCenter {...props} align="end" />
-    </div>
   )
 }
