@@ -241,7 +241,7 @@ function ModelPicker(props: {
 const TIME_HOURS = Array.from({ length: 24 }, (_, hour) => String(hour).padStart(2, '0'))
 const TIME_MINUTES = Array.from({ length: 60 }, (_, minute) => String(minute).padStart(2, '0'))
 
-/** Two-column time wheel dropdown (hours/minutes), the same pattern as the scheduled-tasks picker. */
+/** Two-column time wheel dropdown (hours/minutes), hour and minute columns side by side. */
 function TimePicker(props: {
   value: string
   ariaLabel: string

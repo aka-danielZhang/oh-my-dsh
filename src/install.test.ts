@@ -122,6 +122,7 @@ test('installs desktop packages into a completely missing profile', () => {
       fs.realpathSync.native(fixture.plugin),
     )
     assert.ok(!fs.existsSync(path.join(fixture.home, '.desktop-profile-repair.json')))
+    assert.ok(!fs.existsSync(path.join(fixture.logs, 'retired-plugins.json')))
     assert.deepEqual(repairArtifacts(fixture.root, fixture.home), [])
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true })
@@ -154,6 +155,191 @@ test('missing profile install preserves existing home data and root patch', () =
     assert.deepEqual(fs.readFileSync(path.join(fixture.home, 'settings', 'settings.json')), settings)
     assert.deepEqual(fs.readFileSync(path.join(fixture.home, 'sessions', 'existing.jsonl')), session)
     assert.deepEqual(repairArtifacts(fixture.root, fixture.home), [])
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true })
+  }
+})
+
+const RETIRE_CLI = `
+import fs from 'node:fs'
+import path from 'node:path'
+
+const args = process.argv.slice(2)
+const profileFlag = args.indexOf('--profile')
+if (profileFlag < 0 || args[profileFlag + 1] === undefined) process.exit(64)
+const profileName = args[profileFlag + 1]
+const profile = path.join(process.env.DSH_HOME, 'profiles', profileName)
+const manifestPath = path.join(profile, 'package.json')
+const phases = path.join(profile, '.test-phases')
+const readManifest = () => JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+const writeManifest = (manifest) => fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\\n')
+
+if (args[0] === 'plugin') {
+  const command = args[profileFlag + 2]
+  if (command === 'install') {
+    const phase = args.includes('--frozen-lockfile')
+      ? 'install-frozen'
+      : args.includes('--no-frozen-lockfile') ? 'install-no-frozen' : 'install'
+    fs.mkdirSync(path.join(profile, 'node_modules'), { recursive: true })
+    fs.appendFileSync(phases, phase + '\\n')
+    process.exit(0)
+  }
+  if (command === 'remove') {
+    const name = args[profileFlag + 3]
+    const manifest = readManifest()
+    delete manifest.dependencies[name]
+    writeManifest(manifest)
+    fs.rmSync(path.join(profile, 'node_modules', name), { recursive: true, force: true })
+    fs.appendFileSync(phases, 'remove:' + name + '\\n')
+    process.exit(0)
+  }
+  if (command === 'add') {
+    const pluginDir = args[profileFlag + 3]
+    const pluginManifest = JSON.parse(fs.readFileSync(path.join(pluginDir, 'package.json'), 'utf8'))
+    const manifest = readManifest()
+    manifest.dependencies ??= {}
+    manifest.dependencies[pluginManifest.name] = 'link:' + pluginDir
+    manifest.dsh ??= { profile: { bundles: [] } }
+    manifest.dsh.profile ??= { bundles: [] }
+    manifest.dsh.profile.bundles ??= []
+    if (!manifest.dsh.profile.bundles.includes(pluginManifest.name)) {
+      manifest.dsh.profile.bundles.push(pluginManifest.name)
+    }
+    writeManifest(manifest)
+    fs.mkdirSync(path.join(profile, 'node_modules'), { recursive: true })
+    const link = path.join(profile, 'node_modules', pluginManifest.name)
+    fs.rmSync(link, { recursive: true, force: true })
+    fs.symlinkSync(pluginDir, link, 'junction')
+    fs.appendFileSync(phases, 'add:' + pluginManifest.name + '\\n')
+    process.exit(0)
+  }
+  process.exit(64)
+}
+
+if (args.includes('--dump-config')) process.exit(0)
+process.exit(64)
+`
+
+const RETIRED = 'dsh-scheduled-tasks'
+
+/**
+ * Home whose web profile still carries the retired package exactly like an
+ * installed 0.4.0-rc.2 does: dependency, node_modules link, bundle entry and
+ * the extracted copy under the shell root.
+ */
+function createRetireFixture() {
+  const fixture = createFixture('retire', RETIRE_CLI)
+  const profile = path.join(fixture.home, 'profiles', 'web')
+  const extracted = path.join(fixture.logs, 'plugins', RETIRED)
+  fs.mkdirSync(path.join(profile, 'node_modules'), { recursive: true })
+  fs.mkdirSync(extracted, { recursive: true })
+  fs.writeFileSync(path.join(extracted, 'package.json'), `{"name":"${RETIRED}"}\n`)
+  fs.writeFileSync(path.join(profile, 'pnpm-lock.yaml'), 'lockfileVersion: 9.0\n')
+  fs.writeFileSync(
+    path.join(profile, 'package.json'),
+    JSON.stringify(
+      {
+        name: 'dsh-profile-web',
+        private: true,
+        dependencies: { [RETIRED]: `link:${extracted}` },
+        dsh: { profile: { bundles: ['@deepseek-ai/dsh-base', RETIRED] } },
+      },
+      undefined,
+      2,
+    ) + '\n',
+  )
+  fs.symlinkSync(extracted, path.join(profile, 'node_modules', RETIRED), 'junction')
+  return { ...fixture, profile, extracted }
+}
+
+function readPhases(profile: string): string[] {
+  const file = path.join(profile, '.test-phases')
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean) : []
+}
+
+test('retires an unshipped package from an existing profile in one transaction', () => {
+  const fixture = createRetireFixture()
+  try {
+    runDesktopPluginInstall(
+      fixture.runtime,
+      [{ package: 'dsh-test-plugin', dir: fixture.plugin }],
+      fixture.home,
+      fixture.logs,
+      'web',
+      'unchecked',
+    )
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(fixture.profile, 'package.json'), 'utf8'))
+    assert.deepEqual(Object.keys(manifest.dependencies), ['dsh-test-plugin'])
+    assert.deepEqual(manifest.dsh.profile.bundles, ['@deepseek-ai/dsh-base', 'dsh-test-plugin'])
+    assert.ok(!fs.existsSync(path.join(fixture.profile, 'node_modules', RETIRED)))
+    assert.ok(!fs.existsSync(fixture.extracted))
+    assert.deepEqual(readPhases(fixture.profile), [
+      'install',
+      `remove:${RETIRED}`,
+      'add:dsh-test-plugin',
+      'install-no-frozen',
+      'install-frozen',
+    ])
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(fixture.logs, 'retired-plugins.json'), 'utf8')),
+      { web: [RETIRED] },
+    )
+    assert.ok(!fs.existsSync(path.join(fixture.home, '.desktop-profile-repair.json')))
+    assert.deepEqual(repairArtifacts(fixture.root, fixture.home), [])
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true })
+  }
+})
+
+test('a stale link or bundle entry is dropped without asking pnpm to remove it', () => {
+  const fixture = createRetireFixture()
+  try {
+    // Simulate a profile whose dependency was already hand-removed but whose
+    // link and bundle entry survived, the shape a failed manual cleanup leaves.
+    const manifestPath = path.join(fixture.profile, 'package.json')
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+    delete manifest.dependencies[RETIRED]
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, undefined, 2) + '\n')
+
+    runDesktopPluginInstall(fixture.runtime, [], fixture.home, fixture.logs, 'web', 'unchecked')
+
+    const after = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+    assert.deepEqual(after.dependencies, {})
+    assert.deepEqual(after.dsh.profile.bundles, ['@deepseek-ai/dsh-base'])
+    assert.ok(!fs.existsSync(path.join(fixture.profile, 'node_modules', RETIRED)))
+    assert.ok(!readPhases(fixture.profile).some((phase) => phase.startsWith('remove:')))
+    assert.deepEqual(
+      JSON.parse(fs.readFileSync(path.join(fixture.logs, 'retired-plugins.json'), 'utf8')),
+      { web: [RETIRED] },
+    )
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true })
+  }
+})
+
+test('a retirement marker keeps a hand reinstall from being swept again', () => {
+  const fixture = createRetireFixture()
+  const plugin = [{ package: 'dsh-test-plugin', dir: fixture.plugin }]
+  try {
+    runDesktopPluginInstall(fixture.runtime, plugin, fixture.home, fixture.logs, 'web', 'unchecked')
+    const phases = readPhases(fixture.profile)
+
+    // Second boot: every desktop package resolves and the marker is written.
+    runDesktopPluginInstall(fixture.runtime, plugin, fixture.home, fixture.logs, 'web', 'unchecked')
+    assert.deepEqual(readPhases(fixture.profile), phases)
+
+    // Manual reinstall of the retired package: the marker means the desktop
+    // never fights the user over it.
+    const manifest = JSON.parse(fs.readFileSync(path.join(fixture.profile, 'package.json'), 'utf8'))
+    manifest.dependencies[RETIRED] = 'link:/tmp/manual-scheduled-tasks'
+    fs.writeFileSync(path.join(fixture.profile, 'package.json'), JSON.stringify(manifest, undefined, 2) + '\n')
+    runDesktopPluginInstall(fixture.runtime, plugin, fixture.home, fixture.logs, 'web', 'unchecked')
+    assert.deepEqual(readPhases(fixture.profile), phases)
+    assert.equal(
+      JSON.parse(fs.readFileSync(path.join(fixture.profile, 'package.json'), 'utf8')).dependencies[RETIRED],
+      'link:/tmp/manual-scheduled-tasks',
+    )
   } finally {
     fs.rmSync(fixture.root, { recursive: true, force: true })
   }

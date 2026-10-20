@@ -6,13 +6,123 @@ import type { PluginRef } from './plugins.ts'
 import { mutateProfileExpected, type ProfileExpectation } from './profile-repair.ts'
 import { runtimeEnv, type Runtime } from './runtime.ts'
 
-function openInstallLog(logs: string): number {
-  fs.mkdirSync(path.join(logs, 'logs'), { recursive: true })
-  return fs.openSync(path.join(logs, 'logs/install.log'), 'a')
+/**
+ * Packages the desktop stopped shipping. Deleting the shipped plugin is not
+ * enough for an existing installation: the profile still lists the
+ * dependency, links its `node_modules` entry, names it in
+ * `dsh.profile.bundles`, and keeps the extracted copy under the shell root, so
+ * the retired plugin keeps booting next to whatever replaced it.
+ */
+export interface RetiredDesktopPackage {
+  package: string
+  destRel: string
 }
 
-function runCli(runtime: Runtime, args: string[], home: string, logs: string): void {
-  const log = openInstallLog(logs)
+export const RETIRED_DESKTOP_PACKAGES: readonly RetiredDesktopPackage[] = [
+  // 0.4.0-rc.3: the stock Automation page replaced this plugin (see
+  // docs/notes/2026-10-20-remove-scheduled-tasks.md).
+  { package: 'dsh-scheduled-tasks', destRel: 'plugins/dsh-scheduled-tasks' },
+]
+
+/**
+ * Profile-keyed record of completed retirements. It keeps the sweep one-time:
+ * a person who installs the package by hand afterwards keeps it running.
+ */
+const RETIRED_MARKER = 'retired-plugins.json'
+
+function readRetiredMarker(root: string): Record<string, string[]> {
+  const record: Record<string, string[]> = {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(fs.readFileSync(path.join(root, RETIRED_MARKER), 'utf8'))
+  } catch {
+    return record
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return record
+  for (const [profile, value] of Object.entries(parsed)) {
+    if (Array.isArray(value)) record[profile] = value.filter((entry): entry is string => typeof entry === 'string')
+  }
+  return record
+}
+
+function writeRetiredMarker(root: string, profileName: string, packages: readonly string[]): void {
+  const record = readRetiredMarker(root)
+  record[profileName] = [...new Set([...(record[profileName] ?? []), ...packages])]
+  fs.writeFileSync(path.join(root, RETIRED_MARKER), `${JSON.stringify(record, undefined, 2)}\n`)
+}
+
+/** The three places the loader can keep a package alive. */
+interface PackagePresence {
+  declared: boolean
+  linked: boolean
+  bundled: boolean
+}
+
+function packagePresence(home: string, profileName: string, packageName: string): PackagePresence {
+  const profile = path.join(home, 'profiles', profileName)
+  const presence: PackagePresence = { declared: false, linked: false, bundled: false }
+  const manifestPath = path.join(profile, 'package.json')
+  if (fs.existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
+        dependencies?: Record<string, unknown>
+        devDependencies?: Record<string, unknown>
+        dsh?: { profile?: { bundles?: unknown } }
+      }
+      for (const field of [manifest.dependencies, manifest.devDependencies]) {
+        if (field !== undefined && Object.hasOwn(field, packageName)) presence.declared = true
+      }
+      const bundles = manifest.dsh?.profile?.bundles
+      if (Array.isArray(bundles) && bundles.includes(packageName)) presence.bundled = true
+    } catch {
+      // Unreadable manifest: the node_modules probe below still answers.
+    }
+  }
+  presence.linked = fs.existsSync(path.join(profile, 'node_modules', packageName))
+  return presence
+}
+
+/**
+ * Drop retired names from `dsh.profile.bundles`. `dsh plugin remove` is pnpm:
+ * it drops the dependency and the node_modules link but leaves the bundle
+ * list, and a listed bundle with no resolvable dependency is skipped — and
+ * reported — at every boot.
+ */
+function dropProfileBundles(profile: string, packages: readonly string[]): void {
+  const manifestPath = path.join(profile, 'package.json')
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
+    dsh?: { profile?: { bundles?: unknown } }
+  }
+  const bundles = manifest.dsh?.profile?.bundles
+  if (!Array.isArray(bundles)) return
+  const kept = bundles.filter((bundle) => !packages.includes(bundle as string))
+  if (kept.length === bundles.length) return
+  manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: kept } }
+  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`)
+}
+
+type PendingRetirement = RetiredDesktopPackage & PackagePresence
+
+/** Retired packages this profile still carries and has not retired yet. */
+function pendingRetirements(home: string, root: string, profileName: string): PendingRetirement[] {
+  const done = readRetiredMarker(root)[profileName] ?? []
+  const pending: PendingRetirement[] = []
+  for (const entry of RETIRED_DESKTOP_PACKAGES) {
+    if (done.includes(entry.package)) continue
+    const presence = packagePresence(home, profileName, entry.package)
+    if (!presence.declared && !presence.linked && !presence.bundled) continue
+    pending.push({ ...entry, ...presence })
+  }
+  return pending
+}
+
+function openInstallLog(root: string): number {
+  fs.mkdirSync(path.join(root, 'logs'), { recursive: true })
+  return fs.openSync(path.join(root, 'logs/install.log'), 'a')
+}
+
+function runCli(runtime: Runtime, args: string[], home: string, root: string): void {
+  const log = openInstallLog(root)
   const result = spawnSync(runtime.node, [...runtime.argsPrefix, runtime.cli, ...args], {
     cwd: runtime.cwd,
     env: runtimeEnv(runtime, { DSH_HOME: home, CI: 'true' }),
@@ -130,37 +240,53 @@ export function runDesktopPluginInstall(
   runtime: Runtime,
   plugins: PluginRef[],
   home: string,
-  logs: string,
+  root: string,
   profileName: string,
   expectation: ProfileExpectation,
 ): void {
   const missing = plugins
     .filter((plugin) => !pluginAlreadyInProfile(plugin.dir, plugin.package, home, profileName))
     .map((plugin) => plugin.package)
-  if (missing.length === 0) {
+  const retired = pendingRetirements(home, root, profileName)
+  if (missing.length === 0 && retired.length === 0) {
     console.log(`dsh-desktop: desktop-owned packages already target this release in ${profileName}, skip plugin add`)
     return
   }
-  console.log(`dsh-desktop: stage ${profileName} profile update for ${missing.join(', ')}`)
+  if (retired.length > 0) {
+    console.log(`dsh-desktop: retire ${retired.map((entry) => entry.package).join(', ')} from ${profileName}`)
+  }
+  if (missing.length > 0) {
+    console.log(`dsh-desktop: stage ${profileName} profile update for ${missing.join(', ')}`)
+  }
+  const retiredNames = retired.map((entry) => entry.package)
   const targets = plugins.map((plugin) => [plugin.package, plugin.dir] as const)
-  const managed = plugins.map((plugin) => plugin.package)
+  const managed = [...plugins.map((plugin) => plugin.package), ...retiredNames]
   const preserved = resolvedProfileDependencies(home, profileName, managed)
   mutateProfileExpected(home, profileName, targets, expectation, (shadowHome, hadOriginal) => {
     const shadowProfile = path.join(shadowHome, 'profiles', profileName)
     const protectedFiles = hadOriginal ? captureProtectedProfileFiles(shadowProfile) : []
     ensureProfileScaffold(shadowProfile)
     if (hadOriginal && fs.existsSync(path.join(shadowProfile, 'pnpm-lock.yaml'))) {
-      runCli(runtime, ['plugin', '--profile', profileName, 'install'], shadowHome, logs)
+      runCli(runtime, ['plugin', '--profile', profileName, 'install'], shadowHome, root)
     }
+    for (const entry of retired) {
+      // pnpm remove only when the manifest declares it; a stale link or bundle
+      // entry is dropped below without invoking pnpm over an unknown package.
+      if (entry.declared) {
+        runCli(runtime, ['plugin', '--profile', profileName, 'remove', entry.package], shadowHome, root)
+      }
+      fs.rmSync(path.join(shadowProfile, 'node_modules', entry.package), { recursive: true, force: true })
+    }
+    if (retiredNames.length > 0) dropProfileBundles(shadowProfile, retiredNames)
     for (const plugin of plugins) {
       if (!pluginAlreadyInProfile(plugin.dir, plugin.package, shadowHome, profileName)) {
-        runCli(runtime, ['plugin', '--profile', profileName, 'add', plugin.dir], shadowHome, logs)
+        runCli(runtime, ['plugin', '--profile', profileName, 'add', plugin.dir], shadowHome, root)
       }
     }
     // pnpm's Windows directory-add path can leave new link specs out of the
     // lockfile. Resolve the deliberate mutation before validating it frozen.
-    runCli(runtime, ['plugin', '--profile', profileName, 'install', '--no-frozen-lockfile'], shadowHome, logs)
-    runCli(runtime, ['plugin', '--profile', profileName, 'install', '--frozen-lockfile'], shadowHome, logs)
+    runCli(runtime, ['plugin', '--profile', profileName, 'install', '--no-frozen-lockfile'], shadowHome, root)
+    runCli(runtime, ['plugin', '--profile', profileName, 'install', '--frozen-lockfile'], shadowHome, root)
     for (const plugin of plugins) {
       if (!pluginAlreadyInProfile(plugin.dir, plugin.package, shadowHome, profileName)) {
         throw new Error(`staged ${plugin.package} does not resolve to ${plugin.dir}`)
@@ -168,14 +294,25 @@ export function runDesktopPluginInstall(
     }
     validatePreservedDependencies(shadowHome, profileName, preserved)
     validateProtectedProfileFiles(shadowProfile, protectedFiles)
-    runCli(runtime, ['--profile', profileName, '--dump-config'], shadowHome, logs)
+    runCli(runtime, ['--profile', profileName, '--dump-config'], shadowHome, root)
   })
+  // The profile no longer references these copies; drop them so nobody reads
+  // a retired plugin's files as if the desktop still owned them. Best effort:
+  // a locked file must not block a startup that already committed.
+  for (const entry of retired) {
+    try {
+      fs.rmSync(path.join(root, entry.destRel), { recursive: true, force: true })
+    } catch (error) {
+      console.error(`dsh-desktop: remove retired ${entry.package} copy failed: ${String(error)}`)
+    }
+  }
+  if (retired.length > 0) writeRetiredMarker(root, profileName, retiredNames)
 }
 
-export function frozenProfileInstallOnce(runtime: Runtime, home: string, logs: string, profileName: string): void {
-  runCli(runtime, ['plugin', '--profile', profileName, 'install'], home, logs)
+export function frozenProfileInstallOnce(runtime: Runtime, home: string, root: string, profileName: string): void {
+  runCli(runtime, ['plugin', '--profile', profileName, 'install'], home, root)
 }
 
-export function validateProfileConfig(runtime: Runtime, home: string, logs: string, profileName: string): void {
-  runCli(runtime, ['--profile', profileName, '--dump-config'], home, logs)
+export function validateProfileConfig(runtime: Runtime, home: string, root: string, profileName: string): void {
+  runCli(runtime, ['--profile', profileName, '--dump-config'], home, root)
 }

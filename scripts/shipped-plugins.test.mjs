@@ -57,7 +57,6 @@ test('lists every ship:true plugin once, including thread', () => {
     'dsh-ohmymemo',
     'dsh-provider-balance',
     'dsh-reasoning-efforts',
-    'dsh-scheduled-tasks',
     'dsh-send-while-running',
     'dsh-settings-icons',
     'dsh-thread',

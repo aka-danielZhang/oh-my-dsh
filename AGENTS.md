@@ -70,7 +70,6 @@ docs/                        权威契约文档 + packaging-playbook.md + notes/
 | `dsh-ohmymemo` | dual | OhMyMemo 用户长期记忆（一条记忆一个 md，tools + capsule + 梦境提取） |
 | `dsh-usage-stats` | dual | 设置页「使用统计」：JSONL 事实源 + 手写 SVG 图表 |
 | `dsh-copy-session-id` | browser-only | 会话头「⋯」菜单加「复制会话 ID」并重渲染下载日志项 |
-| `dsh-scheduled-tasks` | dual | 定时任务：五类调度、一任务一长期 session、侧栏时钟入口 |
 | `dsh-settings-icons` | browser-only | 设置导航三枚语义图标（usage-stats/mcp/memory） |
 
 ## 硬规则速览

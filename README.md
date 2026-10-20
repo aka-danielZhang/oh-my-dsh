@@ -47,7 +47,6 @@ dsh plugin --profile web add <name>                 # mcp-settings 与 provider-
 | [`dsh-ohmymemo`](plugin/dsh-ohmymemo) | OhMyMemo 用户长期记忆：一条记忆一个 Markdown 文件，会话后台自动提取与召回，设置页提供记忆空间管理 |
 | [`dsh-provider-balance`](plugin/dsh-provider-balance) | 各供应商剩余额度可视化 |
 | [`dsh-reasoning-efforts`](plugin/dsh-reasoning-efforts) | 为手动添加的 OpenAI 兼容模型补推理力度选项 |
-| [`dsh-scheduled-tasks`](plugin/dsh-scheduled-tasks) | 定时任务：五类调度模式，一任务一个长期会话，侧栏时钟入口 |
 | [`dsh-send-while-running`](plugin/dsh-send-while-running) | 会话运行中也能继续发送新消息 |
 | [`dsh-settings-icons`](plugin/dsh-settings-icons) | 设置导航补三枚语义图标（使用统计 / MCP / 记忆） |
 | [`dsh-thread`](plugin/dsh-thread) | Thread 模式的跨会话 Handoff Draft：接续上一会话的草稿继续工作 |
