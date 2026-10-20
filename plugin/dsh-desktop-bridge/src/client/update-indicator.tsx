@@ -1,4 +1,7 @@
-/** Quiet updater control (the sidebar-foot entry) plus its download dialog. */
+/**
+ * Quiet updater control (the sidebar header action, footer fallback on old
+ * runtimes) plus its download dialog and the collapsed-rail badge.
+ */
 import { useCallback, useEffect, useRef, useState, type ReactElement } from 'react'
 import {
   Button,
@@ -61,6 +64,29 @@ const UPDATE_CONTROL_CSS = [
   '[data-desktop-update-changelog] li{margin:0 0 4px}',
   '[data-desktop-update-changelog] li:last-child{margin:0}',
 ].join('')
+
+/**
+ * Collapsed-rail badge CSS. The toggle is `position:relative` (ui-sidebar's
+ * `.iconButton`), so the badge pins to its top-right corner; `pointer-events`
+ * stays off so every click falls through to the toggle underneath.
+ */
+const UPDATE_BADGE_CSS = [
+  '@keyframes desktop-update-badge-spin{to{transform:rotate(360deg)}}',
+  '[data-desktop-update-badge]{position:absolute;top:-1px;right:-1px;display:inline-flex;align-items:center;justify-content:center;width:9px;height:9px;border-radius:999px;background:var(--dsw-alias-bg-overlay);box-shadow:0 0 0 1px var(--dsw-alias-bg-overlay);pointer-events:none}',
+  '[data-desktop-update-badge-dot]{width:6px;height:6px;border-radius:999px;background:var(--dsw-alias-brand-text)}',
+  '[data-desktop-update-badge-spin]{width:7px;height:7px;box-sizing:border-box;border-radius:999px;border:1.5px solid var(--dsw-alias-border-l);border-top-color:var(--dsw-alias-brand-text);animation:desktop-update-badge-spin .8s linear infinite}',
+  '@media (prefers-reduced-motion:reduce){[data-desktop-update-badge-spin]{animation:none}}',
+  '[data-desktop-update-badge-ring-fill]{transition:stroke-dashoffset .15s linear}',
+  '@media (prefers-reduced-motion:reduce){[data-desktop-update-badge-ring-fill]{transition:none}}',
+].join('')
+
+/** Badge poll cadence: quiet when nothing moves, tight while a download does. */
+const BADGE_IDLE_POLL_MS = 1000
+const BADGE_BUSY_POLL_MS = 150
+
+/** Ring geometry for the micro progress indicator (9px box, 3px radius). */
+const RING_RADIUS = 3
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
 
 /** Version carried by the status variants that have one. */
 function statusVersionOf(status: DesktopUpdateStatus): string | undefined {
@@ -290,7 +316,7 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement | null 
 
   return (
     <>
-      <style>{UPDATE_CONTROL_CSS}</style>
+      <style data-plugin="dsh-desktop-bridge" data-plugin-css="dsh-desktop-bridge/update-control">{UPDATE_CONTROL_CSS}</style>
       <button
         type="button"
         data-desktop-update-button=""
@@ -420,6 +446,110 @@ export function UpdateControl(props: UpdateIndicatorProps): ReactElement | null 
           )}
         </div>
       </Modal>
+    </>
+  )
+}
+
+/**
+ * Header form of the updater: the same control, absent in the collapsed rail
+ * (the toggle badge speaks there — 56px leaves no room for a second button).
+ * @param props - the updater face, locale seat, and the owner's column state.
+ * @returns the control when the column is wide, otherwise nothing.
+ */
+export function HeaderUpdateControl(props: UpdateIndicatorProps & { wide: boolean }): ReactElement | null {
+  if (!props.wide) return null
+  return <UpdateControl {...props} />
+}
+
+/** Phases the rail badge speaks for; a background check stays silent. */
+function isRailBadgeVisible(status: DesktopUpdateStatus): boolean {
+  return status.phase === 'available'
+    || status.phase === 'ready'
+    || status.phase === 'failed'
+    || status.phase === 'preparing'
+    || status.phase === 'downloading'
+    || status.phase === 'installing'
+    || status.phase === 'restarting'
+}
+
+/**
+ * Poll the shell's updater snapshot while the rail badge is mounted. The
+ * header control unmounts with the expanded column, so the badge cannot share
+ * its state and polls on its own: once a second at rest, tightly while a
+ * download owns the updater.
+ * @param read - the shell status reader.
+ * @returns the latest snapshot, or undefined before the first reply.
+ */
+function useRailStatus(read: () => Promise<DesktopUpdateStatus>): DesktopUpdateStatus | undefined {
+  const [status, setStatus] = useState<DesktopUpdateStatus | undefined>(undefined)
+  useEffect(() => {
+    let live = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async (): Promise<void> => {
+      let next: DesktopUpdateStatus | undefined
+      try {
+        next = await read()
+      } catch {
+        next = undefined
+      }
+      if (!live) return
+      if (next !== undefined) setStatus(next)
+      const busy = next !== undefined
+        && (next.phase === 'preparing' || next.phase === 'downloading'
+          || next.phase === 'installing' || next.phase === 'restarting')
+      timer = setTimeout(() => { void poll() }, busy ? BADGE_BUSY_POLL_MS : BADGE_IDLE_POLL_MS)
+    }
+    void poll()
+    return () => {
+      live = false
+      if (timer !== undefined) clearTimeout(timer)
+    }
+  }, [read])
+  return status
+}
+
+/**
+ * The collapsed-rail update badge: a dot for a waiting package or a failed
+ * download, a micro progress ring while the updater works. Rendered inside the
+ * sidebar toggle, so it never owns a click.
+ * @param props - the updater face and locale seat.
+ * @returns the badge, or nothing when the updater has no news.
+ */
+export function UpdateBadge(props: UpdateIndicatorProps): ReactElement | null {
+  const { getUpdateStatus, t } = props
+  const status = useRailStatus(getUpdateStatus)
+  if (status === undefined || !isRailBadgeVisible(status)) return null
+  const percent = updatePercent(status)
+  const working = status.phase === 'preparing' || status.phase === 'downloading'
+    || status.phase === 'installing' || status.phase === 'restarting'
+  const label = status.phase === 'available'
+    ? t('update.available', { version: status.version })
+    : status.phase === 'ready'
+      ? t('update.ready', { version: status.version })
+      : status.phase === 'failed'
+        ? t('update.failed')
+        : percent === undefined
+          ? t('update.preparing')
+          : t('update.progress', { percent })
+  const ring = working && percent !== undefined
+    ? (
+      <svg width="9" height="9" viewBox="0 0 9 9" aria-hidden="true">
+        <circle cx="4.5" cy="4.5" r={RING_RADIUS} fill="none" stroke="var(--dsw-alias-border-l)" strokeWidth="1.4" />
+        <circle
+          cx="4.5" cy="4.5" r={RING_RADIUS} fill="none" stroke="var(--dsw-alias-brand-text)" strokeWidth="1.4"
+          strokeLinecap="round" strokeDasharray={RING_CIRCUMFERENCE}
+          strokeDashoffset={RING_CIRCUMFERENCE * (1 - percent / 100)}
+          transform="rotate(-90 4.5 4.5)" data-desktop-update-badge-ring-fill=""
+        />
+      </svg>
+    )
+    : working
+      ? <span data-desktop-update-badge-spin="" />
+      : <span data-desktop-update-badge-dot="" />
+  return (
+    <>
+      <style data-plugin="dsh-desktop-bridge" data-plugin-css="dsh-desktop-bridge/update-badge">{UPDATE_BADGE_CSS}</style>
+      <span data-desktop-update-badge="" data-phase={status.phase} role="img" aria-label={label}>{ring}</span>
     </>
   )
 }

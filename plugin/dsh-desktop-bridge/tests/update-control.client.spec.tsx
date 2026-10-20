@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
-import { UpdateControl } from '../src/client/update-indicator.tsx'
+import { UpdateControl, HeaderUpdateControl } from '../src/client/update-indicator.tsx'
 import { en, type DesktopBridgeKey } from '../src/client/locales.ts'
 import type { DesktopUpdateStatus } from '../src/client/updates.ts'
 
@@ -22,6 +22,32 @@ function deferred<T>(): { promise: Promise<T>; resolve(value: T): void; reject(e
   })
   return { promise, resolve, reject }
 }
+
+test('the header form renders only in the expanded column', async () => {
+  const getUpdateStatus = vi.fn(async (): Promise<DesktopUpdateStatus> => ({
+    phase: 'available',
+    version: '0.4.0',
+    notes: '',
+  }))
+  const update = {
+    checkUpdate: vi.fn(async () => null),
+    getUpdateStatus,
+    updateGeneration: () => 0,
+    downloadUpdate: vi.fn(async () => {}),
+    cancelUpdate: vi.fn(async () => {}),
+    installUpdate: vi.fn(() => new Promise<never>(() => {})),
+    t,
+  }
+  const view = render(<HeaderUpdateControl {...update} wide={false} />)
+  // The collapsed rail has no room for a second button: the toggle badge
+  // speaks there, and nothing polls from this seat.
+  expect(view.container.querySelector('[data-desktop-update-button]')).toBeNull()
+  expect(getUpdateStatus).not.toHaveBeenCalled()
+  view.rerender(<HeaderUpdateControl {...update} wide />)
+  const title = en['update.available'].replace('{version}', '0.4.0')
+  await waitFor(() => { expect(screen.getByRole('button', { name: title })).toBeTruthy() })
+  expect(getUpdateStatus).toHaveBeenCalled()
+})
 
 test('click starts the download dialog with a live progress bar; ready switches to restart', async () => {
   const initial = deferred<unknown>()

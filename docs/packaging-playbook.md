@@ -71,7 +71,7 @@ sidecar runtime 解析顺序（`find_runtime`）：`$DSH_DESKTOP_RUNTIME` → �
 ## 4. 本机验证
 
 ```sh
-# e2e 冒烟（scratch home，不污染真实 ~/.dsh；探针走 gate→badge DOM→save_file IPC 往返）
+# e2e 冒烟（scratch home，不污染真实 ~/.dsh；探针走 gate→app-root→桥活性标记→save_file IPC 往返）
 DSH_HOME=$(mktemp -d) DSH_DESKTOP_E2E_PROBE=1 DSH_DESKTOP_E2E_EXIT=1 \
   pnpm desktop:dev
 echo "exit=$?"   # 0 = 通过

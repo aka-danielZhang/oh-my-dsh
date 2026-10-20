@@ -126,17 +126,18 @@ function startE2eProbe() {
   if (!isHarnessPage()) return
   if (globalThis.__DSH_E2E_PROBE_STARTED__) return
   globalThis.__DSH_E2E_PROBE_STARTED__ = true
-  // Surface-switch e2e: the badge proves the bridge is alive on the current
-  // surface, then the switch command drives menu→pick→confirm→restart with
-  // the env-picked directory; the shell reports the verdict itself when the
-  // new sidecar answers (or fails). Never re-invoke after the reload — the
-  // flow's active-surface check makes the second run a harmless no-op.
+  // Surface-switch e2e: the bridge liveness marker proves the bridge is alive
+  // on the current surface, then the switch command drives menu→pick→confirm→
+  // restart with the env-picked directory; the shell reports the verdict
+  // itself when the new sidecar answers (or fails). Never re-invoke after the
+  // reload — the flow's active-surface check makes the second run a harmless
+  // no-op.
   const surface = process.env.DSH_DESKTOP_E2E_SURFACE
   const started = Date.now()
   const timer = setInterval(async () => {
     const root = document.getElementById('root') || document.querySelector('[data-app-root], #app')
-    const badge = document.querySelector('[data-desktop-badge]')
-    if (root && badge) {
+    const bridgeLive = document.documentElement.dataset.dshDesktopBridge === '1'
+    if (root && bridgeLive) {
       clearInterval(timer)
       if (surface) {
         ipcRenderer
@@ -170,7 +171,7 @@ function startE2eProbe() {
     }
     if (Date.now() - started > 90_000) {
       clearInterval(timer)
-      const reason = !root ? 'app root missing' : 'badge DOM missing'
+      const reason = !root ? 'app root missing' : 'bridge marker missing'
       ipcRenderer.invoke('dsh_desktop_e2e_report', { verdict: `fail:${reason}` }).catch(() => {})
     }
   }, 250)

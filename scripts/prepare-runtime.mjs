@@ -110,6 +110,8 @@ const skipped = []
 // adoption reverted the unified-toolbar machinery — `dsh-client-ui-conversation`,
 // `dsh-client-ui-layout`, and `dsh-client-test-runtime` left the set — while
 // `dsh-client-shortcuts` joined it (desktop runtime = keyboard-bridge capability).
+// zw.4 added `dsh-client-ui-sidebar`: its `sidebar.header.action` seat is what
+// carries the updater at the sidebar's top edge.
 const FORK_MODIFIED = new Set([
   '@deepseek-ai/dsh',
   '@deepseek-ai/dsh-agent-default-model',
@@ -117,6 +119,7 @@ const FORK_MODIFIED = new Set([
   '@deepseek-ai/dsh-client-modules',
   '@deepseek-ai/dsh-client-shortcuts',
   '@deepseek-ai/dsh-client-ui-model-selection',
+  '@deepseek-ai/dsh-client-ui-sidebar',
   '@deepseek-ai/dsh-host-frontend-static',
   '@deepseek-ai/dsh-llm-pi-ai',
   '@deepseek-ai/dsh-mcp-client',

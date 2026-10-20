@@ -2,8 +2,6 @@
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
-  'badge.text': 'web端',
-  'badge.openBrowser': '在系统浏览器打开 web 端',
   'notify.turnDone': '回合已完成',
   'notify.awaitInput': '等待你的输入',
   'rail.toggle': '切换侧边栏',
@@ -39,8 +37,6 @@ export type DesktopBridgeKey = keyof typeof zh
 
 /** English dictionary, checked complete against the zh key set. */
 export const en = {
-  'badge.text': 'Web',
-  'badge.openBrowser': 'Open the web end in the system browser',
   'notify.turnDone': 'Turn finished',
   'notify.awaitInput': 'Waiting for your input',
   'rail.toggle': 'Toggle sidebar',

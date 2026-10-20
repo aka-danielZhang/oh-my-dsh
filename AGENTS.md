@@ -54,7 +54,7 @@ docs/                        权威契约文档 + packaging-playbook.md + notes/
 
 | 插件 | 形态 | 职责（一句） |
 |---|---|---|
-| `dsh-desktop-bridge` | dual | 桌面门控桥：外链路由、原生注意力通知、下载桥、侧栏底更新入口、日志汇 |
+| `dsh-desktop-bridge` | dual | 桌面门控桥：外链路由、原生注意力通知、下载桥、侧栏头更新入口 + 收起态角标、日志汇 |
 | `dsh-mcp-settings` | dual | 设置页 MCP 服务器管理（manager/inventory/ui 三行一包） |
 | `dsh-provider-balance` | browser-only | 供应商剩余额度可视化（纯 DOM 注入） |
 | `dsh-reasoning-efforts` | host-only | 给手写 llm-pi-ai 模型补 `reasoningEfforts` 声明与 compat 开关 |
@@ -147,7 +147,7 @@ curl -sI localhost:3987/plugins/dsh-desktop-bridge/client.js   # 应 200
 ```sh
 # 前置：Node 22+、pnpm 与 DSH checkout（发现顺序见 docs/electron-shell-contract.md）
 pnpm desktop:dev                # Electron 壳：spawn sidecar → 就绪 → 开窗
-# e2e（探针走 gate→badge DOM→save_file IPC 往返，结论打在 stdout；EXIT 变体自动退出）
+# e2e（探针走 gate→app-root→桥活性标记 html[data-dsh-desktop-bridge]→save_file IPC 往返，结论打在 stdout；EXIT 变体自动退出）
 DSH_DESKTOP_E2E_PROBE=1 pnpm desktop:dev
 DSH_DESKTOP_E2E_PROBE=1 DSH_DESKTOP_E2E_EXIT=1 pnpm desktop:dev; echo "exit=$?"
 ```
