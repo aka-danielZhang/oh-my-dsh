@@ -82,8 +82,8 @@ for (const name of ['dsh-model-efforts-editor', 'dsh-model-image-input']) {
           register: () => fixture.acquire('dictionary'),
           bind: () => key => key,
         })
-        ctx.provide('settingsScope', {
-          bind({ namespace }) {
+        ctx.provide('configForms', {
+          get(namespace) {
             assert.equal(namespace, 'llm-pi-ai')
             return {
               getSnapshot: () => ({ user: {}, revision: 'client-smoke' }),

@@ -23,7 +23,9 @@ async function verify(ctx) {
   const roster = await ctx.agentPresets.list()
   const results = []
   for (const id of expected) {
-    const preset = roster.find(row => row.id === id && row.trust === 'system')
+    // 0.2.x roster rows carry {id, name?, description?, order?, broken?} — the
+    // 0.1.x `trust: 'system'` marker is gone; id + the broken check below.
+    const preset = roster.find(row => row.id === id)
     if (!preset) throw new Error(`Missing shipped preset: ${id}`)
     if (preset.broken !== undefined) throw new Error(`${id}: ${preset.broken}`)
     const handle = await ctx.agents.create({

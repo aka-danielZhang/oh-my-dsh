@@ -88,17 +88,21 @@ function mountProps(session: SessionFacts, input: InputFacts): StopWhileRunningP
   const snapshot = snapshotOf(session)
   const state = inputOf(input)
   // Seats this component never reads get trivial stubs; the two it does
-  // (useSession, useInput) serve the real snapshot/state objects.
+  // (useSession, useInput) serve the real snapshot/state objects. The
+  // single cast sidesteps the share-vocabulary drift across typecheck
+  // postures: the upstream-tag checkout types lack the remote-access hook
+  // while a workspace-anchored build augments it onto GlobalStandardProps,
+  // so a hand-typed literal cannot satisfy both.
   const unused = (() => undefined) as never
-  return {
+  const props = {
     sessionId: snapshot.sessionId,
     useAccess: unused as StopWhileRunningProps['useAccess'],
-    useRemoteAccess: unused as StopWhileRunningProps['useRemoteAccess'],
+    useRemoteAccess: unused,
     useSessionStatus: unused as StopWhileRunningProps['useSessionStatus'],
     useSessionRetainInfo: unused as StopWhileRunningProps['useSessionRetainInfo'],
     useSessionAccess: unused as StopWhileRunningProps['useSessionAccess'],
-    useSession: selector => selector(snapshot),
-    useInput: selector => selector(state),
+    useSession: (selector: (snap: typeof snapshot) => unknown) => selector(snapshot),
+    useInput: (selector: (st: typeof state) => unknown) => selector(state),
     useProjection: unused as StopWhileRunningProps['useProjection'],
     useConversation: unused as StopWhileRunningProps['useConversation'],
     inputActions: {} as StopWhileRunningProps['inputActions'],
@@ -107,6 +111,7 @@ function mountProps(session: SessionFacts, input: InputFacts): StopWhileRunningP
     interrupt: () => { /* the cancel path is exercised in the browser */ },
     t: (key => `t:${key}`) as StopWhileRunningProps['t'],
   }
+  return props as unknown as StopWhileRunningProps
 }
 
 test('component renders null when the visibility terms fail', () => {
