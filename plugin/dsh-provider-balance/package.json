@@ -1,7 +1,7 @@
 {
   "name": "dsh-provider-balance",
   "version": "0.4.3",
-  "description": "DSH web plugin: provider quota/balance badges \u2014 composer chip beside the context meter plus per-row badges on the Models settings page (GLM/Kimi/OpenCode/DeepSeek/Moonshot/xAI + Sub2API gateway auto-detect)",
+  "description": "DSH web plugin: provider quota/balance badges — composer chip beside the context meter plus per-row badges on the Models settings page (GLM/Kimi/OpenCode/DeepSeek/Moonshot/xAI + Sub2API gateway auto-detect)",
   "type": "module",
   "license": "MIT",
   "repository": {

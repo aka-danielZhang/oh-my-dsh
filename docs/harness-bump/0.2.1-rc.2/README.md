@@ -31,7 +31,7 @@
 
 - fork：typecheck 5/5、build 9/9、聚焦套件 349+/1100+ 用例全绿（native-auth staged-snapshot 并行时超时为负载敏感 flake）。
 - 桌面：plugins:check exit=0、desktop:typecheck 0 错、desktop:test 142/142、`DSH_RUNTIME_LOCAL_FORK` 组装内置扫描全过、实启 boot graph 零失败零错误。
-- **未做（发布前必补）**：fork 侧发 zw 层 → revision 钉正式 tag → `unlink:source` → desktop:smoke + ELECTRON_RUN_AS_NODE 实启。
+- **发布收尾（2026-10-20，0.4.0-rc.1）**：fork zw 层已发（`@crazx/*@0.2.1-rc.2.zw.1` 10 包，本地 publish-fork，Actions 被禁期间的既定镜像路径）；revision 钉 `v0.2.1-rc.2+zw.1`（sha 50125828）；`unlink:source` 完成（registry 姿态全树 plugins:check 18 包绿，桥/mcp-settings/usage-stats 补 0.2.1 版 ui-primitives 装载面 devDeps——上游 tarball 缺 simple-icons/dsh-client-store/dsh-util-code-language 声明，同 0.1.6 `diff` 案；send-while-running 测试 stub 剔除已消失的 useRemoteAccess）。registry 姿态 runtime 全新重建 + e2e 探针见发版提交说明。
 
 ## 后续
 

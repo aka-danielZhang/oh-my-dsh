@@ -1,0 +1,74 @@
+{
+  "name": "dsh-todo-completion-guard",
+  "version": "0.1.0",
+  "description": "Turn-end todo guard plugin: one advisory steer when a turn closes on an unfinished todo list",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "desktop": {
+      "ship": true
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsdown",
+    "watch": "tsdown --watch",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "plugin:add": "dsh plugin --profile web add file:.",
+    "plugin:remove": "dsh plugin --profile web remove dsh-todo-completion-guard"
+  },
+  "files": [
+    "lib/index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "todo",
+    "turn-stopping",
+    "guard"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aka-danielZhang/oh-my-dsh.git",
+    "directory": "plugin/dsh-todo-completion-guard"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-agent-loop": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-agent-loop-testkit": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-brand": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-fs": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-fs-local": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-sandbox": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-scope": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-persistence": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session-projection": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tool-todo": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-util-crypto": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-util-values": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-working-directory": "0.2.1-rc.2",
+    "@types/node": "^24.13.3",
+    "tsdown": "^0.22.2",
+    "tsx": "^4.19.2",
+    "typescript": "^6.0.3"
+  },
+  "packageManager": "pnpm@10.28.0"
+}

@@ -105,23 +105,22 @@ const skipped = []
 // 「发布纪律」); the runtime consumes those published versions instead of
 // packing the clone — same bytes the world can install, one provenance.
 // Source of truth: fork repo FORK.md (`node scripts/publish-fork.mjs --list`).
-// Slimmed 2026-10-19 (fork 5f23a53e51): `dsh-compaction-basic` returned to
-// the pristine upstream tree — hierarchy ships as the desktop plugin
-// `dsh-compaction-hierarchical` — and `dsh-todo-completion-guard` moved to
-// this repo's plugin tree as `dsh-todo-completion-guard`.
+// Reshaped 2026-10-19/20: slimming returned `dsh-compaction-basic` and
+// `dsh-todo-completion-guard` to stock roles, then the official-darwin-posture
+// adoption reverted the unified-toolbar machinery — `dsh-client-ui-conversation`,
+// `dsh-client-ui-layout`, and `dsh-client-test-runtime` left the set — while
+// `dsh-client-shortcuts` joined it (desktop runtime = keyboard-bridge capability).
 const FORK_MODIFIED = new Set([
+  '@deepseek-ai/dsh',
   '@deepseek-ai/dsh-agent-default-model',
   '@deepseek-ai/dsh-api-session-controller',
   '@deepseek-ai/dsh-client-modules',
-  '@deepseek-ai/dsh-client-test-runtime',
-  '@deepseek-ai/dsh-client-ui-conversation',
-  '@deepseek-ai/dsh-client-ui-layout',
+  '@deepseek-ai/dsh-client-shortcuts',
   '@deepseek-ai/dsh-client-ui-model-selection',
   '@deepseek-ai/dsh-host-frontend-static',
   '@deepseek-ai/dsh-llm-pi-ai',
   '@deepseek-ai/dsh-mcp-client',
   '@deepseek-ai/dsh-tool-cordis',
-  '@deepseek-ai/dsh',
 ])
 const FORK_NPM_SCOPE = process.env.FORK_NPM_SCOPE ?? '@crazx'
 // Local-fork posture (DSH_RUNTIME_LOCAL_FORK=1): evaluate a merged-but-
@@ -224,7 +223,11 @@ for (const pkg of packages) {
     if (manifest.peerDependencies !== undefined) {
       for (const name of Object.keys(manifest.peerDependencies)) {
         if (!FORK_MODIFIED.has(name)) continue
-        manifest.peerDependencies[name] = forkNpmOf[name]
+        // The BASELINE version, not the zw layer: 0.2.x app-boot's plugin
+        // compat gate validates every @deepseek-ai/dsh-* peer against the
+        // running runtime version (stock app-boot = the baseline) and a zw
+        // range disables the row (publish-fork.mjs applies the same policy).
+        manifest.peerDependencies[name] = manifest.version
         rewrote = true
       }
     }

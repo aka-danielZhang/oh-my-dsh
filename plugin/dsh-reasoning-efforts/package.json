@@ -1,7 +1,7 @@
 {
   "name": "dsh-reasoning-efforts",
   "version": "0.2.0",
-  "description": "Declare reasoning efforts (and their dispatch compat) for hand-declared llm-pi-ai models (custom OpenAI-compatible gateways), filling the settings fields the GUI cannot edit \u2014 explicit declarations and catalog-inherited capabilities are never touched",
+  "description": "Declare reasoning efforts (and their dispatch compat) for hand-declared llm-pi-ai models (custom OpenAI-compatible gateways), filling the settings fields the GUI cannot edit — explicit declarations and catalog-inherited capabilities are never touched",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -42,12 +42,12 @@
     "@deepseek-ai/cordis": ">=0.1.0-rc.5"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/cordis-plugin-timer": "1.1.4",
-    "@deepseek-ai/dsh-llm": "0.1.6-alpha.1",
-    "@deepseek-ai/dsh-scope": "0.1.6-alpha.1",
-    "@deepseek-ai/dsh-session": "0.1.6-alpha.1",
-    "@deepseek-ai/dsh-settings": "0.1.6-alpha.1",
+    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/cordis-plugin-timer": "1.1.7",
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-scope": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-settings": "0.2.1-rc.2",
     "@types/node": "^24.13.3",
     "tsdown": "^0.22.2",
     "tsx": "^4.19.2",

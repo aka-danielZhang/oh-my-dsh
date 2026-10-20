@@ -25,8 +25,8 @@ import { fileURLToPath } from 'node:url'
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pluginRoot = resolve(repoRoot, 'plugin')
 const anchor = resolve(pluginRoot, 'deepseek-harness')
-const OFFICIAL_VERSION = '0.1.6-alpha.1'
-const FORK_VERSION = '0.1.6-alpha.1.zw.1'
+const OFFICIAL_VERSION = '0.2.1-rc.2'
+const FORK_VERSION = '0.2.1-rc.2.zw.3'
 
 /**
  * The fork-modified package set — exactly what
@@ -40,15 +40,11 @@ const FORK_PACKAGES = new Set([
   '@deepseek-ai/dsh-agent-default-model',
   '@deepseek-ai/dsh-api-session-controller',
   '@deepseek-ai/dsh-client-modules',
-  '@deepseek-ai/dsh-client-test-runtime',
-  '@deepseek-ai/dsh-client-ui-conversation',
-  '@deepseek-ai/dsh-client-ui-layout',
+  '@deepseek-ai/dsh-client-shortcuts',
   '@deepseek-ai/dsh-client-ui-model-selection',
-  '@deepseek-ai/dsh-compaction-basic',
   '@deepseek-ai/dsh-host-frontend-static',
   '@deepseek-ai/dsh-llm-pi-ai',
   '@deepseek-ai/dsh-mcp-client',
-  '@deepseek-ai/dsh-todo-completion-guard',
   '@deepseek-ai/dsh-tool-cordis',
 ])
 
@@ -59,9 +55,13 @@ const OFFICIAL_BASELINE_DEPS = new Map([
 
 /** Registry coordinates that do not follow the official DSH release version. */
 const REGISTRY_OVERRIDES = {
-  '@deepseek-ai/cordis': '4.0.2',
-  '@deepseek-ai/cordis-plugin-timer': '1.1.4',
-  '@deepseek-ai/schemastery': '3.18.2',
+  '@deepseek-ai/cordis': '4.0.5',
+  '@deepseek-ai/cordis-plugin-timer': '1.1.7',
+  '@deepseek-ai/schemastery': '3.18.5',
+  // Upstream 0.2.1-rc.2 did not republish these two (partial release); the
+  // 0.0.1-rc.1 line is the newest on the registry and API-compatible here.
+  '@deepseek-ai/dsh-agent-presets': '0.0.1-rc.1',
+  '@deepseek-ai/dsh-invariants': '0.0.1-rc.1',
 }
 
 /**
