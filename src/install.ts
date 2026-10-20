@@ -12,6 +12,14 @@ import { runtimeEnv, type Runtime } from './runtime.ts'
  * dependency, links its `node_modules` entry, names it in
  * `dsh.profile.bundles`, and keeps the extracted copy under the shell root, so
  * the retired plugin keeps booting next to whatever replaced it.
+ *
+ * Only the copies the desktop itself installed are swept: a dependency pinned
+ * to the shell-root extraction (or to a link that no longer resolves), a link
+ * that resolves into it, or a bundle entry that resolves nowhere. A copy a
+ * person installed from a registry or from their own directory is left alone,
+ * and a release old enough to still ship the plugin may re-add the desktop
+ * copy — that copy is plain desktop-owned state, so the next boot sweeps it
+ * again. No marker, no race.
  */
 export interface RetiredDesktopPackage {
   package: string
@@ -24,96 +32,116 @@ export const RETIRED_DESKTOP_PACKAGES: readonly RetiredDesktopPackage[] = [
   { package: 'dsh-scheduled-tasks', destRel: 'plugins/dsh-scheduled-tasks' },
 ]
 
-/**
- * Profile-keyed record of completed retirements. It keeps the sweep one-time:
- * a person who installs the package by hand afterwards keeps it running.
- */
-const RETIRED_MARKER = 'retired-plugins.json'
+interface ProfileManifest {
+  dependencies?: Record<string, unknown>
+  devDependencies?: Record<string, unknown>
+  dsh?: { profile?: { bundles?: unknown } }
+}
 
-function readRetiredMarker(root: string): Record<string, string[]> {
-  const record: Record<string, string[]> = {}
-  let parsed: unknown
+function readProfileManifest(profile: string): ProfileManifest | undefined {
   try {
-    parsed = JSON.parse(fs.readFileSync(path.join(root, RETIRED_MARKER), 'utf8'))
+    return JSON.parse(fs.readFileSync(path.join(profile, 'package.json'), 'utf8')) as ProfileManifest
   } catch {
-    return record
+    return undefined
   }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return record
-  for (const [profile, value] of Object.entries(parsed)) {
-    if (Array.isArray(value)) record[profile] = value.filter((entry): entry is string => typeof entry === 'string')
+}
+
+function declaredSpec(manifest: ProfileManifest | undefined, packageName: string): unknown {
+  for (const field of [manifest?.dependencies, manifest?.devDependencies]) {
+    if (field !== undefined && Object.hasOwn(field, packageName)) return field[packageName]
   }
-  return record
+  return undefined
 }
 
-function writeRetiredMarker(root: string, profileName: string, packages: readonly string[]): void {
-  const record = readRetiredMarker(root)
-  record[profileName] = [...new Set([...(record[profileName] ?? []), ...packages])]
-  fs.writeFileSync(path.join(root, RETIRED_MARKER), `${JSON.stringify(record, undefined, 2)}\n`)
+/** Resolved link target of a profile's `node_modules/<name>`, when it resolves. */
+function linkedTarget(profile: string, packageName: string): string | undefined {
+  try {
+    return fs.realpathSync.native(path.join(profile, 'node_modules', packageName))
+  } catch {
+    return undefined
+  }
 }
 
-/** The three places the loader can keep a package alive. */
-interface PackagePresence {
-  declared: boolean
-  linked: boolean
-  bundled: boolean
+function isInside(child: string, parent: string): boolean {
+  return child === parent || child.startsWith(parent + path.sep)
 }
 
-function packagePresence(home: string, profileName: string, packageName: string): PackagePresence {
+/** Absolute path with symlinked ancestors resolved (macOS `/var` -> `/private/var`). */
+function canonicalPath(target: string): string {
+  try {
+    return fs.realpathSync.native(target)
+  } catch {
+    return path.resolve(target)
+  }
+}
+
+interface PendingRetirement extends RetiredDesktopPackage {
+  /** The profile pins the package to the desktop's own copy (or a link that no longer resolves). */
+  desktopOwned: boolean
+}
+
+/**
+ * Decide whether the named package is the desktop's own, now-retired copy.
+ * The profile is the source of truth: the old shell writes `link:` specs into
+ * the extraction directory, and this release's sweep only touches those.
+ */
+function retireCandidate(home: string, root: string, profileName: string, entry: RetiredDesktopPackage): PendingRetirement {
   const profile = path.join(home, 'profiles', profileName)
-  const presence: PackagePresence = { declared: false, linked: false, bundled: false }
+  const dest = canonicalPath(path.join(root, entry.destRel))
+  const manifest = readProfileManifest(profile)
+  const spec = declaredSpec(manifest, entry.package)
+  const bundles = manifest?.dsh?.profile?.bundles
+  const bundled = Array.isArray(bundles) && bundles.includes(entry.package)
+  const linked = linkedTarget(profile, entry.package)
+  let desktopOwned = false
+  if (typeof spec === 'string' && spec.startsWith('link:')) {
+    const target = spec.slice('link:'.length)
+    // A dangling link is a broken leftover of a deleted copy, never a live user install.
+    desktopOwned = canonicalPath(target) === dest || !fs.existsSync(target)
+  }
+  if (!desktopOwned && linked !== undefined && isInside(linked, dest)) desktopOwned = true
+  // A bundle entry that resolves nowhere is a broken leftover, not an install.
+  if (!desktopOwned && bundled && spec === undefined && linked === undefined) desktopOwned = true
+  return { ...entry, desktopOwned }
+}
+
+/** Retired desktop copies this profile still carries. */
+function pendingRetirements(home: string, root: string, profileName: string): PendingRetirement[] {
+  return RETIRED_DESKTOP_PACKAGES
+    .map((entry) => retireCandidate(home, root, profileName, entry))
+    .filter((candidate) => candidate.desktopOwned)
+}
+
+/**
+ * Drop retired names from the profile manifest: the dependency (or dev
+ * dependency) and the `dsh.profile.bundles` entry. `dsh plugin remove` is bare
+ * pnpm — it edits the dependency and the lockfile but leaves the bundle list,
+ * and a listed bundle with no resolvable dependency is skipped at every boot.
+ * Editing the manifest and resolving once with the existing install steps keeps
+ * the removal in the same validated transaction.
+ */
+function dropProfileEntries(profile: string, packages: readonly string[]): void {
   const manifestPath = path.join(profile, 'package.json')
-  if (fs.existsSync(manifestPath)) {
-    try {
-      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
-        dependencies?: Record<string, unknown>
-        devDependencies?: Record<string, unknown>
-        dsh?: { profile?: { bundles?: unknown } }
-      }
-      for (const field of [manifest.dependencies, manifest.devDependencies]) {
-        if (field !== undefined && Object.hasOwn(field, packageName)) presence.declared = true
-      }
-      const bundles = manifest.dsh?.profile?.bundles
-      if (Array.isArray(bundles) && bundles.includes(packageName)) presence.bundled = true
-    } catch {
-      // Unreadable manifest: the node_modules probe below still answers.
+  const manifest = readProfileManifest(profile)
+  if (manifest === undefined) return
+  let changed = false
+  for (const field of [manifest.dependencies, manifest.devDependencies]) {
+    if (field === undefined) continue
+    for (const name of packages) {
+      if (!Object.hasOwn(field, name)) continue
+      delete field[name]
+      changed = true
     }
   }
-  presence.linked = fs.existsSync(path.join(profile, 'node_modules', packageName))
-  return presence
-}
-
-/**
- * Drop retired names from `dsh.profile.bundles`. `dsh plugin remove` is pnpm:
- * it drops the dependency and the node_modules link but leaves the bundle
- * list, and a listed bundle with no resolvable dependency is skipped — and
- * reported — at every boot.
- */
-function dropProfileBundles(profile: string, packages: readonly string[]): void {
-  const manifestPath = path.join(profile, 'package.json')
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
-    dsh?: { profile?: { bundles?: unknown } }
-  }
   const bundles = manifest.dsh?.profile?.bundles
-  if (!Array.isArray(bundles)) return
-  const kept = bundles.filter((bundle) => !packages.includes(bundle as string))
-  if (kept.length === bundles.length) return
-  manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: kept } }
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`)
-}
-
-type PendingRetirement = RetiredDesktopPackage & PackagePresence
-
-/** Retired packages this profile still carries and has not retired yet. */
-function pendingRetirements(home: string, root: string, profileName: string): PendingRetirement[] {
-  const done = readRetiredMarker(root)[profileName] ?? []
-  const pending: PendingRetirement[] = []
-  for (const entry of RETIRED_DESKTOP_PACKAGES) {
-    if (done.includes(entry.package)) continue
-    const presence = packagePresence(home, profileName, entry.package)
-    if (!presence.declared && !presence.linked && !presence.bundled) continue
-    pending.push({ ...entry, ...presence })
+  if (Array.isArray(bundles)) {
+    const kept = bundles.filter((bundle) => !packages.includes(bundle as string))
+    if (kept.length !== bundles.length) {
+      manifest.dsh = { ...manifest.dsh, profile: { ...manifest.dsh?.profile, bundles: kept } }
+      changed = true
+    }
   }
-  return pending
+  if (changed) fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, undefined, 2)}\n`)
 }
 
 function openInstallLog(root: string): number {
@@ -269,15 +297,12 @@ export function runDesktopPluginInstall(
     if (hadOriginal && fs.existsSync(path.join(shadowProfile, 'pnpm-lock.yaml'))) {
       runCli(runtime, ['plugin', '--profile', profileName, 'install'], shadowHome, root)
     }
-    for (const entry of retired) {
-      // pnpm remove only when the manifest declares it; a stale link or bundle
-      // entry is dropped below without invoking pnpm over an unknown package.
-      if (entry.declared) {
-        runCli(runtime, ['plugin', '--profile', profileName, 'remove', entry.package], shadowHome, root)
+    if (retiredNames.length > 0) {
+      dropProfileEntries(shadowProfile, retiredNames)
+      for (const name of retiredNames) {
+        fs.rmSync(path.join(shadowProfile, 'node_modules', name), { recursive: true, force: true })
       }
-      fs.rmSync(path.join(shadowProfile, 'node_modules', entry.package), { recursive: true, force: true })
     }
-    if (retiredNames.length > 0) dropProfileBundles(shadowProfile, retiredNames)
     for (const plugin of plugins) {
       if (!pluginAlreadyInProfile(plugin.dir, plugin.package, shadowHome, profileName)) {
         runCli(runtime, ['plugin', '--profile', profileName, 'add', plugin.dir], shadowHome, root)
@@ -306,7 +331,6 @@ export function runDesktopPluginInstall(
       console.error(`dsh-desktop: remove retired ${entry.package} copy failed: ${String(error)}`)
     }
   }
-  if (retired.length > 0) writeRetiredMarker(root, profileName, retiredNames)
 }
 
 export function frozenProfileInstallOnce(runtime: Runtime, home: string, root: string, profileName: string): void {
