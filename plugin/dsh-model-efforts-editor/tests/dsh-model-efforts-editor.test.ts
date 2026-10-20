@@ -13,6 +13,7 @@ import {
 } from '../src/client/drafts.ts'
 import type { EditorPlan } from '../src/client/drafts.ts'
 import { en, zh } from '../src/client/locales.ts'
+import { SECTION_CSS, injectStyles } from '../src/client/styles.ts'
 import { apply as clientApply, inject, NS, PI_AI_NS } from '../src/client/index.ts'
 
 test('host half exports a loadable surface entry', () => {
@@ -31,6 +32,17 @@ test('client half exports a loadable plugin', () => {
 
 test('locales cover the same key sets in both languages', () => {
   assert.deepEqual(Object.keys(zh).sort(), Object.keys(en).sort())
+})
+
+test('stylesheet injects only through --dsw-* tokens', () => {
+  assert.equal(typeof SECTION_CSS, 'string')
+  assert.ok(!/#[0-9a-f]{3,8}/i.test(SECTION_CSS), 'no hard-coded hex colors')
+  assert.ok(!/rgba?\(/i.test(SECTION_CSS), 'no hard-coded rgb colors')
+  assert.ok(SECTION_CSS.includes('--dsw-alias-'))
+  assert.ok(SECTION_CSS.includes('--dsw-shadow-lv3'))
+  assert.ok(!SECTION_CSS.includes('--dsw-text-'))
+  assert.ok(!SECTION_CSS.includes('--dsw-bg-elevated'))
+  assert.equal(typeof injectStyles(), 'function')
 })
 
 test('effortsOf reads undeclared, pinned-off, and dict declarations', () => {

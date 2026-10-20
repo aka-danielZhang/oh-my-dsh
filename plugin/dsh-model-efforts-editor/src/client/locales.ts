@@ -18,6 +18,7 @@ export type ModelEffortsLocaleKey =
   | 'wirePlaceholder'
   | 'wireInvalid'
   | 'compatZai'
+  | 'compatZaiHint'
   | 'noChange'
 
 /** The zh dictionary; key order mirrors {@link ModelEffortsLocaleKey}. */
@@ -35,9 +36,10 @@ export const zh: Record<ModelEffortsLocaleKey, string> = {
   stateLevels: '{count} 个档位',
   stateUnknown: '未知',
   levelOffNote: '留空 = 支持「关」但不发送参数',
-  wirePlaceholder: '线上值，默认同名',
+  wirePlaceholder: '默认同名',
   wireInvalid: '所选档位需要非空的线上值（off 可留空）',
-  compatZai: 'Z.ai 线缆格式（thinking + reasoning_effort）',
+  compatZai: 'Z.ai 线缆格式',
+  compatZaiHint: 'thinking + reasoning_effort',
   noChange: '没有需要写入的变更',
 }
 
@@ -56,8 +58,9 @@ export const en: Record<ModelEffortsLocaleKey, string> = {
   stateLevels: '{count} levels',
   stateUnknown: 'unknown',
   levelOffNote: 'empty = supported "off" sends no parameter',
-  wirePlaceholder: 'wire value, defaults to the level name',
+  wirePlaceholder: 'same as level',
   wireInvalid: 'Selected levels need a non-empty wire value (off may stay empty)',
-  compatZai: 'Z.ai wire format (thinking + reasoning_effort)',
+  compatZai: 'Z.ai wire format',
+  compatZaiHint: 'thinking + reasoning_effort',
   noChange: 'Nothing to write',
 }
