@@ -16,7 +16,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { WorkspaceId } from '@deepseek-ai/dsh-workspace'
 import React from 'react'
 import { isThreadHandoffDraft, type ThreadHandoffDraft } from '../draft.ts'
-import { deriveRecoveryView, type RecoveryAction } from '../recovery.ts'
+import { deriveRecoveryView, drivesWithoutLink, resolveCardView, type RecoveryAction } from '../recovery.ts'
 import type { AuthorizeRequest, StateResult, ThreadDraftRecord, ThreadLink, TitleOutcome } from '../thread-types.ts'
 import TYPERT_REMOTE from '../typert.remote-client.ts'
 import { THREAD_SETTINGS_NAMESPACE, type ThreadSettings } from '../thread-types.ts'
@@ -210,7 +210,13 @@ function ContinueButton(props: {
   }
 
   const runAction = async (action: RecoveryAction): Promise<void> => {
-    if (link === null) return
+    // A fresh Draft has no Link yet, and `drive()` is what creates one
+    // (authorize is idempotent over an existing Link), so its primary button
+    // must reach it. Every other action dereferences the durable Link.
+    if (link === null) {
+      if (drivesWithoutLink(action)) await runDrive()
+      return
+    }
     if (action === 'open-target' || action === 'open-thread') {
       openTarget()
       return
@@ -274,9 +280,9 @@ function ContinueButton(props: {
     await runDrive()
   }
 
-  const view = link === null ? null : deriveRecoveryView(link)
-  const primary: RecoveryAction | null = link === null ? 'continue-creation' : view?.primary ?? null
-  const secondary = link === null ? [] : view?.secondary ?? []
+  const view = resolveCardView(link)
+  const primary = view.primary
+  const secondary = view.secondary
   const completed = link !== null && link.relation === 'active'
   const primaryLabel = primary === 'redeliver' && armedRedeliver ? '确认重新投递' : primary === null ? null : ACTION_LABELS[primary]
 
@@ -306,18 +312,14 @@ function ContinueButton(props: {
           {ACTION_LABELS[action]}
         </Button>
       ))}
-      {(completed || error !== null || notice !== null || view?.summary !== null || view?.titleWarning !== null) && (
+      {(completed || error !== null || notice !== null || view.summary !== null || view.titleWarning !== null) && (
         <div style={styles.feedback} aria-live="polite">
           {completed && <span style={styles.success}>已携带上下文创建新会话</span>}
           {notice !== null && <span style={styles.notice}>{notice}</span>}
           {error !== null && <span style={styles.error}>{error}</span>}
-          {view?.summary !== null && view !== null && view.summary !== null && (
-            <span style={styles.notice}>{view.summary}</span>
-          )}
-          {view?.titleWarning !== null && view !== null && view.titleWarning !== null && (
-            <span style={styles.warning}>{view.titleWarning}</span>
-          )}
-          {armedRedeliver && view !== null && view.deliveryWarning !== null && (
+          {view.summary !== null && <span style={styles.notice}>{view.summary}</span>}
+          {view.titleWarning !== null && <span style={styles.warning}>{view.titleWarning}</span>}
+          {armedRedeliver && link !== null && view.deliveryWarning !== null && (
             <span style={styles.warning}>{view.deliveryWarning}</span>
           )}
         </div>

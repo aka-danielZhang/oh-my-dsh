@@ -30,6 +30,23 @@ export interface RecoveryView {
 }
 
 /**
+ * Primary action of a card whose Draft has no durable Link yet. `drive()`
+ * authorizes first (idempotently over an existing Link), so this action — and
+ * only this one — runs before the card has a `linkId` to dereference.
+ */
+export const FRESH_DRAFT_PRIMARY: RecoveryAction = 'continue-creation'
+
+/**
+ * Whether `action` can run with no durable Link. Every other action
+ * dereferences the Link (or the target it owns), so it has to stay gated; the
+ * fresh-draft primary must not, or the single button rendered in the null-Link
+ * state is a dead button.
+ */
+export function drivesWithoutLink(action: RecoveryAction): boolean {
+  return action === FRESH_DRAFT_PRIMARY
+}
+
+/**
  * Derive the recovery view from one Link's durable checkpoints, mirroring the
  * recovery table:
  *
@@ -131,5 +148,21 @@ export function deriveRecoveryView(link: ThreadLink): RecoveryView {
     titleWarning,
     deliveryWarning: null,
     summary: link.delivery.phase === 'submitting' ? '上次交接中断，将继续核对后完成' : null,
+  }
+}
+
+/**
+ * The recovery view for the card state it is rendered in. A prepared but
+ * never-authorized Draft has no Link yet: its only well-defined action is
+ * `continue-creation`, which authorizes and drives the whole saga.
+ */
+export function resolveCardView(link: ThreadLink | null): RecoveryView {
+  if (link !== null) return deriveRecoveryView(link)
+  return {
+    primary: FRESH_DRAFT_PRIMARY,
+    secondary: [],
+    titleWarning: null,
+    deliveryWarning: null,
+    summary: null,
   }
 }

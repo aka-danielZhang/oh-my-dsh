@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { deriveRecoveryView } from '../src/recovery.ts'
+import { deriveRecoveryView, drivesWithoutLink, FRESH_DRAFT_PRIMARY, resolveCardView, type RecoveryAction } from '../src/recovery.ts'
 import type { ThreadLink } from '../src/thread-types.ts'
 
 function link(overrides: Partial<ThreadLink> = {}): ThreadLink {
@@ -119,4 +119,28 @@ test('a submitting delivery self-heals through the same start-handoff action', (
   }))
   assert.equal(view.primary, 'start-handoff')
   assert.match(view.summary ?? '', /将继续核对/)
+})
+
+// Regression guard: the card renders `continue-creation` while no Link exists,
+// and that button must reach `drive()` — gating every click on `link !== null`
+// silently kills the first press on every fresh handoff card.
+test('a fresh draft (no Link yet) offers the one action drivable without a Link', () => {
+  const view = resolveCardView(null)
+  assert.equal(view.primary, FRESH_DRAFT_PRIMARY)
+  assert.equal(view.primary !== null && drivesWithoutLink(view.primary), true)
+  assert.deepEqual(view.secondary, [])
+  assert.equal(view.titleWarning, null)
+  assert.equal(view.deliveryWarning, null)
+  assert.equal(view.summary, null)
+})
+
+test('only the fresh-draft primary runs without a durable Link', () => {
+  assert.equal(drivesWithoutLink(FRESH_DRAFT_PRIMARY), true)
+  const linkBound: RecoveryAction[] = ['recheck', 'start-handoff', 'open-target', 'clone', 'redeliver', 'open-thread', 'cancel']
+  assert.deepEqual(linkBound.filter(drivesWithoutLink), [])
+})
+
+test('an authorized card mirrors the checkpoint-derived recovery view', () => {
+  const reserved = link({ target: { phase: 'reserved', fingerprint: null }, creationActionId: null })
+  assert.deepEqual(resolveCardView(reserved), deriveRecoveryView(reserved))
 })
