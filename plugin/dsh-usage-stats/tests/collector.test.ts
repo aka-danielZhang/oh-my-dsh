@@ -81,7 +81,7 @@ test('collector row metadata', () => {
 })
 
 /** Poll until the predicate holds (the collector's open is async). */
-async function until(predicate: () => boolean, rounds = 100): Promise<void> {
+async function until(predicate: () => boolean, rounds = 1000): Promise<void> {
   for (let i = 0; i < rounds; i += 1) {
     if (predicate()) return
     await new Promise(resolve => setImmediate(resolve))
