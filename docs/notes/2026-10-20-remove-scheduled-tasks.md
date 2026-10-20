@@ -56,7 +56,7 @@
 
 ## 验证
 
-- `pnpm run desktop:typecheck`、`pnpm run desktop:test`（新增两条下船单测：一次性下船含 marker，以及手工重装后不再被清除）。
+- `pnpm run desktop:typecheck`、`pnpm run desktop:test`（新增三条下船单测：一次性下船含 marker、手工重装后不再被清除、只剩陈旧链接/bundle 条目时不调用 pnpm remove）。
 - 根级 `pnpm run plugins:check`。
 - scratch/实机 `DSH_DESKTOP_E2E_PROBE=1 pnpm desktop:dev`：侧栏只剩上游「自动化任务」一个入口，OhMyMemo 设置页与梦境提取正常；安装日志出现 `retire dsh-scheduled-tasks from web`。
 - 旧 Profile 实机：升级后 `~/.dsh/profiles/web/package.json` 不再含该依赖与 bundle 条目，`~/.dsh-desktop/plugins/dsh-scheduled-tasks/` 消失，`retired-plugins.json` 出现；再次启动不再产生事务。
