@@ -4,6 +4,21 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 
 ## [Unreleased]
 
+## [0.4.0-rc.4] - 2026-10-20
+
+### Changed
+
+- 移除随包的「定时任务」插件（`dsh-scheduled-tasks`）：当前基线已内置「自动化任务」（侧栏入口 + 全局管理页 + daily/weekly/cron 调度），两套同名入口长期并存撞车。升级后首次启动会把旧 Web Profile 里的该插件下船——依赖、`dsh.profile.bundles` 条目与 `~/.dsh-desktop/plugins/dsh-scheduled-tasks/` 解压副本一并清除。手工从 registry 或自己目录装回的副本不会被清。
+
+### Removed
+
+- 随插件退役的能力：一个任务绑定一个独立长期后台会话执行、暂停/恢复与立即运行、每次执行的历史记录、hourly「第 N 分」与 monthly「每月 n 号」两类规则（可用 cron 表达式等效表达）。
+- OhMyMemo 记忆不受影响：插件对它的耦合只是定时任务面板里一行只读投影，记忆工具、capsule 注入与梦境提取照常；用户数据也不自动删除——任务定义与运行审计仍在 `~/.dsh/storages/dsh_scheduled_tasks.json`，空锁目录 `~/.dsh/scheduled-tasks/locks/` 无害，标题形如 `[定时] <标题>` 的历史会话建议保留。
+
+### Fixed
+
+- 修复下船在升级路径上的竞态：旧版桌面（随包清单仍含该插件）重启会把已下船的包重新装回，而 `0.4.0-rc.3` 的一次性标记会永久放过这份副本，导致两套「自动化任务」再次并存。下船改为只清**桌面自己装的那一份**（依赖钉在 `~/.dsh-desktop/plugins/dsh-scheduled-tasks`、链接解析进该目录，或只剩一条解析不到的 bundle 条目），旧版装回的副本下次启动照样清掉；registry 安装与用户自己目录的 link 安装不受影响。
+
 ## [0.4.0-rc.3] - 2026-10-20
 
 ### Changed
