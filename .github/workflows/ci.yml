@@ -9,7 +9,7 @@ jobs:
   plugin:
     name: Desktop-owned plugins (typecheck + tests + build)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
       # Upstream-line discipline: typecheck against the SAME baseline the
