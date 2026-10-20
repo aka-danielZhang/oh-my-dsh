@@ -61,6 +61,7 @@ test('lists every ship:true plugin once, including thread', () => {
     'dsh-send-while-running',
     'dsh-settings-icons',
     'dsh-thread',
+    'dsh-todo-completion-guard',
     'dsh-usage-stats',
     'dsh-web-search-toggle',
   ])
