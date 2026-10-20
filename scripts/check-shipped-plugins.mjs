@@ -24,7 +24,9 @@ for (const spec of specs) {
     if (!checkout) throw new Error('check-shipped-plugins: DSH_CHECKOUT is required for the bridge')
     run(['run', 'setup'], spec.dir, { ...process.env, DSH_CHECKOUT: checkout })
   }
-  for (const script of ['typecheck', 'test', 'build']) {
+  // Build before test: the browser-plugin specs execute the BUILT client
+  // bundle (fresh CI checkouts have no lib/ until the build runs).
+  for (const script of ['typecheck', 'build', 'test']) {
     run(['run', '--if-present', script], spec.dir)
   }
 }

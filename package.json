@@ -16,7 +16,7 @@
     "plugin:setup": "node scripts/setup-plugins.mjs",
     "plugin:new": "node scripts/new-plugin.mjs",
     "plugin:check": "cd plugin/dsh-desktop-bridge && pnpm run typecheck && pnpm run test && pnpm run build",
-    "plugins:check": "for d in plugin/*/; do d=${d%/}; [ -L \"$d\" ] && continue; echo \"== $d\"; (cd \"$d\" && pnpm run --if-present typecheck && pnpm run --if-present test && pnpm run --if-present build) || exit 1; done",
+    "plugins:check": "for d in plugin/*/; do d=${d%/}; [ -L \"$d\" ] && continue; echo \"== $d\"; (cd \"$d\" && pnpm run --if-present typecheck && pnpm run --if-present build && pnpm run --if-present test) || exit 1; done",
     "check": "pnpm run plugin:check && pnpm run desktop:typecheck && pnpm run desktop:test",
     "link:source": "node scripts/source-deps.mjs link",
     "unlink:source": "node scripts/source-deps.mjs unlink"
