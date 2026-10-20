@@ -83,10 +83,17 @@ window.__ModuleLoader__.load({
         '  position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 100;',
         '  box-sizing: border-box; width: 288px; padding: 12px;',
         '  border: 1px solid var(--dsw-alias-border-inverted); border-radius: 12px;',
-        '  background: var(--dsw-specific-menu); box-shadow: var(--dsw-shadow-lv3);',
+        /* Generic-web --dsw-specific-menu is a 58%-alpha fill that upstream
+         * pairs with a backdrop blur (MenuSurface); this hand-rolled panel has
+         * no blur, so over conversation text it reads see-through (unreadable
+         * numbers in light mode). Paint the SOLID equivalents of the darwin
+         * nearly-opaque fills instead: f8f9fa/303136 are the menu-group-header
+         * tokens' rgb at full alpha. */
+        '  background: #f8f9fa; box-shadow: var(--dsw-shadow-lv3);',
         '  font-size: 12px; line-height: 20px; color: var(--dsw-alias-label-secondary);',
         '  cursor: default;',
         '}',
+        '[data-ds-dark-theme] .dpb-panel { background: #303136; }',
         /* Settings-row variant: the badge sits in a provider row high in the
          * panel, so its popover opens DOWNWARD from the trigger. */
         '.dpb-panel.dpb-panel-down { top: calc(100% + 6px); bottom: auto; left: 0; right: auto; }',

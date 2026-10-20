@@ -1,6 +1,6 @@
 # 0.2.1-rc.2 基线升级记录（跨 minor：0.1.6-alpha.1 → 0.2.1-rc.2）
 
-日期：2026-10-19/20。fork 分支 `feature/upstream-0.2.1-rc.2`（尖端 `5f23a53e51`），本仓同 topic worktree。
+日期：2026-10-19/20。fork 分支 `feature/upstream-0.2.1-rc.2`（尖端 `fb98997c4b`），本仓同 topic worktree。
 
 ## 概览
 
@@ -11,6 +11,7 @@
 - 冲突裁决原则：上游已解决的摒弃我们的补丁（effort 记忆持久化换 Config-volatile + configEditor、hideChrome owner share、admission 新语义），上游无对应的保留并移植（shell.toolbar 与新增 shell.bottom/shell.leading 拼三行网格、web:log、mcp-client status、pi-ai 亲和头、frontend-static content-length、@crazx 行识别）。
 - 0.2.x API 词汇迁移：`MessageSourceMap` 扩充模式替代 `{kind:'plugin'}`（fork 内 guard/compaction 与桌面 5 插件同步）；tool 消息改 role 配对（planner 两处）；`IconXxxOutline16/14 → OutlineRegular`；`JobOutcome.output → result`；`settings/updated → settings/document-updated`。
 - 层次压缩 reserve clamp：档位输出预留按模型 context 收敛（小 context 不再拒绝运行）。
+- 右栏顶到顶（`fb98997c4b`）：上游 0.2.x 右侧栏面板锚在右栏列 top:0（窗口顶），fork 工具栏行把右栏列钉在 row 2 导致面板从工具栏下方起步（"魔改"观感）。改法：toolbarRow 止于右栏左缘（`grid-column 1/-2`，桥工具栏 subgrid 零 JS 跟随）、rightbarCol 跨到底行之上（`grid-row 1/-2`）、resize handle 同步跨行（原 `1/1/2/-1` 在 fork 三行网格里只盖 38px 工具栏带——顺手修复的隐性回归）。决策细节见 `docs/notes/2026-10-19-rightbar-top-and-dpb-opacity.md`。
 
 ## 桌面侧移植面（12/12 插件）
 
