@@ -234,13 +234,14 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         panelReady = true
       }
 
-      // In-conversation capsule (§13.5, conversation.input.dock): yields to
-      // the expanded panel and collapses when there is nothing to report.
+      // In-conversation capsule (§13.5, header utilities seat — top-right):
+      // yields to the expanded panel and collapses when there is nothing to
+      // report. A click opens the right panel.
       if (sidebarRight !== undefined) {
-        held.push(ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
-          name: 'conversation.input.dock',
+        held.push(ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+          name: 'conversation.session.header.utilities',
           id: 'quno-capsule',
-          order: 10,
+          order: 60,
           inject: () => ({ store, t, face: sidebarRight }),
         }, QunoCapsule)))
       }

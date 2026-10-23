@@ -1,9 +1,10 @@
 /**
- * The in-conversation capsule (design §13.5, conversation.input.dock): a
- * right-aligned pill rendered above the composer card of a Quno main
- * conversation, showing live counts (running tasks, attention, sense alarms).
- * It yields while the right panel is expanded and collapses entirely when
- * there is nothing to report. A click opens the panel.
+ * The in-conversation capsule (design §13.5, header utilities seat): a
+ * compact pill in the header's top-right utilities row — the top-right corner
+ * the product wants (2026-10-23 用户裁定：胶囊在右上角，不放 composer 上方) —
+ * showing live counts (running tasks, attention, sense alarms). It yields
+ * while the right panel is expanded and collapses entirely when there is
+ * nothing to report. A click opens the panel.
  *
  * Panel expansion is read from the `data-sidebar-right-open` DOM seam — the
  * same source the shell styles read — via a MutationObserver that watches
@@ -33,8 +34,8 @@ export interface QunoCapsuleInjected {
   readonly face: SidebarRightFace | undefined
 }
 
-/** Render the capsule row above the composer, or nothing when it does not apply. */
-export function QunoCapsule(props: PropsRuntime<'conversation.input.dock'> & QunoCapsuleInjected): React.ReactElement | null {
+/** Render the capsule pill in the header utilities row, or nothing when it does not apply. */
+export function QunoCapsule(props: PropsRuntime<'conversation.session.header.utilities'> & QunoCapsuleInjected): React.ReactElement | null {
   const snapshot = React.useSyncExternalStore(props.store.subscribe, props.store.getSnapshot, props.store.getSnapshot)
   const face = props.face
   const [expanded, setExpanded] = React.useState(() => readExpanded())
@@ -64,15 +65,13 @@ export function QunoCapsule(props: PropsRuntime<'conversation.input.dock'> & Qun
 
   const open = (): void => { face.openTab(QUNO_PANEL_KIND) }
   return (
-    <div style={styles.row}>
-      <button type="button" style={styles.pill} title={props.t('sidebarOpen')} onClick={open}>
-        <span style={styles.mark} aria-hidden="true">Q</span>
-        <span style={styles.count}>{counts.runningTasks}</span>
-        <span style={styles.divider} aria-hidden="true" />
-        <span style={styles.count}>{counts.attentionOpen}</span>
-        {counts.senseAlarms > 0 && <span style={styles.alarm} aria-hidden="true" />}
-      </button>
-    </div>
+    <button type="button" style={styles.pill} title={props.t('sidebarOpen')} onClick={open}>
+      <span style={styles.mark} aria-hidden="true">Q</span>
+      <span style={styles.count}>{counts.runningTasks}</span>
+      <span style={styles.divider} aria-hidden="true" />
+      <span style={styles.count}>{counts.attentionOpen}</span>
+      {counts.senseAlarms > 0 && <span style={styles.alarm} aria-hidden="true" />}
+    </button>
   )
 }
 
@@ -83,9 +82,8 @@ function readExpanded(): boolean {
 }
 
 const styles = {
-  row: { display: 'flex', justifyContent: 'flex-end', padding: '0 4px 6px' },
   pill: {
-    display: 'inline-flex', alignItems: 'center', gap: 6, height: 26, padding: '0 10px',
+    display: 'inline-flex', alignItems: 'center', gap: 6, height: 24, padding: '0 10px',
     border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 999, cursor: 'pointer',
     background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', font: 'inherit', fontSize: 12,
     boxShadow: '0 2px 8px rgba(0,0,0,0.10)',
