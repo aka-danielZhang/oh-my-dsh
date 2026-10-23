@@ -165,11 +165,10 @@ body[data-ds-dark-theme] [data-quno-main] {
 
 /* ── 7. 安静对话页（仅 [data-quno-main] 作用域） ── */
 
-/* 7.1 头部一行化：标题行退场，「对话/轨迹」推到右侧与身份同行 */
-[data-quno-main] [data-slot="conversation.session.header"] { display: contents; }
+/* 7.1 头部两行左对齐：第一行身份，第二行「对话/轨迹」居其下（不贴右）；
+   会话标题行退场 */
+[data-quno-main] header { flex-direction: column; align-items: flex-start; gap: 2px; min-height: 60px; }
 [data-quno-main] [data-slot="conversation.session.header"] > div:nth-child(1) { display: none; }
-[data-quno-main] [data-slot="conversation.session.header"] > div:nth-child(2) { margin-left: auto; }
-[data-quno-main] header { min-height: 52px; }
 
 /* 7.2 消息列与输入框同宽居中（提案 800–840px） */
 [data-quno-main] div:has(> [data-slot="conversation.chat.flow"]) { max-width: min(800px, 100%); margin: 0 auto; }

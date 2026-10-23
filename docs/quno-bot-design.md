@@ -669,7 +669,7 @@ Notice:   pending → prepared → inbox-durable → presented
 **身份三件套**
 
 - **消息头像**：assistant 回复首段左侧 26px 圆形 Quno 头像——纯 CSS `::before` 挂在 `[data-chat-flow-kind="assistant-step"]`（皮肤补 `position: relative`；正文列左移 36px = 头像 26 + 间距 10）；连续输出与工具过程后的后续段不重复插头像（相邻同 Kind 撤销 `::before`）。user 消息保持 stock 右对齐气泡；system/compaction/tool 节点无头像。回复首部名字标签为待办：chat 流的分组虚拟化使纯 CSS 无法稳定挂到每轮首段，需 fork 座位或上游 hook。
-- **会话头身份**：`conversation.header.leading`（single/root，显式 priority）渲染「头像 + Quno + 状态点（在线/静默/暂停）」，仅当前在屏会话为 quno 主会话时输出，其余渲染 null；**头部收敛为一行**——会话标题行退场，「对话/轨迹」推到右侧与身份同行（stock 的双层头部经 `display: contents` + `margin-left: auto` 合并）；面包屑已隐藏（§13.3）。
+- **会话头身份**：`conversation.header.leading`（single/root，显式 priority）渲染「头像 + Quno + 状态点（在线/静默/暂停）」，仅当前在屏会话为 quno 主会话时输出，其余渲染 null；**头部两行左对齐**——第一行身份，第二行「对话/轨迹」居其下（会话标题行退场；不贴右侧，2026-10-23 用户裁定）；面包屑已隐藏（§13.3）。
 - **首开欢迎**：`hero.options`（list/session）渲染 Quno 欢迎块（大头像 + 一句欢迎语 + 三枚建议开场 chips，点击即发送）。stock 鲸鱼座（`hero.brand.mark` 的 fallback）在 `[data-quno-main]` 下经座席 `[data-slot]` wrapper 隐藏；`hero.headline` 文案硬编码不可换，接受保留。
 
 **视觉规格（安静对话）**
