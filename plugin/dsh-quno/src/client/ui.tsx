@@ -91,19 +91,58 @@ export function ErrorBanner(props: { readonly children: React.ReactNode }): Reac
   return <div style={styles.error}>{props.children}</div>
 }
 
-/** Stylesheet for pseudo-state affordances and the quno-main chrome cleanup
- * (installed once, plugin-tagged). The cleanup rules target only
- * `[data-slot]` seams scoped by our own `data-quno-main` claim (design
- * §13.3); no stock class names are touched. */
+/** QUNO_SKIN_CSS（design §13.9）：单一幂等样式表，六块结构——皮肤 token、
+ * 消息头像（含流式呼吸）、会话头身份/欢迎块、对话内胶囊、卡片规格、
+ * 铬件隐藏。选择器只用 `[data-slot]`/`data-chat-*` 接缝与自有属性
+ * （`[data-quno-main]`），不引用 stock CSS-module 类名；暗色经 token 天然成立。 */
 export const QUNO_CSS = `
+/* ── 1. 皮肤 token 作用域 ── */
+[data-quno-main] {
+  --quno-avatar-size: 28px;
+  --quno-avatar-gap: 12px;
+}
+
+/* ── 2. 消息头像：assistant 段落左侧圆形头像，流式时呼吸 ── */
+[data-quno-main] [data-chat-flow-kind="assistant-step"] {
+  position: relative;
+  padding-left: calc(var(--quno-avatar-size) + var(--quno-avatar-gap));
+}
+[data-quno-main] [data-chat-flow-kind="assistant-step"]::before {
+  content: "Q";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: var(--quno-avatar-size);
+  height: var(--quno-avatar-size);
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  background: var(--dsw-alias-brand-primary);
+  color: var(--dsw-alias-bg-base);
+}
+[data-quno-main] [data-chat-flow-kind="assistant-step"]:has([data-streaming])::before {
+  animation: quno-avatar-breath 1.6s ease-in-out infinite;
+}
+@keyframes quno-avatar-breath {
+  50% { opacity: 0.55; }
+}
+
+/* ── 3. 会话头身份 / hero 欢迎块（组件内联样式，此处仅 stock 鲸鱼座退场） ── */
+[data-quno-main] [data-slot="conversation.hero.brand.mark"] { display: none !important; }
+
+/* ── 4. 对话内胶囊（组件内联样式） ── */
+
+/* ── 5. 卡片规格（任务卡组件内联样式按此实现） ── */
+
+/* ── 6. 铬件隐藏：工作区（hero/空态选择器、面包屑）与模式（preset 控件） ── */
 .dsh-quno-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .dsh-quno-action:hover { background: var(--dsw-alias-bg-layer-2); }
 .dsh-quno-tab[data-active="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .dsh-quno-tab:hover { color: var(--dsw-alias-label-primary); }
-/* 正常对话框口径（§13.3）：模型/权限/Plan/附件等 composer 常规件保留，
- * 只隐藏「工作区」（hero/空态选择器）与「模式」（preset 控件、面包屑）。 */
 [data-quno-main] [data-slot="conversation.hero.workspace"],
-[data-quno-main] [data-slot="conversation.empty.workspace"],
 [data-quno-main] [data-slot="conversation.hero.agentPreset"],
 [data-quno-main] [data-slot="conversation.session.header.lineage"] { display: none !important; }
 `

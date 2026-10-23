@@ -35,7 +35,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { QunoLocaleKey } from './locales.ts'
 import type { QunoRemoteFace } from './store.ts'
-import type { SidebarRightFace } from './pill.tsx'
+import type { SidebarRightFace } from './capsule.tsx'
 import TYPERT_REMOTE from '../typert.remote-client.ts'
 import { QunoClientStore } from './store.ts'
 import { en, zh } from './locales.ts'
@@ -43,7 +43,9 @@ import { QunoSettingsSection } from './settings.tsx'
 import { QunoAlternateView } from './alternate.tsx'
 import { QunoMainMarker, QunoPresetLabelShadow } from './marker.tsx'
 import { QunoPanelTab, QunoPanelTitle } from './panel.tsx'
-import { QunoPanelPill } from './pill.tsx'
+import { QunoCapsule } from './capsule.tsx'
+import { QunoHeaderIdentity } from './header-identity.tsx'
+import { QunoHeroWelcome } from './hero-welcome.tsx'
 import { QunoTaskCard } from './task-card.tsx'
 import { QunoReportActions } from './report-actions.tsx'
 import { surfaceEnabled } from './view-model.ts'
@@ -185,9 +187,6 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     // Registered while the master switch is on; disposed (stock UI returns)
     // while it is off. `slots.inject` ties each contribution to this fiber, so
     // a plugin unload cleans up even if the listener never fires again.
-    const presetOf = (sessionId: string): string | null | undefined =>
-      sessions?.list.getSnapshot().byId[sessionId]?.projectionValues?.agentPreset
-
     const registerGated = (): void => {
       // Left column: the Quno tab beside the stock browser (§13.2, work/Quno
       // arrangement). The fork's region wrapper renders this seat as the
@@ -223,15 +222,33 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         panelReady = true
       }
 
-      // Collapsed-state capsule (§13.5).
+      // In-conversation capsule (§13.5, conversation.input.dock): yields to
+      // the expanded panel and collapses when there is nothing to report.
       if (sidebarRight !== undefined) {
-        held.push(ctx.slots.inject('shell.overlay', () => ctx.slots.register({
-          name: 'shell.overlay',
-          id: 'quno-panel-pill',
-          order: 40,
+        held.push(ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+          name: 'conversation.input.dock',
+          id: 'quno-capsule',
+          order: 10,
           inject: () => ({ store, t, face: sidebarRight }),
-        }, QunoPanelPill)))
+        }, QunoCapsule)))
       }
+
+      // Header identity (§13.8): 头像 + 名字 + 状态点 while a Quno main is on
+      // screen; null otherwise keeps the root seat clean.
+      held.push(ctx.slots.inject('conversation.header.leading', () => ctx.slots.register({
+        name: 'conversation.header.leading',
+        priority: -1,
+        inject: () => ({ store, t }),
+      }, QunoHeaderIdentity)))
+
+      // First-open welcome (§13.8): avatar + welcome line + opener chips on
+      // the hero of a Quno main (the marker's hero seat carries the claim).
+      held.push(ctx.slots.inject('conversation.hero.options', () => ctx.slots.register({
+        name: 'conversation.hero.options',
+        id: 'quno-welcome',
+        order: 20,
+        inject: () => ({ store, t }),
+      }, QunoHeroWelcome)))
 
       // Main-conversation identification + chrome cleanup (§13.3). Two seats
       // carry the same claim: the header utilities render once the conversation
@@ -253,50 +270,6 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         id: 'agent-preset',
         priority: -1,
       }, QunoPresetLabelShadow)))
-
-      // Auto-open: entering a Quno main conversation swaps the right column
-      // for the Quno panel (§13.4). Once per on-screen session; closing the
-      // tab does not re-fire until the session changes. The surface store may
-      // not be adopted yet on the first mounted tick — openTab throws then —
-      // so a failed attempt retries with a short bounded backoff instead of
-      // poisoning the store listener.
-      let openedFor: string | null = null
-      let retryTimer: ReturnType<typeof setTimeout> | undefined
-      const evaluate = (): void => {
-        if (sidebarRight === undefined || !panelReady) return
-        const mounted = sidebarRight.mounted.getSnapshot()
-        if (mounted === undefined || mounted === openedFor) {
-          if (mounted === undefined) openedFor = null
-          return
-        }
-        if (presetOf(mounted) !== 'quno') {
-          openedFor = null
-          return
-        }
-        try {
-          sidebarRight.openTab(QUNO_PANEL_KIND)
-          openedFor = mounted
-        } catch {
-          openedFor = null
-          if (retryTimer === undefined) {
-            retryTimer = setTimeout(() => {
-              retryTimer = undefined
-              evaluate()
-            }, 600)
-          }
-        }
-      }
-      held.push(ctx.effect(() => {
-        const disposers = [
-          sidebarRight?.mounted.subscribe(evaluate),
-          sessions?.list.subscribe(evaluate),
-        ]
-        evaluate()
-        return () => {
-          if (retryTimer !== undefined) clearTimeout(retryTimer)
-          for (const dispose of disposers) dispose?.()
-        }
-      }, 'dsh-quno: panel auto-open'))
     }
 
     const applyGating = (): void => {

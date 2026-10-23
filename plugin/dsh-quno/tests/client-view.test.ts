@@ -4,7 +4,7 @@ import {
   eventLine,
   mainPresence,
   panelCounts,
-  shouldShowPill,
+  shouldShowCapsule,
   surfaceEnabled,
   type StateSlice,
 } from '../src/client/view-model.ts'
@@ -58,21 +58,19 @@ test('panelCounts reads the actionable slices', () => {
   assert.deepEqual(panelCounts(slice), { runningTasks: 2, attentionOpen: 2, senseAlarms: 1 })
 })
 
-test('shouldShowPill requires the quno main conversation on screen and the panel collapsed', () => {
+test('shouldShowCapsule requires a resolved quno preset, a collapsed panel and content', () => {
   const base = {
-    mainSessionId: 'main-1',
-    mountedSessionId: 'main-1',
-    mountedPreset: 'quno' as const,
+    preset: 'quno' as const,
     panelExpanded: false,
+    hasContent: true,
   }
-  assert.equal(shouldShowPill(base), true)
-  assert.equal(shouldShowPill({ ...base, panelExpanded: true }), false)
-  assert.equal(shouldShowPill({ ...base, mountedSessionId: 'other' }), false)
-  assert.equal(shouldShowPill({ ...base, mountedPreset: 'default' }), false)
+  assert.equal(shouldShowCapsule(base), true)
+  assert.equal(shouldShowCapsule({ ...base, panelExpanded: true }), false)
+  assert.equal(shouldShowCapsule({ ...base, hasContent: false }), false)
+  assert.equal(shouldShowCapsule({ ...base, preset: 'default' }), false)
   // A pending projection keeps the capsule off instead of flashing it.
-  assert.equal(shouldShowPill({ ...base, mountedPreset: undefined }), false)
-  assert.equal(shouldShowPill({ ...base, mountedPreset: null }), false)
-  assert.equal(shouldShowPill({ ...base, mainSessionId: null }), false)
+  assert.equal(shouldShowCapsule({ ...base, preset: undefined }), false)
+  assert.equal(shouldShowCapsule({ ...base, preset: null }), false)
 })
 
 test('narrowPanelParams accepts only the declared shapes', () => {

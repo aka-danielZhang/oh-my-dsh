@@ -49,28 +49,26 @@ export function panelCounts(slice: StateSlice): PanelCounts {
   }
 }
 
-/** Predicate inputs for the collapsed-pill visibility decision. */
-export interface PillInput {
-  /** The Quno main session id (null while unbound). */
-  readonly mainSessionId: string | null
-  /** The session the right sidebar currently hosts, if any. */
-  readonly mountedSessionId: string | undefined
-  /** The mounted session's `agentPreset` projection (undefined while pending). */
-  readonly mountedPreset: string | null | undefined
+/** Predicate inputs for the in-conversation capsule's visibility. */
+export interface CapsuleInput {
+  /** The host session's resolved `agentPreset` (undefined while pending). */
+  readonly preset: string | null | undefined
   /** Whether the right panel column is expanded. */
   readonly panelExpanded: boolean
+  /** Whether there is anything worth showing (running tasks, attention, alarms). */
+  readonly hasContent: boolean
 }
 
 /**
- * The capsule shows only over a Quno main conversation with the panel collapsed.
- * The preset check deliberately requires the resolved `'quno'` value, so a
- * pending projection keeps the capsule off rather than flashing it.
+ * The capsule lives above the composer of a Quno main conversation and yields
+ * to the expanded panel. The preset check deliberately requires the resolved
+ * `'quno'` value, so a pending projection keeps the capsule off rather than
+ * flashing it; with nothing to report the row collapses entirely.
  */
-export function shouldShowPill(input: PillInput): boolean {
-  if (input.mainSessionId === null) return false
-  if (input.mountedSessionId !== input.mainSessionId) return false
-  if (input.mountedPreset !== 'quno') return false
-  return !input.panelExpanded
+export function shouldShowCapsule(input: CapsuleInput): boolean {
+  if (input.preset !== 'quno') return false
+  if (input.panelExpanded) return false
+  return input.hasContent
 }
 
 /** Minimal event slice for the summary line. */
