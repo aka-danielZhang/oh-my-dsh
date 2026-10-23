@@ -85,10 +85,27 @@ export interface TaskWire {
   readonly childSessionId: string | null
   readonly resultDigest: string | null
   readonly result: string | null
+  /** The recorded execution plan, when the delegating turn produced one. */
+  readonly plan: string | null
+  /** The delegating prompt (bounded), so the panel detail can show the ask. */
+  readonly prompt: string | null
   readonly artifacts: readonly { readonly kind: string; readonly label: string; readonly uri: string }[]
   readonly error: { readonly code: string; readonly message: string } | null
   readonly createdAt: number
   readonly settledAt: number | null
+}
+
+/** One ingested Sense event in the panel's recent-events summary. */
+export interface EventWire {
+  readonly id: string
+  readonly type: string
+  readonly operation: string
+  readonly subjectKey: string | null
+  readonly summary: string | null
+  readonly occurredAt: number | null
+  readonly receivedAt: number
+  readonly ingestSeq: number
+  readonly pruned: boolean
 }
 
 /** One notification with its "why". */
@@ -230,6 +247,10 @@ export const senseCommandInput = z.object({
 export const taskCommandInput = z.object({
   taskId: z.string().min(1).max(200),
   action: z.enum(['resume', 'abandon']),
+})
+
+export const eventsRecentInput = z.object({
+  limit: z.number().int().min(1).max(50).optional(),
 })
 
 export const muteInput = z.object({

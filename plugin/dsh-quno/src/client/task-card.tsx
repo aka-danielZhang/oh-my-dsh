@@ -17,6 +17,8 @@ export interface QunoTaskCardInjected {
   readonly store: QunoClientStore
   readonly t: (key: QunoLocaleKey) => string
   readonly openSession: (sessionId: string) => void
+  /** Focus the task in the right panel (§13.6); undefined degrades to the child-session jump. */
+  readonly openPanel: ((taskId?: string) => void) | undefined
 }
 
 interface TaskMeta {
@@ -65,9 +67,14 @@ export function QunoTaskCard(props: ToolCallViewProps & QunoTaskCardInjected): R
         </div>
       )}
       <div style={styles.actions}>
+        {meta.taskId !== undefined && props.openPanel !== undefined && (
+          <Button size="sm" variant="primary" onClick={() => { props.openPanel?.(meta.taskId ?? '') }}>
+            {t('taskOpenPanel')}
+          </Button>
+        )}
         {childSessionId !== null && (
-          <Button size="sm" variant="outline" onClick={() => { if (childSessionId !== null) props.openSession(childSessionId) }}>
-            {t('taskOpen')}
+          <Button size="sm" variant={props.openPanel !== undefined ? 'outline' : 'primary'} onClick={() => { if (childSessionId !== null) props.openSession(childSessionId) }}>
+            {props.openPanel !== undefined ? t('panelTaskChild') : t('taskOpen')}
           </Button>
         )}
         {(status === 'interrupted' || status === 'failed') && task !== undefined && (

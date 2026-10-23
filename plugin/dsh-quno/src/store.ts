@@ -956,6 +956,14 @@ export class QunoStore {
     return rows.map(mapEvent)
   }
 
+  /** The newest events across every source, newest first (panel summary; bodies may be pruned). */
+  listRecentEvents(limit = 20): EventRecord[] {
+    const rows = this.requireDb().prepare(
+      `SELECT ${EVENT_COLUMNS} FROM events ORDER BY ingest_seq DESC LIMIT ?`,
+    ).all(limit) as Record<string, unknown>[]
+    return rows.map(mapEvent)
+  }
+
   /** Delete or blank expired event bodies that no open work still needs. */
   pruneExpiredEvents(now: number, bodyDays: number): number {
     const cutoff = now - bodyDays * 24 * 60 * 60 * 1000

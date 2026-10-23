@@ -91,12 +91,22 @@ export function ErrorBanner(props: { readonly children: React.ReactNode }): Reac
   return <div style={styles.error}>{props.children}</div>
 }
 
-/** Stylesheet for pseudo-state affordances (installed once, plugin-tagged). */
+/** Stylesheet for pseudo-state affordances and the quno-main chrome cleanup
+ * (installed once, plugin-tagged). The cleanup rules target only
+ * `[data-slot]` seams scoped by our own `data-quno-main` claim (design
+ * §13.3); no stock class names are touched. */
 export const QUNO_CSS = `
 .dsh-quno-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .dsh-quno-action:hover { background: var(--dsw-alias-bg-layer-2); }
 .dsh-quno-tab[data-active="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .dsh-quno-tab:hover { color: var(--dsw-alias-label-primary); }
+[data-quno-main] [data-slot="conversation.input.model"],
+[data-quno-main] [data-slot="conversation.input.permission"],
+[data-quno-main] [data-slot="conversation.input.plan"],
+[data-quno-main] [data-slot="conversation.hero.workspace"],
+[data-quno-main] [data-slot="conversation.empty.workspace"],
+[data-quno-main] [data-slot="conversation.hero.agentPreset"],
+[data-quno-main] [data-slot="conversation.session.header.lineage"] { display: none !important; }
 `
 
 const styles = {

@@ -93,7 +93,16 @@ test('a 125-event burst after sleep drains in bounded batches without a model st
       generation: h.store.getSenseInstance(sense.instance.id).generation,
       configRevision: h.store.getSenseInstance(sense.instance.id).configRevision,
     })
-    // 120 events from A and 5 from B arrive in one burst.
+    // 120 events from A and 5 from B arrive in one burst. B is ingested first
+    // so its deliveries are the oldest: the bounded pre-selection scan
+    // (priority, created_at, id — ids are random UUIDs) must not decide by
+    // lottery whether the minority source is even visible to the batch
+    // selection; the test asserts the cap logic, not the window's luck.
+    ingress.ingest(binding(senseB), batch(Array.from({ length: 5 }, (_value, index) =>
+      envelope({ eventKey: `b-${String(index)}`, type: 'test/changed', summary: 'B' })), {
+      batchKey: 'burst-b',
+      checkpointAfter: { value: 'b-0', revision: 0 },
+    }), h.clock.now)
     for (let page = 0; page < 2; page += 1) {
       ingress.ingest(binding(senseA), batch(Array.from({ length: 60 }, (_value, index) =>
         envelope({ eventKey: `a-${String(page * 60 + index)}`, type: 'test/changed', summary: 'A' })), {
@@ -101,11 +110,6 @@ test('a 125-event burst after sleep drains in bounded batches without a model st
         checkpointAfter: { value: `a-${String(page)}`, revision: page },
       }), h.clock.now)
     }
-    ingress.ingest(binding(senseB), batch(Array.from({ length: 5 }, (_value, index) =>
-      envelope({ eventKey: `b-${String(index)}`, type: 'test/changed', summary: 'B' })), {
-      batchKey: 'burst-b',
-      checkpointAfter: { value: 'b-0', revision: 0 },
-    }), h.clock.now)
     h.runtime.router.route(h.clock.now)
 
     const sourceIds = new Set([senseA.source.id, senseB.source.id])

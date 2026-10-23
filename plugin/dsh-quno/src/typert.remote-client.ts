@@ -11,11 +11,12 @@
  */
 
 import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
-import type { CheckNowResult, EnsureMainResult, QunoWireState } from './api-types.ts'
+import type { CheckNowResult, EnsureMainResult, EventWire, QunoWireState } from './api-types.ts'
 import {
   actAttentionInput,
   createSenseInput,
   ensureMainInput,
+  eventsRecentInput,
   muteInput,
   passthroughSchema,
   senseCommandInput,
@@ -62,6 +63,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       action: 'resume' | 'abandon'
     }) => Promise<RemoteResult<QunoWireState>>
     mute: (request: { minutes?: number; until?: string; cancel?: boolean }) => Promise<RemoteResult<QunoWireState>>
+    eventsRecent: (request: { limit?: number }) => Promise<RemoteResult<{ events: EventWire[] }>>
   }
 
   interface TypertRemoteMap {
@@ -101,6 +103,7 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       action: 'resume' | 'abandon'
     }) => Promise<RemoteResult<QunoWireState>>
     'quno/mute': (request: { minutes?: number; until?: string; cancel?: boolean }) => Promise<RemoteResult<QunoWireState>>
+    'quno/eventsRecent': (request: { limit?: number }) => Promise<RemoteResult<{ events: EventWire[] }>>
   }
 
   interface TypertRemoteNamespaceMap {
@@ -197,6 +200,14 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
       invocation: direct,
       parameters: parameter('request', muteInput, 'dsh-quno/api-types#MuteInput'),
       result: STATE,
+      sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
+    },
+    {
+      id: 'dsh-quno#quno/eventsRecent', service: 'quno', namespace: 'quno', method: 'eventsRecent',
+      implementation: 'eventsRecentForClient',
+      invocation: direct,
+      parameters: parameter('request', eventsRecentInput, 'dsh-quno/api-types#EventsRecentInput'),
+      result: resultCodec('dsh-quno/api-types#EventsRecentResult'),
       sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
     },
   ],

@@ -12,6 +12,7 @@ import { localClock, zonedToEpoch } from './util.ts'
 import type { QunoHost } from './service.ts'
 import type {
   AttentionWire,
+  EventWire,
   NoticeWire,
   QunoWireState,
   RunWire,
@@ -129,6 +130,11 @@ export async function buildQunoState(host: QunoHost): Promise<QunoWireState> {
   }
 }
 
+/** Build the bounded recent-events summary for the panel's 动态 view. */
+export async function buildRecentEvents(host: QunoHost, limit: number): Promise<EventWire[]> {
+  return host.store.listRecentEvents(limit).map(toEventWire)
+}
+
 function toAttentionWire(item: {
   readonly id: string
   readonly topicKey: string
@@ -208,6 +214,8 @@ function toTaskWire(task: {
   readonly childSessionId: string | null
   readonly resultDigest: string | null
   readonly result: string | null
+  readonly plan?: string | null
+  readonly prompt?: string | null
   readonly artifacts: readonly { readonly kind: string; readonly label: string; readonly uri: string }[]
   readonly error: { readonly code: string; readonly message: string } | null
   readonly createdAt: number
@@ -220,11 +228,47 @@ function toTaskWire(task: {
     childSessionId: task.childSessionId,
     resultDigest: task.resultDigest,
     result: task.result,
+    plan: task.plan ?? null,
+    prompt: task.prompt === null || task.prompt === undefined ? null : clipText(task.prompt, 2000),
     artifacts: task.artifacts.map(artifact => ({ kind: artifact.kind, label: artifact.label, uri: artifact.uri })),
     error: task.error === null ? null : { code: task.error.code, message: task.error.message },
     createdAt: task.createdAt,
     settledAt: task.settledAt,
   }
+}
+
+function toEventWire(event: {
+  readonly id: string
+  readonly type: string
+  readonly operation: string
+  readonly subjectKey: string | null
+  readonly summary: string | null
+  readonly occurredAt: number | null
+  readonly receivedAt: number
+  readonly ingestSeq: number
+  readonly prunedAt: number | null
+}): EventWire {
+  return {
+    id: event.id,
+    type: event.type,
+    operation: event.operation,
+    subjectKey: event.subjectKey,
+    summary: event.summary,
+    occurredAt: event.occurredAt,
+    receivedAt: event.receivedAt,
+    ingestSeq: event.ingestSeq,
+    pruned: event.prunedAt !== null,
+  }
+}
+
+/** Clip one text body to at most `max` code units without splitting a surrogate pair. */
+function clipText(text: string, max: number): string {
+  if (text.length <= max) return text
+  let end = max
+  const last = text.charCodeAt(end - 1)
+  const next = text.charCodeAt(end)
+  if (last >= 0xD800 && last <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF) end--
+  return text.slice(0, end)
 }
 
 function toNoticeWire(notice: {

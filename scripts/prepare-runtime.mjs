@@ -120,6 +120,8 @@ const FORK_MODIFIED = new Set([
   '@deepseek-ai/dsh-client-shortcuts',
   '@deepseek-ai/dsh-client-ui-model-selection',
   '@deepseek-ai/dsh-client-ui-sidebar',
+  '@deepseek-ai/dsh-client-ui-workspace',
+  '@deepseek-ai/dsh-cordis-client-runner',
   '@deepseek-ai/dsh-host-frontend-static',
   '@deepseek-ai/dsh-llm-pi-ai',
   '@deepseek-ai/dsh-mcp-client',

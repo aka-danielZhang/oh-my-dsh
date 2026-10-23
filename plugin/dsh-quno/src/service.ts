@@ -16,7 +16,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { DEFAULT_QUNO_CONFIG, mergeQunoConfig, parseQunoConfig } from './contracts.ts'
 import { applyUserAction } from './attention.ts'
 import { AgentAnalyzer } from './analyzer.ts'
-import { buildQunoState } from './api.ts'
+import { buildQunoState, buildRecentEvents } from './api.ts'
 import { Router } from './routing.ts'
 import { Runner } from './runner.ts'
 import { Scheduler } from './scheduler.ts'
@@ -28,7 +28,7 @@ import { QunoStore } from './store.ts'
 import { recall, type RecallRequest, type RecallResult } from './recall.ts'
 import type { AttentionAct } from './contracts.ts'
 import type { QunoStatusSummary } from './host-face.ts'
-import type { CheckNowResult, EnsureMainResult, QunoWireState } from './api-types.ts'
+import type { CheckNowResult, EnsureMainResult, EventWire, QunoWireState } from './api-types.ts'
 import type {
   AttentionItemRecord,
   AttentionStatus,
@@ -499,6 +499,11 @@ export class QunoHost {
   /** Bind or create the main conversation from the browser. */
   async ensureMainForClient(request: { readonly cwd: string }): Promise<EnsureMainResult> {
     return await this.ensureMain(request.cwd)
+  }
+
+  /** Bounded recent-events summary for the panel's 动态 view (called by the gateway). */
+  async eventsRecentForClient(request: { readonly limit?: number }): Promise<{ readonly events: EventWire[] }> {
+    return { events: await buildRecentEvents(this, request.limit ?? 20) }
   }
 
   /** Merge a validated config patch. */

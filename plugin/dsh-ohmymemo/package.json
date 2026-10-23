@@ -78,7 +78,7 @@
     "@deepseek-ai/cordis": "4.0.5",
     "@deepseek-ai/cordis-plugin-timer": "1.1.7",
     "@deepseek-ai/dsh-agent": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-agent-default-model": "npm:@crazx/dsh-agent-default-model@0.2.1-rc.2.zw.3",
+    "@deepseek-ai/dsh-agent-default-model": "npm:@crazx/dsh-agent-default-model@0.2.1-rc.2.zw.6",
     "@deepseek-ai/dsh-api-gateway": "0.2.1-rc.2",
     "@deepseek-ai/dsh-client-locale": "0.2.1-rc.2",
     "@deepseek-ai/dsh-client-store": "0.2.1-rc.2",

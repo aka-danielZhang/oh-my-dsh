@@ -5,7 +5,7 @@ Quno 是 DSH 里的**常驻个人助理**：它把外部变化（日历、订阅
 一个 `dsh-quno` 包同时提供 Host 与浏览器两半：
 
 - **Host**：专用 SQLite（`~/.dsh/quno/quno.sqlite`）、Sense 注册与代际化 ingress/ACK、无模型预检的到期队列、隔离的隐藏分析会话、关注事项、统一通知 outbox（安静时段/频控/去重/重启对账）、委派只读子任务、`quno` 与 `quno-task` 两个程序化 agent preset，以及 Typert `quno` Remote。
-- **浏览器**：设置页 Quno 面板（配置/来源/关注/运行/任务五个页签）、侧栏「Quno」入口、`quno_task` 任务卡与回合尾反馈按钮。
+- **浏览器**：设置页 Quno 面板（配置/来源/关注/运行/任务五个页签）、侧栏「work / Quno」页签（work 为基座浏览区原样，Quno 为联系人视图，总开关关闭即原样回归）、右栏 Quno 面板（动态/关注/任务实时视图，进入主对话自动展开）、收起态实时胶囊（运行任务/待关注计数，点击展开）、`quno_task` 任务卡（点击在右栏面板定位该任务）与回合尾反馈按钮。
 
 完整设计见 [docs/quno-bot-design.md](../../docs/quno-bot-design.md)。
 

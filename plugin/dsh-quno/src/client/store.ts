@@ -10,6 +10,7 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   CheckNowResult,
   EnsureMainResult,
+  EventWire,
   QunoWireState,
 } from '../api-types.ts'
 
@@ -48,17 +49,20 @@ export interface QunoRemoteFace {
   }): Promise<RemoteResult<QunoWireState>>
   taskCommand(request: { taskId: string; action: 'resume' | 'abandon' }): Promise<RemoteResult<QunoWireState>>
   mute(request: { minutes?: number; until?: string; cancel?: boolean }): Promise<RemoteResult<QunoWireState>>
+  eventsRecent(request: { limit?: number }): Promise<RemoteResult<{ events: EventWire[] }>>
 }
 
 /** Immutable snapshot consumed through `useSyncExternalStore`. */
 export interface QunoSnapshot {
   readonly phase: 'idle' | 'loading' | 'ready' | 'error'
   readonly state: QunoWireState | null
+  /** Recent Sense events (动态 view); a failed fetch keeps the previous list. */
+  readonly events: readonly EventWire[]
   readonly error: string | null
   readonly busy: boolean
 }
 
-const INITIAL: QunoSnapshot = { phase: 'idle', state: null, error: null, busy: false }
+const INITIAL: QunoSnapshot = { phase: 'idle', state: null, events: [], error: null, busy: false }
 
 /** Polling store + command surface. */
 export class QunoClientStore {
@@ -104,16 +108,29 @@ export class QunoClientStore {
     try {
       const result = await this.remote.state()
       if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
-      this.set({ phase: 'ready', state: result.value, error: null, busy: this.snapshot.busy })
+      const events = await this.refreshEvents()
+      this.set({ phase: 'ready', state: result.value, events, error: null, busy: this.snapshot.busy })
     } catch (error) {
       this.set({
         phase: this.snapshot.state === null ? 'error' : 'ready',
         state: this.snapshot.state,
+        events: this.snapshot.events,
         error: (error as Error).message,
         busy: this.snapshot.busy,
       })
     } finally {
       this.polling = false
+    }
+  }
+
+  /** Fetch the recent-events summary; a failure degrades to the previous list. */
+  private async refreshEvents(): Promise<readonly EventWire[]> {
+    try {
+      const result = await this.remote.eventsRecent({ limit: 20 })
+      if (!result.ok) return this.snapshot.events
+      return result.value.events
+    } catch {
+      return this.snapshot.events
     }
   }
 
