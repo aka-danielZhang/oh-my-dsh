@@ -24,12 +24,12 @@ import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-gateway/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
+import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
-import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
-import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -40,7 +40,6 @@ import TYPERT_REMOTE from '../typert.remote-client.ts'
 import { QunoClientStore } from './store.ts'
 import { en, zh } from './locales.ts'
 import { QunoSettingsSection } from './settings.tsx'
-import { QunoAlternateView } from './alternate.tsx'
 import { QunoMainMarker, QunoPresetLabelShadow } from './marker.tsx'
 import { QunoPanelTab, QunoPanelTitle } from './panel.tsx'
 import { QunoCapsule } from './capsule.tsx'
@@ -48,6 +47,7 @@ import { QunoHeaderIdentity } from './header-identity.tsx'
 import { QunoHeroWelcome } from './hero-welcome.tsx'
 import { QunoTaskCard } from './task-card.tsx'
 import { QunoReportActions } from './report-actions.tsx'
+import { QunoEntryPanel, QunoEntryGlyph } from './entry-panel.tsx'
 import { surfaceEnabled } from './view-model.ts'
 import { QUNO_PANEL_ID, QUNO_PANEL_KIND } from './right-tab.ts'
 import { QUNO_CSS } from './ui.tsx'
@@ -113,6 +113,13 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   const openSession = (sessionId: string): void => {
     const workspace = ctx.get('uiWorkspace') as { openSession(sessionId: SessionId): void } | undefined
     workspace?.openSession(sessionId as SessionId)
+  }
+  // The entry panel's hand-off target: from a selected panel back to the
+  // Conversation view (absent layout service → no-op; the panel degrades to
+  // its loading line).
+  const backToConversation = (): void => {
+    const layout = ctx.get('layout') as { selectPanel(panelId: null): void } | undefined
+    layout?.selectPanel(null)
   }
   // The panel linkage degrades to the child-session jump while the gated
   // surface is disposed or the service is missing (an unregistered kind throws).
@@ -188,17 +195,22 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     // while it is off. `slots.inject` ties each contribution to this fiber, so
     // a plugin unload cleans up even if the listener never fires again.
     const registerGated = (): void => {
-      // Left column: the Quno tab beside the stock browser (§13.2, work/Quno
-      // arrangement). The fork's region wrapper renders this seat as the
-      // second tab and mounts us only while it is active; disposing it (master
-      // switch off) removes the tab and leaves the stock region verbatim.
-      held.push(ctx.slots.inject('sidebar.workspaces.alternate', () => ctx.slots.register({
-        name: 'sidebar.workspaces.alternate',
-        id: 'quno',
-        order: 10,
+      // Sidebar entry (§13.2): a native panel row under Automations — the
+      // shell owns the row styling, so it reads as one of its own. The panel
+      // page itself is a hand-off: on mount it opens the one main conversation
+      // and returns the layout to the Conversation view.
+      held.push(ctx.slots.inject('main', () => ctx.slots.register({
+        name: 'main',
+        key: 'quno-entry',
+        locale: NS,
+        inject: () => ({ store, t, openSession, backToConversation }),
+      }, QunoEntryPanel)))
+      held.push(ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
+        name: 'sidebar.panellist',
+        id: 'quno-entry',
+        order: 30,
         label: () => t('nav'),
-        inject: () => ({ store, t, openSession, openPanel }),
-      }, QunoAlternateView)))
+      }, QunoEntryGlyph)))
 
       // Right column: two-stage panel registration (§13.4).
       if (sidebarRightTabs !== undefined) {

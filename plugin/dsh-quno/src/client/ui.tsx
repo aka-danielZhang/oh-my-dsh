@@ -92,18 +92,17 @@ export function ErrorBanner(props: { readonly children: React.ReactNode }): Reac
 }
 
 /** QUNO_SKIN_CSS（design §13.9）：单一幂等样式表，七块结构——皮肤 token、
- * 消息头像（含流式呼吸）、会话头身份/欢迎块、对话内胶囊、卡片规格、
- * 铬件隐藏、侧栏首分区（7 + 7b 两个面板）。选择器只用 `[data-slot]`/
- * `data-chat-*` 接缝与自有属性（`[data-quno-main]`、`[data-quno-side]`），
- * 不引用 stock CSS-module 类名；暗色经 token 天然成立。第 7 块是唯一触碰
- * stock 布局的块：纯几何（display/order），全部规则以 `:has([role="tablist"])`
- * 或 `[data-quno-side]` 声明权结界——alternate 不在场时逐条失活，stock
- * 布局逐字节回归（design §13.2「页签条提为侧栏首分区」与「两个面板」）。 */
+ * 消息头像、会话头身份/欢迎块、对话内胶囊、卡片规格、铬件隐藏、
+ * 调色板与安静对话页（2026-10-23「连成一体，安静对话」提案）。
+ * 选择器只用 `[data-slot]`/`data-chat-*` 接缝与自有属性
+ * （`[data-quno-main]`），不引用 stock CSS-module 类名；颜色经 token 与
+ * `--quno-*` 调色板双写暗色。侧栏回归 stock（Quno 入口为原生面板行，
+ * 无页签、无面板分裂）。 */
 export const QUNO_CSS = `
 /* ── 1. 皮肤 token 作用域 ── */
 [data-quno-main] {
-  --quno-avatar-size: 28px;
-  --quno-avatar-gap: 12px;
+  --quno-avatar-size: 26px;
+  --quno-avatar-gap: 10px;
 }
 
 /* ── 2. 消息头像：assistant 段落左侧圆形头像，流式时呼吸 ── */
@@ -150,28 +149,72 @@ export const QUNO_CSS = `
 [data-quno-main] [data-slot="conversation.hero.agentPreset"],
 [data-quno-main] [data-slot="conversation.session.header.lineage"] { display: none !important; }
 
-/* ── 7. 侧栏首分区：页签条提到壳行（新会话/插件/自动化任务）之上 ──
-   页签条由 fork WorkspacesRegion 渲染在浏览区座位内部，壳行（新会话、
-   面板行）是侧栏列的直接子节点——DOM 上跨层，槽位无法重排。这里用纯
-   几何手段（display: contents 打穿「区域座 + 包装盒」两层，flex order
-   提升页签条），零 fork、零 DOM 改动。自门控：每条规则都以页签条的
-   存在为前提（:has 结界），alternate 一旦 dispose（总开关关闭/插件
-   卸载），规则逐条失活，侧栏回到 stock 布局。暗色无关（不动颜色）。 */
-[data-slot="sidebar"] div:has(> [role="tablist"]),
-[data-slot="sidebar"] div:has(> [data-slot="sidebar.workspaces"]):has([role="tablist"]) { display: contents; }
-[data-slot="sidebar"] [role="tablist"] { order: -1; }
-/* 品牌行仍居最顶：它是 root 的首个子节点（root = 设置锚点向上第三层）。
-   stock 态下全体 order 相同，此规则不改变任何位置。 */
-[data-slot="sidebar"] div:has(> div > div > [data-slot="sidebar.settings"]) > div:nth-child(1) { order: -2; }
+/* ── Quno 调色板（「连成一体，安静对话」提案值；暗色随主题双写） ──
+   提案浅色参考：强调 #48669D、气泡冷灰、标题 #23272E。暗色取主题
+   label/层色的半透明等价物，跟随 body[data-ds-dark-theme] 翻转。 */
+[data-quno-main] {
+  --quno-accent: #48669D;
+  --quno-title: #23272E;
+  --quno-bubble: #F1F3F6;
+}
+body[data-ds-dark-theme] [data-quno-main] {
+  --quno-accent: #7A96C8;
+  --quno-title: var(--dsw-alias-label-primary);
+  --quno-bubble: rgba(255, 255, 255, 0.06);
+}
 
-/* ── 7b. 两个面板：Quno 页签下壳行整体退场 ──
-   work = stock 侧栏原样；Quno = 身份行 + 页签 + 联系人 + 设置脚。Quno 页签
-   激活时 QunoAlternateView 在侧栏 root 上写 data-quno-side="on"（owner
-   token 防串，卸载即释放），据此收掉 work 世界的壳行：独立「新会话」按钮
-   （root 下唯一的直接子 button）与全局面板行（唯一的直接子 nav）。锁定时
-   ⌥⌘N 快捷键仍建 work 会话并随页签跟随逻辑切回 work。 */
-[data-quno-side="on"] > button,
-[data-quno-side="on"] > nav { display: none; }
+/* ── 7. 安静对话页（仅 [data-quno-main] 作用域） ── */
+
+/* 7.1 头部一行化：标题行退场，「对话/轨迹」推到右侧与身份同行 */
+[data-quno-main] [data-slot="conversation.session.header"] { display: contents; }
+[data-quno-main] [data-slot="conversation.session.header"] > div:nth-child(1) { display: none; }
+[data-quno-main] [data-slot="conversation.session.header"] > div:nth-child(2) { margin-left: auto; }
+[data-quno-main] header { min-height: 52px; }
+
+/* 7.2 消息列与输入框同宽居中（提案 800–840px） */
+[data-quno-main] div:has(> [data-slot="conversation.chat.flow"]) { max-width: min(800px, 100%); margin: 0 auto; }
+[data-quno-main] [data-composer-card] {
+  max-width: min(800px, 100%); margin-left: auto; margin-right: auto;
+  border-radius: 16px; box-shadow: 0 1px 2px rgba(35, 39, 46, 0.05);
+}
+
+/* 7.3 头像缩小；连续输出与工具过程后不重复插头像（相邻同 Kind 撤销） */
+[data-quno-main] { --quno-avatar-size: 26px; --quno-avatar-gap: 10px; }
+[data-quno-main] [data-chat-flow-kind="tool-call"] + [data-chat-flow-kind="assistant-step"]::before,
+[data-quno-main] [data-chat-flow-kind="assistant-step"] + [data-chat-flow-kind="assistant-step"]::before { content: none; }
+
+/* 7.4 回合节奏：已完成过程行退场（执行信息走轨迹视图）；运行中行内含
+   [data-chat-running] 不受影响；回复组以固定上间距分区，无分隔线。 */
+[data-quno-main] [data-chat-flow-kind="turn-process"]:not(:has([data-chat-running])) { display: none; }
+[data-quno-main] [data-chat-flow-kind="turn-process"] + * { padding-top: 24px; }
+
+/* 7.5 回复底部只留复制与用量：评价（赞/踩）与分支按钮退场。
+   锚为 stock 的 aria-label（中英双字典值）；stock 改文案时规则失效
+   （fail-open，按钮回归），不会误伤。复制成功反馈为 stock 原位行为。
+   复制钮保持 stock 图标盒、放宽为「图标 + 文字」，不断开图标。 */
+[data-quno-main] button[aria-label="好的回答"],
+[data-quno-main] button[aria-label="有问题的回答"],
+[data-quno-main] button[aria-label="取消标记"],
+[data-quno-main] button[aria-label="在新对话中分支"],
+[data-quno-main] button[aria-label="Good response"],
+[data-quno-main] button[aria-label="Bad response"],
+[data-quno-main] button[aria-label="Remove rating"],
+[data-quno-main] button[aria-label="Branch into a new conversation"] { display: none; }
+[data-quno-main] [data-turn-tail] button[aria-label="复制"]::after { content: "复制"; }
+[data-quno-main] [data-turn-tail] button[aria-label="Copy"]::after { content: "Copy"; }
+[data-quno-main] [data-turn-tail] button[aria-label="复制"]::after,
+[data-quno-main] [data-turn-tail] button[aria-label="Copy"]::after {
+  font-size: 12px; font-weight: 400; color: var(--dsw-alias-label-secondary);
+}
+[data-quno-main] [data-turn-tail] button[aria-label="复制"],
+[data-quno-main] [data-turn-tail] button[aria-label="Copy"] {
+  width: auto; min-width: 32px; padding: 0 8px; gap: 6px;
+}
+
+/* 7.6 用户气泡冷灰、发送钮雾蓝 */
+[data-quno-main] { --dsw-specific-bubble: var(--quno-bubble); }
+[data-quno-main] [data-composer-card] button[aria-label="发送消息"],
+[data-quno-main] [data-composer-card] button[aria-label="Send message"] { background: var(--quno-accent); }
 `
 
 const styles = {

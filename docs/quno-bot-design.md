@@ -577,7 +577,7 @@ Notice:   pending → prepared → inbox-durable → presented
 
 **页签条样式规格（fork 侧验收项，对齐分段控件截图语义）**：页签条是 fork WorkspacesRegion 渲染的 chrome，Quno 侧只提供 label 与视图、不自绘页签。规格：置于浏览区顶部的分段 pill 控件——两个等分段（work / Quno）、行高与 stock 侧栏行（32px）对齐、容器左右留白与浏览区 padding 一致；激活段为抬升底色 pill（`--dsw-*` 提升面 token），未激活段文字次级色；图标 + 文案居中，字号字重与侧栏行一致；rail 态退化为 W/Q 两枚切换钮（已有）。目标：看起来就像侧栏原生的一员，而不是贴上去的外来控件。
 
-**「新会话」语义（定稿；位置与面板口径 2026-10-23 三次修订）**：stock 新会话按钮行为不变——它**只向 work 会话体系新增**（锁定时 ⌥⌘N 快捷键同样只建 work 会话，页签跟随逻辑自动切回 work）；Quno 页签没有也不提供任何「新建」入口（一个 Quno 一条主对话，创建只走设置页/首次 `ensureMain`）。**两个面板**：侧栏在两个页签下是完全不同的面板——work 页签 = stock 侧栏原样（新会话按钮、插件/自动化任务行、工作区列表俱在）；Quno 页签 = 身份行 + 页签条 + 联系人视图 + 设置脚，work 世界的壳行（独立「新会话」按钮、全局面板行）**整体退场**（「Quno 下本来也不需要什么新会话、自动化任务……完全做成两个侧边栏面板」——用户明确）。实现：页签条经插件皮肤 CSS（QUNO_CSS 第 7 块）提为侧栏首分区——`display: contents` 打穿浏览区座位的两层包装盒 + flex `order` 提升，零 fork；壳行退场由 QunoAlternateView 挂载时在侧栏 root 写 `data-quno-side="on"`（owner token，卸载即释放）声明，第 7b 块据此隐藏。全部规则以 `:has([role="tablist"])`/声明权结界，alternate 不在场（总开关关闭/插件卸载/rail 态）时逐条失活、stock 布局逐字节回归。
+**「新会话」语义（定稿；入口口径 2026-10-23 四次修订——页签方案否决）**：work/Quno 页签与「两个面板」方案**整体否决**（同日三次修订的页签首分区、壳行退场全部回退——「不用搞这个页签了，直接在自动化任务下面加一个按钮即可」——用户明确）。侧栏回归 stock 原样：新会话按钮、插件/自动化任务行、工作区列表不动；Quno 入口为**原生面板行**——`main` 槽注册 `quno-entry` 页 + `sidebar.panellist` 同 id 条目（order 30，排序在自动化任务之后），壳自持按钮/标签/选中态，样式天然协调。注册的页面是**交接页**而非目的地：挂载即 `ensureMain()` → `openSession()` → `selectPanel(null)` 切回对话视图，使该行成为纯粹的「打开 Quno」按钮；总开关关闭时行随门控整体消失。Quno 主对话仍无任何新建入口（创建只走设置页/首次 `ensureMain`）；⌥⌘N 仍只建 work 会话。对话面安静皮肤（§13.8）不受影响，随在屏会话作用域生效。
 
 - **为什么走 fork**：`sidebar.workspaces` 是 single 槽，占位即整体替换；且**profile 启动的插件客户端没有动态 runner 的 shadowing facade**（它只在运行时插件管理器路径存在），single 槽注册若不显式 `priority: -1` 会与 stock 占位者同优先级冲突抛错（实机复现）。要「原样保留 stock 又并列一个备选视图」，插件侧无扩展点，满足 fork 门槛。
 - **后台会话不出现**：`origin: 'subagent'` 会话被 ui-workspace 会话树原生隐藏（分析会话与子任务会话已走此路径），决策 7 的「默认看不到」由基座原生满足。
@@ -656,28 +656,33 @@ Notice:   pending → prepared → inbox-durable → presented
 
 纪律沿用：注册即 effect、缺槽 try/catch 降级（rc.45 教训）、样式预打 `data-plugin`/`data-plugin-css`、只用 `[data-slot]` 接缝与 `--dsw-*` token、文案中文接 `ctx.locale` 双语；另加两条实机教训：boot 插件无 runner facade（single 槽显式 priority 或走接缝槽）、React 钩子不得位于条件返回之后（#310 崩溃面）。
 
-### 13.8 对话面设计标准（Quno 皮肤）
+### 13.8 对话面设计标准（Quno 皮肤；2026-10-23「连成一体，安静对话」二次修订）
 
-设计目标：主对话看起来、摸起来都像「和 Quno 这个人说话」，而不是又一个 agent 控制台。
+设计目标：主对话看起来、摸起来都像「和 Quno 这个人说话」，而不是又一个 agent 控制台；视觉方向为冷灰侧栏、白色主画布、克制的雾蓝强调（提案《连成一体，安静对话》，实现记录见 `docs/notes/2026-10-23-quno-quiet-design.md`）。
 
 **原则**
 
-1. **身份在场**：每条 Quno 消息带头像；会话头有名字与状态；首开空态有欢迎。
+1. **身份在场**：每轮回复首部带头像；会话头有名字与状态；首开空态有欢迎。
 2. **换肤不换管线**：stock 的流式渲染、Markdown、工具卡、回合轨、滚动管理全部保留；Quno 风格 = 作用域 CSS（`[data-quno-main]`）+ 加法槽。整体接管为何不取，见 §13.9 决策与风险表。
-3. **一致性**：只用 `--dsw-*` token 与 `[data-slot]` 接缝；暗色双写（`body[data-ds-dark-theme] [data-quno-main]`）；文案中文接 `ctx.locale`。
+3. **一致性**：只用 `--dsw-*` token、`--quno-*` 调色板与 `[data-slot]` 接缝；暗色双写（`body[data-ds-dark-theme]` 下的调色板覆盖）；文案中文接 `ctx.locale`。
 
 **身份三件套**
 
-- **消息头像**：assistant 消息左侧 28px 圆形 Quno 头像——纯 CSS `::before` 挂在 `[data-quno-main] .flowItem[data-chat-flow-kind="assistant-step"]`（`.flowItem` 默认无定位上下文，皮肤补 `position: relative`；正文列左移 40px = 头像 28 + 间距 12）。user 消息保持 stock 右对齐气泡；system/compaction/tool 节点无头像；流式（`data-streaming`）时头像 1.6s 呼吸微光。
-- **会话头身份**：`conversation.header.leading`（single/root，显式 priority）渲染「头像 + Quno + 状态点（在线/静默/暂停）」，仅当前在屏会话为 quno 主会话时输出，其余渲染 null；面包屑已隐藏（§13.3）。
+- **消息头像**：assistant 回复首段左侧 26px 圆形 Quno 头像——纯 CSS `::before` 挂在 `[data-chat-flow-kind="assistant-step"]`（皮肤补 `position: relative`；正文列左移 36px = 头像 26 + 间距 10）；连续输出与工具过程后的后续段不重复插头像（相邻同 Kind 撤销 `::before`）。user 消息保持 stock 右对齐气泡；system/compaction/tool 节点无头像。回复首部名字标签为待办：chat 流的分组虚拟化使纯 CSS 无法稳定挂到每轮首段，需 fork 座位或上游 hook。
+- **会话头身份**：`conversation.header.leading`（single/root，显式 priority）渲染「头像 + Quno + 状态点（在线/静默/暂停）」，仅当前在屏会话为 quno 主会话时输出，其余渲染 null；**头部收敛为一行**——会话标题行退场，「对话/轨迹」推到右侧与身份同行（stock 的双层头部经 `display: contents` + `margin-left: auto` 合并）；面包屑已隐藏（§13.3）。
 - **首开欢迎**：`hero.options`（list/session）渲染 Quno 欢迎块（大头像 + 一句欢迎语 + 三枚建议开场 chips，点击即发送）。stock 鲸鱼座（`hero.brand.mark` 的 fallback）在 `[data-quno-main]` 下经座席 `[data-slot]` wrapper 隐藏；`hero.headline` 文案硬编码不可换，接受保留。
 
-**视觉规格**
+**视觉规格（安静对话）**
 
-- 气泡：用户气泡沿用 stock（`--dsw-specific-bubble`、`--dsw-radius-xl`）；assistant 无气泡，靠头像与段落节奏分区（stock 语义如此，不硬造气泡）。
+- 消息列与输入框同宽居中：`min(800px, 100%)`（提案 800–840px），右栏打开自适应收窄。
+- 气泡：用户气泡右对齐、冷灰底（`--dsw-specific-bubble` 作用域覆盖为 `--quno-bubble`）；assistant 无气泡，靠头像与段落节奏分区。
+- **回合节奏**：已完成过程行（「已完成，用时 X 秒」）退场——执行信息走轨迹视图；运行中行内含 `[data-chat-running]` 不受影响（执行中状态保留）；回复组以 24px 上间距分区，不再有横贯分隔线。
+- **回复底部只留复制与用量**：赞/踩/分支按钮退场（按 stock aria-label 中英双字典值锚定，stock 改文案时 fail-open）；复制钮补「复制」文字标签、始终可发现，成功反馈为 stock 原位行为；用量沿用 stock 统计口径。
 - 卡片（汇报卡/任务卡统一）：圆角 16、1px `--dsw-alias-border-l1`、padding 12/14、标题行 13px 次级色 + 正文 14px、左缘 3px 状态条（running=interactive、done=state-success、failed=state-danger）。
-- token 作用域：容器级覆盖只写少量 alias；portal（Tooltip/Modal/Menu 渲到 document.body）逃出容器作用域——胶囊/卡片的 tooltip 不吃覆盖，接受。
+- 输入框：与消息列对齐、16px 圆角、极弱底部阴影；附件/模型/权限/Plan 保留；发送钮雾蓝 `--quno-accent`；对话内胶囊（任务/关注入口）贴输入框上方、无事项塌陷。
+- token 作用域：容器级覆盖只写少量 alias 与 `--quno-*` 调色板；portal（Tooltip/Modal/Menu 渲到 document.body）逃出容器作用域——胶囊/卡片的 tooltip 不吃覆盖，接受。
 - 状态呈现：stock RunningStatus（鲸尾 + shimmer）保留，文案不可换（不是槽），只经 token 改色；turn 状态读取面用 `useSession` / `useSessionStatus`。
+- 动效：页签切换 160ms 底色过渡、alternate 视图 160ms 淡入，缓动 cubic-bezier(0.22,1,0.36,1)，`prefers-reduced-motion` 时全部取消；流式输出原速呈现，不逐字淡入；「对话/轨迹」140ms 与右栏 220ms 属 stock 自有行为，皮肤不接。
 
 ### 13.9 对话面代码设计
 
@@ -693,14 +698,17 @@ Notice:   pending → prepared → inbox-durable → presented
 | 右栏面板 | `sidebarRightTabs` + `sidebar.right.pane.tab` | §13.4（已落地） |
 | 任务卡 / 回合尾 | `tool.call.toolview` / `conversation.chat.turnTail` | 已落地 |
 
-**QUNO_SKIN_CSS 结构**（单一 `<style data-plugin="dsh-quno" data-plugin-css="skin">`，幂等插入）：
+**QUNO_SKIN_CSS 结构**（单一 `<style data-plugin="dsh-quno" data-plugin-css="skin">`，幂等插入；2026-10-23 收敛为七块）：
 
-1. token 作用域块（`[data-quno-main]` + 暗色双写）
-2. 消息头像块（`data-chat-flow-kind` 选择器 + `data-streaming` 呼吸）
+1. token 作用域块（`[data-quno-main]`；头像 26px）
+2. 消息头像块（`data-chat-flow-kind` 选择器；连续输出不重复插头像）
 3. 会话头身份 / hero 欢迎块
 4. 胶囊块
 5. 卡片块（汇报卡/任务卡统一规格）
 6. 铬件隐藏块（§13.3 表）
+7. Quno 调色板（`--quno-*`，暗色双写）+ 安静对话页（头部一行化、列宽 800、已完成过程行退场、回复底部只留复制与用量、气泡冷灰、发送钮雾蓝）
+
+侧栏无皮肤块：Quno 入口为原生面板行（`main` 槽 + `sidebar.panellist`，见 §13.2），壳自持样式。
 
 **实现期修正项**（对现行代码的 delta）：移除 QUNO_CSS 中 `conversation.input.model/permission/plan` 的隐藏（口径已修订为保留）；移除 `conversation.empty.workspace` 死选择器（该槽在本基线不存在）；胶囊从 `shell.overlay` 迁至 `conversation.input.dock`；移除右栏自动展开 watcher。
 
@@ -782,7 +790,7 @@ dsh-quno-sense-<name>   各来源感知器（首版两个真实来源，建议�
 | 历史召回 | 「三月那个方案」经 recall 命中被压缩原文（替换链追溯）并正确引用 |
 | 记忆纪律 | 「今天别提醒」不进 OhMyMemo；「记住我用中文」经确认写入 |
 | 梦境隔离 | 分析会话/自动汇报不出现在梦境提取来源 |
-| work / Quno 页签 | 侧栏呈两个面板：work 页签 = stock 侧栏原样（新会话/插件/自动化任务/工作区列表俱在）；Quno 页签 = 品牌行 + 页签条 + 联系人视图 + 设置脚，壳行（新会话按钮、插件/自动化任务行）退场、无任何新建入口（样式规格见 §13.2）；Quno 页签点击联系人直接进入唯一主对话；总开关关闭后页签条消失、区域与壳行原样回归 |
+| 侧栏 Quno 入口 | 自动化任务行下方出现原生面板行「Q Quno」（壳自持样式，order 30 排在自动化任务之后）；点击行 → 打开唯一主对话并切回对话视图；总开关关闭后行消失、侧栏原样回归；侧栏无 work/Quno 页签、无新建入口 |
 | 铬件净化 | quno 主会话无 hero/空态工作区选择、preset 标签与 cwd 露出；模型选择器、权限、Plan 等 composer 常规件保留可用；非 quno 会话铬件不受影响；空态首屏 composer 占位文案仍提工作区（已知残留） |
 | 右栏面板与胶囊 | 右栏默认收起、不随进入会话自动展开；胶囊在对话框内（composer 上方）实时显示计数；点击胶囊 → 面板展开且胶囊退场；动态/关注/任务三视图实时刷新 |
 | 对话皮肤 | 每条 Quno 消息左侧带 28px 头像（流式时呼吸）；会话头显示头像 + 名字 + 状态点；首开空态渲染欢迎块与建议开场；非 quno 会话无任何皮肤残留 |
@@ -900,6 +908,7 @@ dsh-quno-sense-<name>   各来源感知器（首版两个真实来源，建议�
 - 2026-10-23 §13 修订：左栏页签走 fork `sidebar.workspaces.alternate` 接缝（页签条为 fork chrome，样式规格与新会话语义见 §13.2）；主对话铬件口径修订为「只去工作区与 preset 模式，模型选择器等 composer 常规件保留」（§13.3；修订记录见 `docs/notes/2026-10-23-quno-sidebar-tab-chrome.md`）。
 - 2026-10-23 §13.2 二次修订：页签条提为侧栏首分区（品牌行之下、新会话/插件/自动化任务等壳行之上）——插件皮肤 CSS 几何重排（`display: contents` + `order`，`:has` 结界自门控），零 fork；同轮完成对话面皮肤与右栏/胶囊口径的实机验证。
 - 2026-10-23 §13.2 三次修订：侧栏分裂为两个面板——Quno 页签下壳行（新会话按钮、插件/自动化任务行）整体退场，work 页签 stock 原样；声明权 `data-quno-side` 挂侧栏 root（alternate 挂载即写、卸载即释放），皮肤 CSS 7b 块据此隐藏，自门控口径不变。
+- 2026-10-23 §13.2 四次修订（页签方案否决）：work/Quno 页签与两个面板整体回退，侧栏回归 stock；Quno 入口改为自动化任务行下的原生面板行（`main` + `sidebar.panellist` 注册，交接页挂载即打开主对话并 `selectPanel(null)` 切回对话视图）；同轮落地「连成一体，安静对话」视觉（§13.8 二次修订，实现记录见 `docs/notes/2026-10-23-quno-quiet-design.md`）。
 - 2026-10-23 §6.11 实现落地：`plugin/dsh-quno-sense-yzj` 0.1.0 按本文件建成并验证（单测 16 项 + 真实 CLI 登出态 auth 路径 + 真实 `QunoSensesService` 生命周期 + scratch profile 注册），落地偏差四条（probe 只判 CLI 可用性、增量页方向自我保护、`type old` 回翻未实现、`mentionedMe` 恒 null）见 `docs/notes/2026-10-23-quno-sense-yzj-impl.md`。
 - 2026-10-23 交互改版落地并按用户纠偏修订为 work/Quno 制：fork `v0.2.1-rc.2+zw.6` 增 `sidebar.workspaces.alternate` 接缝（`@crazx/dsh-client-ui-workspace`、`@crazx/dsh-cordis-client-runner` 首发于 zw.6；zw.5 因陈旧构建产物已弃用），dsh-quno 侧栏改注册接缝槽、右栏面板/收起态胶囊/任务卡联动/铬件净化全部实机验证；偏差 #12–#15，决策与实施记录见 `docs/notes/2026-10-23-quno-work-quno-tabs.md` 与 `docs/notes/2026-10-23-quno-sidebar-impl.md`。
 - 2026-10-23 对话面二次修订：右栏默认收起、胶囊迁入对话框内 `conversation.input.dock`；新增 Quno 皮肤标准与代码设计（§13.8/§13.9：消息头像/会话头身份/首开欢迎块 + 不整体接管对话框的三路否决）；勘误 `conversation.empty.workspace` 死选择器（记录见 `docs/notes/2026-10-23-quno-conversation-skin.md`）。
