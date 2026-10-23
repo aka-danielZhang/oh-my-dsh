@@ -188,10 +188,10 @@ body[data-ds-dark-theme] [data-quno-main] {
 [data-quno-main] [data-chat-flow-kind="turn-process"]:not(:has([data-chat-running])) { display: none; }
 [data-quno-main] [data-chat-flow-kind="turn-process"] + * { padding-top: 24px; }
 
-/* 7.5 回复底部只留复制与用量：评价（赞/踩）与分支按钮退场。
+/* 7.5 回复底部保持 stock 样式，只少三颗按钮：评价（赞/踩）与分支退场，
+   复制/用量/时间原样（图标形态不动，不加文字）。
    锚为 stock 的 aria-label（中英双字典值）；stock 改文案时规则失效
-   （fail-open，按钮回归），不会误伤。复制成功反馈为 stock 原位行为。
-   复制钮保持 stock 图标盒、放宽为「图标 + 文字」，不断开图标。 */
+   （fail-open，按钮回归），不会误伤。复制成功反馈为 stock 原位行为。 */
 [data-quno-main] button[aria-label="好的回答"],
 [data-quno-main] button[aria-label="有问题的回答"],
 [data-quno-main] button[aria-label="取消标记"],
@@ -200,16 +200,6 @@ body[data-ds-dark-theme] [data-quno-main] {
 [data-quno-main] button[aria-label="Bad response"],
 [data-quno-main] button[aria-label="Remove rating"],
 [data-quno-main] button[aria-label="Branch into a new conversation"] { display: none; }
-[data-quno-main] [data-turn-tail] button[aria-label="复制"]::after { content: "复制"; }
-[data-quno-main] [data-turn-tail] button[aria-label="Copy"]::after { content: "Copy"; }
-[data-quno-main] [data-turn-tail] button[aria-label="复制"]::after,
-[data-quno-main] [data-turn-tail] button[aria-label="Copy"]::after {
-  font-size: 12px; font-weight: 400; color: var(--dsw-alias-label-secondary);
-}
-[data-quno-main] [data-turn-tail] button[aria-label="复制"],
-[data-quno-main] [data-turn-tail] button[aria-label="Copy"] {
-  width: auto; min-width: 32px; padding: 0 8px; gap: 6px;
-}
 
 /* 7.6 用户气泡冷灰、发送钮雾蓝 */
 [data-quno-main] { --dsw-specific-bubble: var(--quno-bubble); }

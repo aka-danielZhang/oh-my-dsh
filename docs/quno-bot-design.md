@@ -677,7 +677,7 @@ Notice:   pending → prepared → inbox-durable → presented
 - 消息列与输入框同宽居中：`min(800px, 100%)`（提案 800–840px），右栏打开自适应收窄。
 - 气泡：用户气泡右对齐、冷灰底（`--dsw-specific-bubble` 作用域覆盖为 `--quno-bubble`）；assistant 无气泡，靠头像与段落节奏分区。
 - **回合节奏**：已完成过程行（「已完成，用时 X 秒」）退场——执行信息走轨迹视图；运行中行内含 `[data-chat-running]` 不受影响（执行中状态保留）；回复组以 24px 上间距分区，不再有横贯分隔线。
-- **回复底部只留复制与用量**：赞/踩/分支按钮退场（按 stock aria-label 中英双字典值锚定，stock 改文案时 fail-open）；复制钮补「复制」文字标签、始终可发现，成功反馈为 stock 原位行为；用量沿用 stock 统计口径。
+- **回复底部只留复制与用量**：赞/踩/分支按钮退场（按 stock aria-label 中英双字典值锚定，stock 改文案时 fail-open）；复制/用量/时间保持 stock 图标形态原样（不加文字、不改样式）；复制成功反馈为 stock 原位行为；用量沿用 stock 统计口径。
 - 卡片（汇报卡/任务卡统一）：圆角 16、1px `--dsw-alias-border-l1`、padding 12/14、标题行 13px 次级色 + 正文 14px、左缘 3px 状态条（running=interactive、done=state-success、failed=state-danger）。
 - 输入框：与消息列对齐、16px 圆角、极弱底部阴影；附件/模型/权限/Plan 保留；发送钮雾蓝 `--quno-accent`；对话内胶囊（任务/关注入口）贴输入框上方、无事项塌陷。
 - token 作用域：容器级覆盖只写少量 alias 与 `--quno-*` 调色板；portal（Tooltip/Modal/Menu 渲到 document.body）逃出容器作用域——胶囊/卡片的 tooltip 不吃覆盖，接受。
