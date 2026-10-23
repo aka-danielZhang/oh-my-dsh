@@ -23,6 +23,7 @@ oh-my-dsh 是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness
 | 发布 runbook（tag/latest 指针/secrets） | [docs/release-runbook.md](docs/release-runbook.md) |
 | 开发插件接入已安装 Desktop（接入前必读） | [docs/desktop-plugin-integration.md](docs/desktop-plugin-integration.md) |
 | OhMyMemo 记忆空间（范围/状态/视图/目录地图） | [docs/ohmymemo-memory-space.md](docs/ohmymemo-memory-space.md) |
+| Quno 开发说明（单一主对话/Sense 感知/事件流/子任务/压缩） | [docs/quno-bot-design.md](docs/quno-bot-design.md) |
 | Harness 基线升级 playbook | [docs/harness-bump/README.md](docs/harness-bump/README.md) |
 | 决策记录（日期命名，非平凡变更必写） | `docs/notes/` |
 
@@ -68,6 +69,9 @@ docs/                        权威契约文档 + packaging-playbook.md + notes/
 | `dsh-thread` | dual | Thread 模式跨会话 Handoff Draft（preset-owned，设置总开关门控） |
 | `dsh-todo-completion-guard` | host-only | 回合收尾待办守卫：未完成 todo 列表上的回合结束前注入一次建议性提醒 |
 | `dsh-ohmymemo` | dual | OhMyMemo 用户长期记忆（一条记忆一个 md，tools + capsule + 梦境提取） |
+| `dsh-quno` | dual | Quno 常驻个人助理：Sense 事件流 + 单主对话投递 + 关注/反馈 + 只读委派 + 主动压缩 preset |
+| `dsh-quno-sense-calendar` | host-only | Quno 日历 Sense：本地 .ics 快照差分（新增/改期/撤回） |
+| `dsh-quno-sense-feed` | host-only | Quno 订阅源 Sense：RSS/Atom 条件请求，条目内容修订去重 |
 | `dsh-usage-stats` | dual | 设置页「使用统计」：JSONL 事实源 + 手写 SVG 图表 |
 | `dsh-copy-session-id` | browser-only | 会话头「⋯」菜单加「复制会话 ID」并重渲染下载日志项 |
 | `dsh-settings-icons` | browser-only | 设置导航三枚语义图标（usage-stats/mcp/memory） |

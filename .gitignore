@@ -89,3 +89,12 @@ plugin/dsh-usage-stats/.preview/
 
 # dsh-todo-completion-guard：构建产物（scripts/new-plugin.mjs 生成）
 plugin/dsh-todo-completion-guard/lib/
+
+# dsh-quno：构建产物（scripts/new-plugin.mjs 生成）
+plugin/dsh-quno/lib/
+
+# dsh-quno-sense-calendar：构建产物（scripts/new-plugin.mjs 生成）
+plugin/dsh-quno-sense-calendar/lib/
+
+# dsh-quno-sense-feed：构建产物（scripts/new-plugin.mjs 生成）
+plugin/dsh-quno-sense-feed/lib/

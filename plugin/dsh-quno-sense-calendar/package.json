@@ -1,0 +1,54 @@
+{
+  "name": "dsh-quno-sense-calendar",
+  "version": "0.1.0",
+  "description": "Quno Sense: local iCalendar (.ics) directory source with stable UID/revision identity and snapshot-diff changes",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "default": "./lib/index.js"
+    },
+    "./src/*": "./src/*",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "desktop": {
+      "ship": true
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsdown",
+    "watch": "tsdown --watch",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "plugin:add": "dsh plugin --profile web add file:.",
+    "plugin:remove": "dsh plugin --profile web remove dsh-quno-sense-calendar"
+  },
+  "files": [
+    "lib/index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aka-danielZhang/oh-my-dsh.git",
+    "directory": "plugin/dsh-quno-sense-calendar"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.5",
+    "@types/node": "^24.13.3",
+    "tsdown": "^0.22.2",
+    "tsx": "^4.19.2",
+    "typescript": "^6.0.3"
+  },
+  "packageManager": "pnpm@10.28.0"
+}
