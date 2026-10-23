@@ -7,7 +7,11 @@
  * enters the one main conversation.
  *
  * The region mounts this view only while its tab is active, so the component
- * is a pure function of the shared polling store.
+ * is a pure function of the shared polling store — and its mount/unmount IS
+ * the Quno-tab-active state: while mounted it claims the sidebar column root
+ * with `data-quno-side="on"`, under which the skin CSS retires the shell rows
+ * (the standalone New Session button and the global panel list) so the Quno
+ * tab reads as its own sidebar panel (design §13.2, two-panel arrangement).
  *
  * @module dsh-quno/client/alternate
  */
@@ -37,6 +41,29 @@ export function QunoAlternateView(props: AlternateProps): React.ReactElement {
   const { t } = props
   const state = snapshot.state
   const [busy, setBusy] = React.useState(false)
+
+  // Region claim: while this view is on screen the Quno tab is its own
+  // sidebar panel — the shell rows (standalone New Session button, global
+  // panel list) belong to the work world and step aside via the
+  // [data-quno-side] skin rules (QUNO_CSS block 7). Owner-token claim on the
+  // sidebar column root (the first element inside the `sidebar` slot anchor);
+  // unmount — tab switch, alternate dispose, plugin unload — always releases
+  // the claim it owns, and a missing anchor simply claims nothing.
+  const sideToken = React.useRef(`quno-side-${Math.random().toString(36).slice(2)}`)
+  React.useLayoutEffect(() => {
+    const anchor = document.querySelector<HTMLElement>('[data-slot="sidebar"]')
+    const root = anchor?.firstElementChild
+    if (!(root instanceof HTMLElement)) return
+    root.dataset.qunoSide = 'on'
+    root.dataset.qunoSideOwner = sideToken.current
+    const claimed = root
+    return () => {
+      if (claimed.dataset.qunoSideOwner === sideToken.current) {
+        delete claimed.dataset.qunoSide
+        delete claimed.dataset.qunoSideOwner
+      }
+    }
+  }, [])
 
   if (state === null) {
     const loading = snapshot.phase !== 'error'

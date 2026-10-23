@@ -93,11 +93,12 @@ export function ErrorBanner(props: { readonly children: React.ReactNode }): Reac
 
 /** QUNO_SKIN_CSS（design §13.9）：单一幂等样式表，七块结构——皮肤 token、
  * 消息头像（含流式呼吸）、会话头身份/欢迎块、对话内胶囊、卡片规格、
- * 铬件隐藏、侧栏首分区。选择器只用 `[data-slot]`/`data-chat-*` 接缝与自有
- * 属性（`[data-quno-main]`），不引用 stock CSS-module 类名；暗色经 token
- * 天然成立。第 7 块是唯一触碰 stock 布局的块：纯几何（display/order），
- * 全部规则以 `:has([role="tablist"])` 结界——alternate 不在场时逐条失活，
- * stock 布局逐字节回归（design §13.2「页签条提为侧栏首分区」）。 */
+ * 铬件隐藏、侧栏首分区（7 + 7b 两个面板）。选择器只用 `[data-slot]`/
+ * `data-chat-*` 接缝与自有属性（`[data-quno-main]`、`[data-quno-side]`），
+ * 不引用 stock CSS-module 类名；暗色经 token 天然成立。第 7 块是唯一触碰
+ * stock 布局的块：纯几何（display/order），全部规则以 `:has([role="tablist"])`
+ * 或 `[data-quno-side]` 声明权结界——alternate 不在场时逐条失活，stock
+ * 布局逐字节回归（design §13.2「页签条提为侧栏首分区」与「两个面板」）。 */
 export const QUNO_CSS = `
 /* ── 1. 皮肤 token 作用域 ── */
 [data-quno-main] {
@@ -162,6 +163,15 @@ export const QUNO_CSS = `
 /* 品牌行仍居最顶：它是 root 的首个子节点（root = 设置锚点向上第三层）。
    stock 态下全体 order 相同，此规则不改变任何位置。 */
 [data-slot="sidebar"] div:has(> div > div > [data-slot="sidebar.settings"]) > div:nth-child(1) { order: -2; }
+
+/* ── 7b. 两个面板：Quno 页签下壳行整体退场 ──
+   work = stock 侧栏原样；Quno = 身份行 + 页签 + 联系人 + 设置脚。Quno 页签
+   激活时 QunoAlternateView 在侧栏 root 上写 data-quno-side="on"（owner
+   token 防串，卸载即释放），据此收掉 work 世界的壳行：独立「新会话」按钮
+   （root 下唯一的直接子 button）与全局面板行（唯一的直接子 nav）。锁定时
+   ⌥⌘N 快捷键仍建 work 会话并随页签跟随逻辑切回 work。 */
+[data-quno-side="on"] > button,
+[data-quno-side="on"] > nav { display: none; }
 `
 
 const styles = {
