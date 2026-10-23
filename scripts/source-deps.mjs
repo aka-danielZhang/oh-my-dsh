@@ -26,7 +26,7 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const pluginRoot = resolve(repoRoot, 'plugin')
 const anchor = resolve(pluginRoot, 'deepseek-harness')
 const OFFICIAL_VERSION = '0.2.1-rc.2'
-const FORK_VERSION = '0.2.1-rc.2.zw.6'
+const FORK_VERSION = '0.2.1-rc.2.zw.7'
 
 /**
  * The fork-modified package set — exactly what

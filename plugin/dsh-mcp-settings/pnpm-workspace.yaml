@@ -11,7 +11,7 @@ overrides:
   '@deepseek-ai/dsh-acp': 0.2.1-rc.2
   '@deepseek-ai/dsh-api-gateway': 0.2.1-rc.2
   '@deepseek-ai/dsh-api-remotes': 0.2.1-rc.2
-  '@deepseek-ai/dsh-api-session-controller': npm:@crazx/dsh-api-session-controller@0.2.1-rc.2.zw.6
+  '@deepseek-ai/dsh-api-session-controller': npm:@crazx/dsh-api-session-controller@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-api-settings-controller': 0.2.1-rc.2
   '@deepseek-ai/dsh-api-workspace-controller': 0.2.1-rc.2
   '@deepseek-ai/dsh-api-workspace-files': 0.2.1-rc.2
@@ -29,7 +29,7 @@ overrides:
   '@deepseek-ai/dsh-client-file-upload': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-hmr': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-locale': 0.2.1-rc.2
-  '@deepseek-ai/dsh-client-modules': npm:@crazx/dsh-client-modules@0.2.1-rc.2.zw.6
+  '@deepseek-ai/dsh-client-modules': npm:@crazx/dsh-client-modules@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-client-resources': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-store': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-agent-preset': 0.2.1-rc.2
@@ -48,7 +48,7 @@ overrides:
   '@deepseek-ai/dsh-client-ui-jobs': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-layout': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-message-feedback': 0.2.1-rc.2
-  '@deepseek-ai/dsh-client-ui-model-selection': npm:@crazx/dsh-client-ui-model-selection@0.2.1-rc.2.zw.6
+  '@deepseek-ai/dsh-client-ui-model-selection': npm:@crazx/dsh-client-ui-model-selection@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-client-ui-open-in-app': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-permission-presets': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-plan': 0.2.1-rc.2
@@ -62,7 +62,7 @@ overrides:
   '@deepseek-ai/dsh-client-ui-settings-models': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-settings-plugin-inventory': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-settings-plugins': 0.2.1-rc.2
-  '@deepseek-ai/dsh-client-ui-sidebar': npm:@crazx/dsh-client-ui-sidebar@0.2.1-rc.2.zw.6
+  '@deepseek-ai/dsh-client-ui-sidebar': npm:@crazx/dsh-client-ui-sidebar@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-client-ui-sidebar-files': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-sidebar-right': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-sidebar-textpreview': 0.2.1-rc.2
@@ -74,7 +74,7 @@ overrides:
   '@deepseek-ai/dsh-client-ui-trajectory': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-user-questions': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-workflow-run': 0.2.1-rc.2
-  '@deepseek-ai/dsh-client-ui-workspace': npm:@crazx/dsh-client-ui-workspace@0.2.1-rc.2.zw.6
+  '@deepseek-ai/dsh-client-ui-workspace': npm:@crazx/dsh-client-ui-workspace@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-client-web': 0.2.1-rc.2
   '@deepseek-ai/dsh-code-runtime': 0.2.1-rc.2
   '@deepseek-ai/dsh-code-runtime-worker-thread': 0.2.1-rc.2
@@ -89,7 +89,7 @@ overrides:
   '@deepseek-ai/dsh-time-context': 0.2.1-rc.2
   '@deepseek-ai/dsh-tmux-context': 0.2.1-rc.2
   '@deepseek-ai/dsh-agent': 0.2.1-rc.2
-  '@deepseek-ai/dsh-agent-default-model': npm:@crazx/dsh-agent-default-model@0.2.1-rc.2.zw.6
+  '@deepseek-ai/dsh-agent-default-model': npm:@crazx/dsh-agent-default-model@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-agent-loop': 0.2.1-rc.2
   '@deepseek-ai/dsh-agent-tool-presentation': 0.2.1-rc.2
   '@deepseek-ai/dsh-scope': 0.2.1-rc.2
@@ -111,9 +111,9 @@ overrides:
   '@deepseek-ai/dsh-experimental-tool-agent-team': 0.2.1-rc.2
   '@deepseek-ai/dsh-experimental-webworker-packer': 0.2.1-rc.2
   '@deepseek-ai/dsh-experimental-webworker-runtime': 0.2.1-rc.2
-  '@deepseek-ai/dsh-cordis-client-runner': npm:@crazx/dsh-cordis-client-runner@0.2.1-rc.2.zw.6
+  '@deepseek-ai/dsh-cordis-client-runner': npm:@crazx/dsh-cordis-client-runner@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-cordis-host-runner': 0.2.1-rc.2
-  '@deepseek-ai/dsh-tool-cordis': npm:@crazx/dsh-tool-cordis@0.2.1-rc.2.zw.6
+  '@deepseek-ai/dsh-tool-cordis': npm:@crazx/dsh-tool-cordis@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-client-ui-cordis': 0.2.1-rc.2
   '@deepseek-ai/dsh-command-feedback': 0.2.1-rc.2
   '@deepseek-ai/dsh-message-feedback': 0.2.1-rc.2
@@ -138,7 +138,7 @@ overrides:
   '@deepseek-ai/dsh-host-directory-picker-auto': 0.2.1-rc.2
   '@deepseek-ai/dsh-host-directory-picker-browse': 0.2.1-rc.2
   '@deepseek-ai/dsh-host-directory-picker-native': 0.2.1-rc.2
-  '@deepseek-ai/dsh-host-frontend-static': npm:@crazx/dsh-host-frontend-static@0.2.1-rc.2.zw.6
+  '@deepseek-ai/dsh-host-frontend-static': npm:@crazx/dsh-host-frontend-static@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-host-open-in-app': 0.2.1-rc.2
   '@deepseek-ai/dsh-host-plugin-inventory': 0.2.1-rc.2
   '@deepseek-ai/dsh-host-webserver': 0.2.1-rc.2
@@ -154,14 +154,14 @@ overrides:
   '@deepseek-ai/dsh-deepseek-llm-api-extensions': 0.2.1-rc.2
   '@deepseek-ai/dsh-llm': 0.2.1-rc.2
   '@deepseek-ai/dsh-llm-deepseek': 0.2.1-rc.2
-  '@deepseek-ai/dsh-llm-pi-ai': npm:@crazx/dsh-llm-pi-ai@0.2.1-rc.2.zw.6
+  '@deepseek-ai/dsh-llm-pi-ai': npm:@crazx/dsh-llm-pi-ai@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-llm-retry': 0.2.1-rc.2
   '@deepseek-ai/dsh-plugin-package-inventory-deepseek': 0.2.1-rc.2
   '@deepseek-ai/dsh-token-meter': 0.2.1-rc.2
   '@deepseek-ai/dsh-lsp': 0.2.1-rc.2
   '@deepseek-ai/dsh-lsp-stdio': 0.2.1-rc.2
   '@deepseek-ai/dsh-tool-lsp': 0.2.1-rc.2
-  '@deepseek-ai/dsh-mcp-client': npm:@crazx/dsh-mcp-client@0.2.1-rc.2.zw.6
+  '@deepseek-ai/dsh-mcp-client': npm:@crazx/dsh-mcp-client@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-plan-mode': 0.2.1-rc.2
   '@deepseek-ai/dsh-agent-presets': 0.2.1-rc.2
   '@deepseek-ai/dsh-persona': 0.2.1-rc.2
@@ -274,7 +274,7 @@ overrides:
   '@deepseek-ai/dsh-workflow': 0.2.1-rc.2
   '@deepseek-ai/dsh-workflow-worker-thread': 0.2.1-rc.2
   '@deepseek-ai/dsh-workspace': 0.2.1-rc.2
-  '@deepseek-ai/dsh': npm:@crazx/dsh@0.2.1-rc.2.zw.6
+  '@deepseek-ai/dsh': npm:@crazx/dsh@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-desktop': 0.2.1-rc.2
   '@deepseek-ai/dsh-desktop-host': 0.2.1-rc.2
   '@deepseek-ai/dsh-web-frontend': 0.2.1-rc.2

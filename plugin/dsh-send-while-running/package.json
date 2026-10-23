@@ -69,7 +69,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
-    "@deepseek-ai/dsh-api-session-controller": "npm:@crazx/dsh-api-session-controller@0.2.1-rc.2.zw.3",
+    "@deepseek-ai/dsh-api-session-controller": "npm:@crazx/dsh-api-session-controller@0.2.1-rc.2.zw.7",
     "@deepseek-ai/dsh-client-locale": "0.2.1-rc.2",
     "@deepseek-ai/dsh-client-store": "0.2.1-rc.2",
     "@deepseek-ai/dsh-client-ui-conversation": "0.2.1-rc.2",

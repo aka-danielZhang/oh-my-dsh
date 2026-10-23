@@ -100,9 +100,8 @@ export const QUNO_CSS = `
 .dsh-quno-action:hover { background: var(--dsw-alias-bg-layer-2); }
 .dsh-quno-tab[data-active="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
 .dsh-quno-tab:hover { color: var(--dsw-alias-label-primary); }
-[data-quno-main] [data-slot="conversation.input.model"],
-[data-quno-main] [data-slot="conversation.input.permission"],
-[data-quno-main] [data-slot="conversation.input.plan"],
+/* 正常对话框口径（§13.3）：模型/权限/Plan/附件等 composer 常规件保留，
+ * 只隐藏「工作区」（hero/空态选择器）与「模式」（preset 控件、面包屑）。 */
 [data-quno-main] [data-slot="conversation.hero.workspace"],
 [data-quno-main] [data-slot="conversation.empty.workspace"],
 [data-quno-main] [data-slot="conversation.hero.agentPreset"],
