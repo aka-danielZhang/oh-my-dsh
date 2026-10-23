@@ -91,10 +91,13 @@ export function ErrorBanner(props: { readonly children: React.ReactNode }): Reac
   return <div style={styles.error}>{props.children}</div>
 }
 
-/** QUNO_SKIN_CSS（design §13.9）：单一幂等样式表，六块结构——皮肤 token、
+/** QUNO_SKIN_CSS（design §13.9）：单一幂等样式表，七块结构——皮肤 token、
  * 消息头像（含流式呼吸）、会话头身份/欢迎块、对话内胶囊、卡片规格、
- * 铬件隐藏。选择器只用 `[data-slot]`/`data-chat-*` 接缝与自有属性
- * （`[data-quno-main]`），不引用 stock CSS-module 类名；暗色经 token 天然成立。 */
+ * 铬件隐藏、侧栏首分区。选择器只用 `[data-slot]`/`data-chat-*` 接缝与自有
+ * 属性（`[data-quno-main]`），不引用 stock CSS-module 类名；暗色经 token
+ * 天然成立。第 7 块是唯一触碰 stock 布局的块：纯几何（display/order），
+ * 全部规则以 `:has([role="tablist"])` 结界——alternate 不在场时逐条失活，
+ * stock 布局逐字节回归（design §13.2「页签条提为侧栏首分区」）。 */
 export const QUNO_CSS = `
 /* ── 1. 皮肤 token 作用域 ── */
 [data-quno-main] {
@@ -145,6 +148,20 @@ export const QUNO_CSS = `
 [data-quno-main] [data-slot="conversation.hero.workspace"],
 [data-quno-main] [data-slot="conversation.hero.agentPreset"],
 [data-quno-main] [data-slot="conversation.session.header.lineage"] { display: none !important; }
+
+/* ── 7. 侧栏首分区：页签条提到壳行（新会话/插件/自动化任务）之上 ──
+   页签条由 fork WorkspacesRegion 渲染在浏览区座位内部，壳行（新会话、
+   面板行）是侧栏列的直接子节点——DOM 上跨层，槽位无法重排。这里用纯
+   几何手段（display: contents 打穿「区域座 + 包装盒」两层，flex order
+   提升页签条），零 fork、零 DOM 改动。自门控：每条规则都以页签条的
+   存在为前提（:has 结界），alternate 一旦 dispose（总开关关闭/插件
+   卸载），规则逐条失活，侧栏回到 stock 布局。暗色无关（不动颜色）。 */
+[data-slot="sidebar"] div:has(> [role="tablist"]),
+[data-slot="sidebar"] div:has(> [data-slot="sidebar.workspaces"]):has([role="tablist"]) { display: contents; }
+[data-slot="sidebar"] [role="tablist"] { order: -1; }
+/* 品牌行仍居最顶：它是 root 的首个子节点（root = 设置锚点向上第三层）。
+   stock 态下全体 order 相同，此规则不改变任何位置。 */
+[data-slot="sidebar"] div:has(> div > div > [data-slot="sidebar.settings"]) > div:nth-child(1) { order: -2; }
 `
 
 const styles = {

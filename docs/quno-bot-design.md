@@ -577,7 +577,7 @@ Notice:   pending → prepared → inbox-durable → presented
 
 **页签条样式规格（fork 侧验收项，对齐分段控件截图语义）**：页签条是 fork WorkspacesRegion 渲染的 chrome，Quno 侧只提供 label 与视图、不自绘页签。规格：置于浏览区顶部的分段 pill 控件——两个等分段（work / Quno）、行高与 stock 侧栏行（32px）对齐、容器左右留白与浏览区 padding 一致；激活段为抬升底色 pill（`--dsw-*` 提升面 token），未激活段文字次级色；图标 + 文案居中，字号字重与侧栏行一致；rail 态退化为 W/Q 两枚切换钮（已有）。目标：看起来就像侧栏原生的一员，而不是贴上去的外来控件。
 
-**「新会话」语义（定稿）**：stock 新会话按钮渲染在 SidebarRoot（页签条之上），常驻不动，行为不变——它**只向 work 会话体系新增**；Quno 页签没有也不提供任何「新建」入口（一个 Quno 一条主对话，创建只走设置页/首次 `ensureMain`）。停在 Quno 页签时点新会话：创建的是 work 会话，fork 页签条在创建后自动切回 work 页签（fork 侧验收项）。
+**「新会话」语义（定稿；位置口径 2026-10-23 二次修订）**：stock 新会话按钮常驻不动，行为不变——它**只向 work 会话体系新增**；Quno 页签没有也不提供任何「新建」入口（一个 Quno 一条主对话，创建只走设置页/首次 `ensureMain`）。停在 Quno 页签时点新会话：创建的是 work 会话，fork 页签条在创建后自动切回 work 页签（fork 侧验收项）。**页签条位置**：页签条是侧栏的**首分区**——品牌行之下、壳行（新会话/插件/自动化任务）之上，三行壳件整体居于页签之下（「新会话+插件+自动化任务都应该在页签下面」——用户明确）。实现走插件皮肤 CSS（QUNO_CSS 第 7 块）：`display: contents` 打穿浏览区座位的两层包装盒 + flex `order` 提升，零 fork、零 DOM 改动；全部规则以 `:has([role="tablist"])` 结界，alternate 不在场（总开关关闭/插件卸载/rail 态）时逐条失活、stock 布局逐字节回归，rail 态切换钮不受影响。
 
 - **为什么走 fork**：`sidebar.workspaces` 是 single 槽，占位即整体替换；且**profile 启动的插件客户端没有动态 runner 的 shadowing facade**（它只在运行时插件管理器路径存在），single 槽注册若不显式 `priority: -1` 会与 stock 占位者同优先级冲突抛错（实机复现）。要「原样保留 stock 又并列一个备选视图」，插件侧无扩展点，满足 fork 门槛。
 - **后台会话不出现**：`origin: 'subagent'` 会话被 ui-workspace 会话树原生隐藏（分析会话与子任务会话已走此路径），决策 7 的「默认看不到」由基座原生满足。
@@ -782,7 +782,7 @@ dsh-quno-sense-<name>   各来源感知器（首版两个真实来源，建议�
 | 历史召回 | 「三月那个方案」经 recall 命中被压缩原文（替换链追溯）并正确引用 |
 | 记忆纪律 | 「今天别提醒」不进 OhMyMemo；「记住我用中文」经确认写入 |
 | 梦境隔离 | 分析会话/自动汇报不出现在梦境提取来源 |
-| work / Quno 页签 | 浏览区顶部出现分段 pill 页签（样式规格见 §13.2）；work 页签为 stock 浏览区原样（搜索/工作区/行菜单/对话框俱在）；Quno 页签点击联系人直接进入唯一主对话；Quno 页签无新建入口，stock 新会话按钮只向 work 体系新增、创建后自动切回 work 页签；总开关关闭后页签条消失、区域原样回归 |
+| work / Quno 页签 | 侧栏首分区出现分段 pill 页签（品牌行之下、新会话等壳行之上；样式规格见 §13.2）；work 页签为 stock 浏览区原样（搜索/工作区/行菜单/对话框俱在）；Quno 页签点击联系人直接进入唯一主对话；Quno 页签无新建入口，stock 新会话按钮只向 work 体系新增、创建后自动切回 work 页签；总开关关闭后页签条消失、区域原样回归 |
 | 铬件净化 | quno 主会话无 hero/空态工作区选择、preset 标签与 cwd 露出；模型选择器、权限、Plan 等 composer 常规件保留可用；非 quno 会话铬件不受影响；空态首屏 composer 占位文案仍提工作区（已知残留） |
 | 右栏面板与胶囊 | 右栏默认收起、不随进入会话自动展开；胶囊在对话框内（composer 上方）实时显示计数；点击胶囊 → 面板展开且胶囊退场；动态/关注/任务三视图实时刷新 |
 | 对话皮肤 | 每条 Quno 消息左侧带 28px 头像（流式时呼吸）；会话头显示头像 + 名字 + 状态点；首开空态渲染欢迎块与建议开场；非 quno 会话无任何皮肤残留 |
@@ -898,4 +898,7 @@ dsh-quno-sense-<name>   各来源感知器（首版两个真实来源，建议�
 - 2026-10-23 §6.11 按 yzj-cli 0.1.5 实测评审修订：`--limit` 上限 20 与配额按群口径、健康分类改「进程级退出码 → API errorCode」两层、`readOriginal` 诚实报 `false`、双向可见性与消息项字段降级为登录态首验项、`--jq` 支持面修正（`im group search` 不支持）、`--profile` 进 configFields（记录见 `docs/notes/2026-10-23-quno-sense-yzj-cli-contract-review.md`）。
 - 2026-10-23 UI 交互改版：§13 全面重写（左栏「Quno/会话」页签、主对话铬件净化、右栏 Quno 面板、收起态胶囊、任务卡 → 面板联动），并更正「`sidebar.workspaces.sessionListView` 槽存在」的事实错误（§18 偏差 #11；方案与依据见 `docs/notes/2026-10-23-quno-sidebar-redesign.md`）。
 - 2026-10-23 §13 修订：左栏页签走 fork `sidebar.workspaces.alternate` 接缝（页签条为 fork chrome，样式规格与新会话语义见 §13.2）；主对话铬件口径修订为「只去工作区与 preset 模式，模型选择器等 composer 常规件保留」（§13.3；修订记录见 `docs/notes/2026-10-23-quno-sidebar-tab-chrome.md`）。
+- 2026-10-23 §13.2 二次修订：页签条提为侧栏首分区（品牌行之下、新会话/插件/自动化任务等壳行之上）——插件皮肤 CSS 几何重排（`display: contents` + `order`，`:has` 结界自门控），零 fork；同轮完成对话面皮肤与右栏/胶囊口径的实机验证。
+- 2026-10-23 §6.11 实现落地：`plugin/dsh-quno-sense-yzj` 0.1.0 按本文件建成并验证（单测 16 项 + 真实 CLI 登出态 auth 路径 + 真实 `QunoSensesService` 生命周期 + scratch profile 注册），落地偏差四条（probe 只判 CLI 可用性、增量页方向自我保护、`type old` 回翻未实现、`mentionedMe` 恒 null）见 `docs/notes/2026-10-23-quno-sense-yzj-impl.md`。
 - 2026-10-23 交互改版落地并按用户纠偏修订为 work/Quno 制：fork `v0.2.1-rc.2+zw.6` 增 `sidebar.workspaces.alternate` 接缝（`@crazx/dsh-client-ui-workspace`、`@crazx/dsh-cordis-client-runner` 首发于 zw.6；zw.5 因陈旧构建产物已弃用），dsh-quno 侧栏改注册接缝槽、右栏面板/收起态胶囊/任务卡联动/铬件净化全部实机验证；偏差 #12–#15，决策与实施记录见 `docs/notes/2026-10-23-quno-work-quno-tabs.md` 与 `docs/notes/2026-10-23-quno-sidebar-impl.md`。
+- 2026-10-23 对话面二次修订：右栏默认收起、胶囊迁入对话框内 `conversation.input.dock`；新增 Quno 皮肤标准与代码设计（§13.8/§13.9：消息头像/会话头身份/首开欢迎块 + 不整体接管对话框的三路否决）；勘误 `conversation.empty.workspace` 死选择器（记录见 `docs/notes/2026-10-23-quno-conversation-skin.md`）。
