@@ -546,34 +546,104 @@ Notice:   pending → prepared → inbox-durable → presented
 
 ## 13. UI 与 Remote
 
-### 13.1 视图
+> 本节于 2026-10-23 两次修订。第一版交互改版建立在 `sidebar.workspaces.sessionListView` 槽上，经核实该槽**在 fork 源码中不存在**（仅以未合入 note 形式存在；dsh-thread 与 dsh-quno 的注册均为永不触发的 dormant 注册），`registerMessageProjection` 实为 Host 侧 LLM 消息投影而非 UI 通道——两处事实性错误已在偏差 #11 更正。同日的第一版落地方案（占用 `sidebar.workspaces` 主槽 + 自绘精简会话列表）经用户纠偏与实机验证后，改为本节的 **work / Quno 页签制**（偏差 #13）：fork 增加 `sidebar.workspaces.alternate` 接缝槽并发布 `v0.2.1-rc.2+zw.6`，stock 浏览区原样保留为「work」页签，Quno 独享「Quno」页签。以下挂载点均已对照 fork `v0.2.1-rc.2+zw.6` 源码与实机（scratch `DSH_HOME` + 真实浏览器 DOM 断言）验证。
 
-侧栏新增「Quno」入口（fork `sidebar.workspaces.sessionListView` 槽，dsh-thread 分组先例）。配置与状态是同一产品的配套视图，不增加另一个 Automation 中心。
+### 13.1 总体形态：三个面
 
-**后台运行会话可见性（已定稿）**：分析会话与委派子任务会话**默认对用户隐藏**（不出现在普通侧栏会话列表），但从「运行记录」视图与任务卡点进去**可见**（只读视角）。实现若当前基线无 session 隐藏能力，先用 Quno 分组视图隔离 + 可识别标题过渡，不假定未存在的 hidden 属性。
+```text
+┌──────────────┬──────────────────────────────┬──────────────────┐
+│ 左侧栏        │ 主对话（消息流）              │ 右栏 Quno 面板    │
+│ brand/新会话  │  · 汇报卡 / 任务卡 / 聊天      │ ┌──────────────┐ │
+│ 插件/自动化   │  · 任务卡点击 ───────────────→ │ │动态│关注│任务│ │
+│ ┌work│Quno┐  │                              │ │  实时状态     │ │
+│ │(work=原样) │  右上角常驻小胶囊（可收起）     │ └──────────────┘ │
+│ ◉ Quno 在线   │  （运行任务/待办事项计数）      │ 收起时只剩胶囊   │
+└──────────────┴──────────────────────────────┴──────────────────┘
+```
 
-| 视图 | 内容 |
+- **work 页签 = 原样**：stock WorkspaceBrowser（搜索、工作区树/单列、会话行菜单、对话框、拖拽）原封不动；brand 行、新会话、插件、自动化任务等壳层行常驻，不随页签切换。
+- **Quno 页签 = 消息对象**：每个 Quno 一行（头像 + 名字 + 一行状态 + 待关注徽标），点击直接进唯一主对话；cwd 固定默认、用户不可见不可选，preset/模型/权限等「模式」概念全部不露出（§13.3）。
+- **右栏就是 Quno 状态面板**：动态（Sense）、关注事项、子任务三个视图实时刷新；在 Quno 主对话里右栏默认就是这块面板（「换掉右侧栏」语义，§13.4）。
+- **收起的胶囊也能看**：面板折叠后右上角留一颗小胶囊，实时显示运行中任务数与待办事项数；点击即展开面板（§13.5）。
+- **任务从对话里长出来**：`quno_task` 任务卡嵌在引起它的那条回复里；点卡片 → 右栏面板打开并定位该任务的实时运行视图（§13.6）。
+
+视图内容分工：设置页承担**配置**（职责/模型/来源范围/节奏/预算——五页签现状保留）；右栏面板承担**实时状态**（Sense 健康、关注事项、任务）；「为什么提醒/没提醒」的证据与规则摘要在面板的动态视图可查（可审计结论依据，不暴露模型内部推理）。
+
+### 13.2 左侧栏改版：work / Quno 页签（fork 接缝）
+
+**接缝（fork `v0.2.1-rc.2+zw.6`）**：ui-workspace 的 `sidebar.workspaces` 占位者改为 WorkspacesRegion 包装，并声明子槽 **`sidebar.workspaces.alternate`**（list / root，owner `{ active }`，槽级 inject `hooks.alternate` 提供席位元数据 = `{ occupied, label() }`）。无备选注册时区域逐字节等价于 stock 浏览器；有注册时顶部出现「work / <备选标签>」页签条，按页签挂载浏览器或备选条目；备选 dispose 时从任一页签回落浏览器并撤掉页签条。rail 态有备选时渲染 W/<首字> 两枚切换钮。设计依据与上游合并成本评估见 fork 仓 `.agents/notes/implemented/feature/2026-10-23-workspaces-alternate-view.md`。
+
+**插件侧（dsh-quno）**：向 `sidebar.workspaces.alternate` 注册 id `quno`、`label: () => t('nav')` 的联系人视图（头像 + 名字 + 在线/静默/暂停状态 + 待关注徽标 + 运行中/待办子行；点击 → `remote.quno.ensureMain()` → `ctx.uiWorkspace.openSession(mainSessionId)`；任务子行点击 → 右栏面板定位该任务）。Quno 总开关关闭（`config.enabled === false`）时 dispose 全部门控注册：alternate 消失 → 页签条消失 → 区域原样回归 stock；总开关只影响门控注册，设置页/任务卡/回合尾按钮不随开关消失（历史任务卡仍可读，面板动作降级为跳子会话）。
+
+- **为什么走 fork**：`sidebar.workspaces` 是 single 槽，占位即整体替换；且**profile 启动的插件客户端没有动态 runner 的 shadowing facade**（它只在运行时插件管理器路径存在），single 槽注册若不显式 `priority: -1` 会与 stock 占位者同优先级冲突抛错（实机复现）。要「原样保留 stock 又并列一个备选视图」，插件侧无扩展点，满足 fork 门槛。
+- **后台会话不出现**：`origin: 'subagent'` 会话被 ui-workspace 会话树原生隐藏（分析会话与子任务会话已走此路径），决策 7 的「默认看不到」由基座原生满足。
+- **风险与回归**：无 alternate 注册时区域渲染路径与上游一致；壳 e2e 探针断言的侧栏折叠循环与 `shell.leading` 重开不受影响。rail 态的搜索/添加图标在有备选时让位于切换钮（展开后齐全），为 stock rail 的唯一可见变化。
+
+**被否决的两版（记录在案）**：占用 `sidebar.workspaces` 主槽自绘「Quno / 会话」页签（第一版落地后经用户纠偏否决——新会话/插件/自动化任务应当与既有会话同属 work，而非被替换；且自绘会话列表有搜索/右键/拖拽等先天缺口）；`sidebar.panellist` + `main` keyed 面板（Quno 会成为「一页应用」而非「消息对象」）。
+
+### 13.3 主对话铬件净化（无 cwd、无模式）
+
+主对话由 `ensureMain` 以固定 cwd 创建（缺省 homedir），用户全程无 cwd/preset 入口。残余铬件按以下机制隐藏：
+
+- **会话标记**：同一标记组件注册进两个席位——`conversation.session.header.utilities`（list/session，id `quno-main-marker`）与 `conversation.hero.options`（list/session，id `quno-main-marker-hero`）：组件渲染隐藏哨兵，会话 `projectionValues.agentPreset === 'quno'` 时向上找最近 `[data-slot="main.conversation"]` 锚打 `data-quno-main="main"`（带 owner token 的认领，卸载/切换安全交接；右栏会话面与投影未到达时不打标——投影迟到只表现为净化晚一拍，不误伤）。hero 席位覆盖首开空态（此时头部铬件尚未渲染，utilities 席位不存在）。
+- **按槽接缝隐藏**（只用 `[data-slot]` 接缝与自有命名空间，禁用 stock CSS-module 类名）：
+
+| 隐藏对象 | 选择器接缝 |
 |---|---|
-| 对话（主对话） | 主动汇报卡、正常聊天、任务卡、来源入口、反馈按钮 |
-| Quno 配置 | 职责、模型、来源范围、检查频率、工作/安静时段、提醒强度、预算 |
-| 来源 | 各 Sense 健康（正常/延迟/鉴权失效/限流/缺口）、最后成功同步、重连与停用 |
-| 关注事项 | 当前关注/等待/延后/已结束、下一次复查时间 |
-| 运行记录 | 每轮处理量、事项变化、为什么通知/没通知、耗时成本、失败重试 |
-| 任务列表 | 全部委派任务与子任务会话入口（主对话 ↔ 子会话关系导航、产物列表） |
+| 模型选择器 | `[data-quno-main] [data-slot="conversation.input.model"]` |
+| 权限选择器 | `[data-quno-main] [data-slot="conversation.input.permission"]` |
+| Plan 芯片 | `[data-quno-main] [data-slot="conversation.input.plan"]` |
+| hero 工作区选择 / 空态工作区选择 / preset 控件 | `[data-slot="conversation.hero.workspace"]` / `[data-slot="conversation.empty.workspace"]` / `[data-slot="conversation.hero.agentPreset"]` |
+| 会话头面包屑（含 cwd 风险） | `[data-quno-main] [data-slot="conversation.session.header.lineage"]` |
 
-「为什么提醒我」必须能看到证据与规则摘要；「为什么没提醒」能看到安静时段/已解决/重复/预算原因。展示可审计结论依据，不要求暴露模型内部推理。
+- **会话头 preset 标签**（`conversation.session.header.actions` 的 `agent-preset` 占位）：同 id + `priority: -1` 遮蔽（dsh-copy-session-id 先例），组件在非 quno 会话渲染简易等价文本（数据源 `projectionValues.agentPreset`）、quno 主会话渲染 null。遮蔽是全局的，简易复刻是刻意取舍。
+- 模型/权限的实际默认由 `quno` preset 固定；调整需求由设置页承担，不在对话面暴露。
+- 已知残留（v1 接受）：空态首屏 composer 的占位文案仍提「选择一个工作区开始」（`conversation.composer.bar` 内的输入占位，功能上可直接输入开聊，不拦工作流）。
 
-### 13.2 挂载点与通道
+### 13.4 右栏 Quno 面板（动态 / 关注 / 任务实时看板）
 
-| 槽/机制 | 内容 | 先例 |
+基座原生两段式（ui-schedule 已发货先例）：
+
+1. **类型注册**：`ctx.sidebarRightTabs.register({ id: 'dsh-quno/panel', kind: 'qunoPanel', multiple: false, keepMounted: true, title })`；参数经 `SidebarRightTabParamsMap` declaration merge 声明（`{ taskId?, view? }`）。
+2. **实体注册**：keyed 槽 `sidebar.right.pane.tab`（body，key = `dsh-quno/panel`）+ `sidebar.right.pane.tab.title`（chip 标题，含运行中任务计数）。
+
+- **面板内三视图**（组件内页签，设置页五页签同款 useState 模式）：
+  - **动态**：各 Sense 实例健康（healthy/degraded/rate-limited/auth-required/缺口）、信息缺口、最近事件摘要（`eventsRecent` Remote）。
+  - **关注**：attention items（open/waiting/snoozed）+ 已处理/延后/不再关注按钮（`actAttention`，带 expectedRevision 防并发，与设置页同通道）。
+  - **任务**：进行中/已结束任务列表与实时状态；点击进入任务详情（§13.6）。
+- **数据源**：现有 `remote.quno.state` + 15 秒轮询 store 扩展（增 `events.recent` Remote 方法；任务列表连同 `plan`/`prompt` 摘要随 `state()` 下发，见偏差 #14）；实时性升级路径为 typert stream（`@Remote({mode:'stream'})`），v1 不阻塞在轮询上。
+- **「换掉右侧栏」语义**：watch 当前会话（`ctx.sidebarRight.mounted` + sessions list + 轮询 tick 三路订阅），进入 `agentPreset === 'quno'` 的会话时自动 `ctx.sidebarRight.openTab('qunoPanel')`——openTab 同步展开右栏；每个在屏会话只自动开一次，用户手动关页签不回弹（切会话再回才重开）。openTab 在面板 store 未就绪的瞬间会抛，观察器带 600ms 有界重试。其他会话右栏内容不动；push/fullscreen/float/分栏/折叠全部吃 dockkit 原生能力，零自研。
+
+### 13.5 收起态胶囊（shell.overlay）
+
+- `shell.overlay`（list/root，id `quno-panel-pill`）注册小胶囊，**仅在 quno 主会话在屏且右栏折叠时渲染**（dsh-thread 胶囊浮层先例）：在屏判定 = `ctx.sidebarRight.mounted`（缺省回落 `retainedBy.mainView` 行）+ 该会话 preset 为 `quno`；折叠判定 = `data-sidebar-right-open` DOM 接缝的 MutationObserver（attributes + **childList**——右栏展开时面板节点可能连同属性一起新插入，纯 attribute 观察会漏）。
+- 内容：运行中任务数、待办关注数、Sense 健康点（任一非 healthy 变橙）；轮询 store 直读。
+- 点击 → `ctx.sidebarRight.openTab('qunoPanel')`（列自动展开，胶囊随之退场）。
+- 面板完全折叠时，右栏原生展开按钮仍在，两入口不冲突。
+
+### 13.6 任务卡 → 面板联动（子任务实时运行）
+
+- `quno_task` 任务卡（`tool.call.toolview` keyed 槽，已落地）的主按钮改为：`ctx.sidebarRight.openTab('qunoPanel', { params: { taskId, view: 'task' } })`（ui-schedule `openTaskDetail` 同款发货先例）；「查看完整子会话」`openSession(childSessionId)` 为次按钮；面板服务不可用或总开关关闭时主按钮降级为跳子会话。
+- **任务详情视图**：状态机 + plan + prompt 摘要 + result/error + artifacts + 操作（续跑/放弃走现有 `taskCommand`；「查看完整子会话」直接打开只读子会话——子会话默认隐藏但可直接打开，决策 7 语义完整落地）。
+- 链路闭环：回复消息里的卡片（对话上下文）→ 点击 → 右栏实时运行（不离开主对话）→ 需要深挖才跳进子会话只读视图。
+- 运行日志的逐行 follow（`ctx.jobs` Remote stream）v1 未接，任务详情以结果/计划/产物 + 子会话入口呈现（偏差 #14）。
+
+### 13.7 挂载点与 Remote 总表（2026-10-23 修订，work/Quno 制）
+
+| 槽/机制 | 内容 | 状态 |
 |---|---|---|
-| `sidebar.workspaces.sessionListView` | Quno 列表视图 | dsh-thread |
-| `settings.section` | Quno 设置页（配置/来源/事项/运行记录） | ohmymemo |
-| `settings.general.item` | Quno 总开关 | dsh-thread |
-| 消息投影 `registerMessageProjection` | 汇报卡 / 任务卡 / 反馈按钮 | thread handoff 卡（toolview 变体思路） |
-| Typert Remote `quno` | `bots.* / senses.* / attention.* / runs.* / tasks.* / feedback.*` | dsh-usage-stats 手写 typert 先例 |
+| `sidebar.workspaces.alternate`（fork zw.6 新槽） | Quno 联系人页签 | 已发布（`v0.2.1-rc.2+zw.6`）并实机验证 |
+| `sidebar.workspaces`（stock，不动） | work 页签 = stock 浏览区原样 | fork Region 包装，无备选时逐字节等价 |
+| `sidebarRightTabs.register` + `sidebar.right.pane.tab`（+`.title`） | Quno 面板（动态/关注/任务） | 已落地，实机验证 |
+| `shell.overlay` | 收起态实时胶囊 | 已落地，实机验证（含展开/折叠联动） |
+| `conversation.session.header.utilities` + `conversation.hero.options` | `data-quno-main` 会话标记（双席位，渲染 null/哨兵） | 已落地，实机验证 |
+| `conversation.session.header.actions` 同 id 遮蔽 | quno 主会话隐藏 preset 标签 | 已发货机制（copy-session-id 先例） |
+| `tool.call.toolview` key `quno_task` | 任务卡（主按钮 → 面板，次按钮 → 子会话） | 已落地 |
+| `conversation.chat.turnTail` | 回合尾反馈按钮 | 已落地 |
+| `settings.section` / `settings.general.item` | Quno 设置页 / 总开关 | 已落地 |
+| Typert Remote `quno` | 11 方法（含新增 `eventsRecent`；任务列表随 `state()` 携带 plan/prompt） | 已落地 |
 
-纪律沿用：注册即 effect、缺槽 try/catch 降级（rc.45 教训）、样式预打 `data-plugin`/`data-plugin-css`、只用 `--dsw-*` token、文案中文接 `ctx.locale` 双语。
+纪律沿用：注册即 effect、缺槽 try/catch 降级（rc.45 教训）、样式预打 `data-plugin`/`data-plugin-css`、只用 `[data-slot]` 接缝与 `--dsw-*` token、文案中文接 `ctx.locale` 双语；另加两条实机教训：boot 插件无 runner facade（single 槽显式 priority 或走接缝槽）、React 钩子不得位于条件返回之后（#310 崩溃面）。
 
 ## 14. 插件落点与 DSH 能力映射
 
@@ -636,6 +706,10 @@ dsh-quno-sense-<name>   各来源感知器（首版两个真实来源，建议�
 | 历史召回 | 「三月那个方案」经 recall 命中被压缩原文（替换链追溯）并正确引用 |
 | 记忆纪律 | 「今天别提醒」不进 OhMyMemo；「记住我用中文」经确认写入 |
 | 梦境隔离 | 分析会话/自动汇报不出现在梦境提取来源 |
+| work / Quno 页签 | 浏览区顶部出现「work / Quno」页签；work 页签为 stock 浏览区原样（搜索/工作区/行菜单/对话框俱在）；Quno 页签点击联系人直接进入唯一主对话；总开关关闭后页签条消失、区域原样回归 |
+| 铬件净化 | quno 主会话无模型/权限/plan/hero 与空态工作区选择/preset 标签与 cwd 露出；非 quno 会话铬件不受影响；空态首屏 composer 占位文案仍提工作区（已知残留） |
+| 右栏面板 | 进入 quno 主会话自动展开 Quno 面板；动态/关注/任务三视图实时刷新；每会话只自动开一次，手动关页签不回弹；折叠后胶囊计数实时可见、点击即展开 |
+| 任务卡联动 | 点任务卡 → 右栏定位该任务实时运行（plan/prompt/产物/续跑/放弃）；「查看完整子会话」可进入只读子会话；子会话不出现在会话列表 |
 
 ### 15.2 事件流与判断（沿用事件流设计验收表）
 
@@ -676,6 +750,7 @@ dsh-quno-sense-<name>   各来源感知器（首版两个真实来源，建议�
 - **阶段 A（协议与可靠性闭环）—已完成 2026-10-23**：contracts/store/ingress/routing/scheduler + 测试 Sense + 假模型结果 + outbox；故障注入覆盖 ACK 幂等、事务原子性、重启恢复、对账；主对话绑定与 `quno` preset 骨架（含压缩参数）同步落地。
 - **阶段 B（可用的个人助理）—已完成 2026-10-23**：真实 AgentLoop 分析与主对话投递、关注事项、反馈（按钮 + 自然语言）、安静时段、来源健康、`quno_recall`、委派子任务正常路径 + 任务卡、设置页五个页签、侧栏入口。两个真实 Sense 落地为**本地 iCalendar + RSS/Atom**（消息源当时无可用 API 而延后，现经 yzj-cli 路径解除阻塞，Sense 设计见 §6.11，待实现）；dry-run 由 `config.dryRun` 提供，开启主动汇报由用户决定。
 - **阶段 C（真实使用调优）—机制已落地 2026-10-23**：以确定性模拟验证 125 条积压的有界批次、跨源公平、同主题合并、每小时通知上限与最小间隔、时间驱动的复查、保留期清理与预算；真实数天的误报/漏报调参仍需上线后按 §15 指标迭代。
+- **交互改版（2026-10-23 落地，work/Quno 制）**：§13 全面重写两次后定稿——fork zw.6 增 `sidebar.workspaces.alternate` 接缝，「work」（stock 原样）/「Quno」（联系人视图）双页签；主对话铬件净化（双席位标记 + 接缝 CSS）；右栏 Quno 面板（动态/关注/任务 + `eventsRecent`）；收起态实时胶囊；任务卡 → 面板联动。实机（scratch `DSH_HOME` + 真实浏览器 DOM 断言）全链路通过；偏差 #12–#15。
 - **dsh-thread 退役**：见 §16.1——功能整体不需要，**不依赖 Quno 进度、无能力平价要求**，可提前到任意桌面 Release；本次未执行（属独立发版动作）。
 - **后续明确延期**：审批卡与对外写操作、多 Quno 配置 UI 与跨 Quno 通知仲裁、独立 HTTP push、多设备、复杂 cron、Sense 商店、自然语言编译 Sense。
 - **明确不做**：云端常驻/关机继续运行（产品决策，§17）。
@@ -720,6 +795,11 @@ dsh-quno-sense-<name>   各来源感知器（首版两个真实来源，建议�
 | 8 | 回合尾反馈按钮按来源消息过滤 | 1 小时内可操作通知窗口 | turn-tail props 不暴露触发消息来源 |
 | 9 | 主对话「绑定 workspace」 | `sessionController.create({cwd, agentPreset:'quno'})`，不强制挂 workspace | Quno 主对话是独立入口；warehouse 挂载由侧栏自己的 slot 承担 |
 | 10 | 自定义层次压缩 Provider | 直接用 stock `compaction-basic`（本 fork 已带层次能力）+ `thresholdRatio 0.5` / `retainRatio 0.08` + command-compact + tool-result pruner | 不重复造 Provider；压缩仍是「第二道防线」，指针摘要 + `quno_recall` 兜底 |
+| 11 | 侧栏经 fork `sidebar.workspaces.sessionListView` 挂 Quno 分组视图 | 该槽**不存在于任何已发布 fork**（仅以未合入 note 存在），dsh-thread/dsh-quno 的注册均 dormant，侧栏入口从未实际渲染 | §13 已于 2026-10-23 全面重写为真实槽位方案；更正见 `docs/notes/2026-10-23-quno-sidebar-redesign.md` |
+| 12 | 「动态插件注册经门面天然压过 shipped 占位者」 | 只对**运行时插件管理器**装载路径成立；profile 启动的客户端走裸 ModuleLoader、无该 facade，single 槽注册必须显式 `priority: -1`，否则与 stock 占位者同优先级冲突抛错（实机复现并修） | 最终方案不占用主槽（#13），教训沉淀为实机纪律；见 `docs/notes/2026-10-23-quno-sidebar-impl.md` |
+| 13 | 第一版落地：占用 `sidebar.workspaces` 自绘「Quno / 会话」页签 + 精简会话列表 | 用户纠偏：新会话/插件/自动化任务应与既有会话同属 work；改为 fork zw.6 `sidebar.workspaces.alternate` 接缝，work 页签 stock 原样、Quno 独享页签，先前列键缺口（搜索/右键/拖拽）整体消失 | 产品形态以「消息对象」+「原样 work」为准；见 `docs/notes/2026-10-23-quno-work-quno-tabs.md` |
+| 14 | Remote 增 `events.recent` / `tasks.list` 两方法 | 仅增 `eventsRecent`；任务列表随 `state()` 下发并扩 `plan`/`prompt` 摘要列，不再单开 `tasks.list`；任务详情的运行日志逐行 follow（`ctx.jobs`）v1 未接，以子会话入口呈现 | state() 已是全量有界快照，避免双通道漂移 |
+| 15 | 铬件净化覆盖首开空态 | 标记组件双席位（`header.utilities` + `hero.options`）覆盖空态首屏；空态 composer 占位文案仍提「选择一个工作区开始」（输入功能不受影响） | 文案属基座 stock，拦截需遮蔽 composer 面，v1 接受 |
 
 **验证**（2026-10-23，scratch `DSH_HOME`，未污染真实 `~/.dsh`）：
 
@@ -739,3 +819,5 @@ dsh-quno-sense-<name>   各来源感知器（首版两个真实来源，建议�
 - 2026-10-23 三期实现落地并验证（记录见 §18；决策与偏差见 `docs/notes/2026-10-23-quno-implementation.md`）。
 - 2026-10-23 Sense 编写最小面与打包分发定稿（§6.10）；云之家群聊 Sense 设计（§6.11），消息源阻塞经 yzj-cli 路径解除（决策见 `docs/notes/2026-10-23-quno-sense-yzj.md`）。
 - 2026-10-23 §6.11 按 yzj-cli 0.1.5 实测评审修订：`--limit` 上限 20 与配额按群口径、健康分类改「进程级退出码 → API errorCode」两层、`readOriginal` 诚实报 `false`、双向可见性与消息项字段降级为登录态首验项、`--jq` 支持面修正（`im group search` 不支持）、`--profile` 进 configFields（记录见 `docs/notes/2026-10-23-quno-sense-yzj-cli-contract-review.md`）。
+- 2026-10-23 UI 交互改版：§13 全面重写，并更正「`sidebar.workspaces.sessionListView` 槽存在」与「`registerMessageProjection` 是 UI 通道」两处事实错误（§18 偏差 #11；方案与依据见 `docs/notes/2026-10-23-quno-sidebar-redesign.md`）。
+- 2026-10-23 交互改版落地并按用户纠偏修订为 work/Quno 制：fork `v0.2.1-rc.2+zw.6` 增 `sidebar.workspaces.alternate` 接缝（`@crazx/dsh-client-ui-workspace`、`@crazx/dsh-cordis-client-runner` 首发于 zw.6；zw.5 因陈旧构建产物已弃用），dsh-quno 侧栏改注册接缝槽、右栏面板/收起态胶囊/任务卡联动/铬件净化全部实机验证；偏差 #12–#15，决策与实施记录见 `docs/notes/2026-10-23-quno-work-quno-tabs.md` 与 `docs/notes/2026-10-23-quno-sidebar-impl.md`。
