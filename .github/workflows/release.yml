@@ -210,21 +210,6 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 1
 
-      # runtime/build/<全sha> + pnpm `.pnpm` 嵌套在冷缓存 electron-rebuild（node-pty）时超
-      # MAX_PATH，MSB4018 PathTooLongException（rc.5 前被 runtime 缓存命中掩盖）。
-      # LongPathsEnabled 单独无效：VS18 的 .NET Framework MSBuild 不认；subst 也无效——
-      # Node/TS/pnpm 会 realpath 回真实长路径造成双身份。把真实目录改名到短路径、原位留
-      # junction 兼容 GITHUB_WORKSPACE：realpath 全部收敛到 D:\odsh 且身份一致。
-      - name: Enable Windows long paths + shorten the real workspace path
-        shell: bash
-        run: |
-          set -euo pipefail
-          powershell -Command "Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1"
-          cd /d
-          cmd //c "move D:\a\oh-my-dsh\oh-my-dsh D:\odsh"
-          cmd //c "mklink /J D:\a\oh-my-dsh\oh-my-dsh D:\odsh"
-          node -e "console.log('realpath:', require('fs').realpathSync('D:/a/oh-my-dsh/oh-my-dsh'))"
-
       - name: Verify release checkout
         shell: bash
         run: |
@@ -322,7 +307,17 @@ jobs:
           DSH_DESKTOP_USE_CACHED_PLUGIN_LIBS: ${{ steps.plugin-libs.outputs.cache-hit == 'true' && '1' || '' }}
         run: |
           set -euo pipefail
+          # 冷态 electron-rebuild（node-pty）在 runtime/build/<全sha> + pnpm `.pnpm` 嵌套下超
+          # MAX_PATH，MSB4018（VS18 的 .NET Framework MSBuild 不认 LongPathsEnabled；subst/
+          # junction 会被 Node/TS realpath 穿透造成双身份，workspace 本身又被 runner 进程
+          # 占住改不了名）。把 checkout 复制到真实短路径 D:\odsh、在副本里构建，release/
+          # 产物再拷回工作区供后续步骤使用。robocopy 0-7 都是成功语义。
+          cmd //c "robocopy D:\a\oh-my-dsh\oh-my-dsh D:\odsh //E //NFL //NDL //NJH //NJS //MT:16" || true
+          [ -d /d/odsh/scripts ] || { echo "::error::robocopy to D:\\odsh failed"; exit 1; }
+          cd /d/odsh
           pnpm desktop:build -- --win
+          rm -rf "$GITHUB_WORKSPACE/release"
+          cp -r /d/odsh/release "$GITHUB_WORKSPACE/release"
 
       - name: Stage updater artifacts
         shell: bash
