@@ -210,6 +210,13 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 1
 
+      # runtime/build/<full-sha> + pnpm 的 .pnpm 嵌套在冷缓存 electron-rebuild（node-pty）时
+      # 超 MAX_PATH，MSB4018 PathTooLongException——rc.5 前被 runtime 缓存命中掩盖。
+      - name: Enable Windows long paths
+        shell: powershell
+        run: |
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1
+
       - name: Verify release checkout
         shell: bash
         run: |
