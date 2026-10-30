@@ -11,7 +11,7 @@
  */
 import { spawnSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, rmdirSync, statSync, symlinkSync } from 'node:fs'
-import { dirname, isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** @typedef {{
@@ -351,6 +351,8 @@ if (invokedAsCli && process.argv[2] === '--print') {
   const field = process.argv[3]
   for (const spec of listShippedPluginSpecs(repoRoot)) {
     if (field === undefined) console.log(spec.package)
-    else console.log(spec[field] ?? '')
+    // Shell consumers (release.yml case-globs) pattern-match on POSIX separators;
+    // join() would emit backslashes on Windows and break the match.
+    else console.log(spec[field]?.split(sep).join('/') ?? '')
   }
 }
