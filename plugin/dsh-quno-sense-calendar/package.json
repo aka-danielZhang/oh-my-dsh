@@ -16,7 +16,7 @@
       "patch": "./cordis.patch.yml"
     },
     "desktop": {
-      "ship": true
+      "ship": false
     }
   },
   "scripts": {
