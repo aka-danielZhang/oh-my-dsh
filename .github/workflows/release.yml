@@ -314,6 +314,12 @@ jobs:
           DSH_DESKTOP_USE_CACHED_PLUGIN_LIBS: ${{ steps.plugin-libs.outputs.cache-hit == 'true' && '1' || '' }}
         run: |
           set -euo pipefail
+          # runtime/build/<全sha> + pnpm `.pnpm` 嵌套下的原生模块重建（node-pty）路径超
+          # MAX_PATH；VS18 的 .NET Framework MSBuild 不吃 LongPathsEnabled（TLog 还会把
+          # 项目绝对路径双写进中间目录）。subst 短盘符别名同一物理目录，构建全程以 R: 为
+          # 根；产物落盘位置不变，后续步骤仍从工作区路径读取。
+          cmd //c "subst R: D:\\a\\oh-my-dsh\\oh-my-dsh"
+          cd /r
           pnpm desktop:build -- --win
 
       - name: Stage updater artifacts
