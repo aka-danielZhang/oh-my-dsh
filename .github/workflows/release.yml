@@ -220,6 +220,7 @@ jobs:
         run: |
           set -euo pipefail
           powershell -Command "Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1"
+          cd /d
           cmd //c "move D:\a\oh-my-dsh\oh-my-dsh D:\odsh"
           cmd //c "mklink /J D:\a\oh-my-dsh\oh-my-dsh D:\odsh"
           node -e "console.log('realpath:', require('fs').realpathSync('D:/a/oh-my-dsh/oh-my-dsh'))"
