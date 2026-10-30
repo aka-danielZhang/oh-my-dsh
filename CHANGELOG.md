@@ -4,6 +4,12 @@ Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的�
 
 ## [Unreleased]
 
+## [0.4.0-rc.6] - 2026-10-30
+
+### Changed
+
+- runtime 升级到 fork `v0.2.1-rc.2+zw.7`：`dsh-client-ui-workspace` 与 `dsh-cordis-client-runner` 进入 fork 补丁面（为后续 quno 常驻面板铺路，本版无界面变化），随包插件的 devDeps 对齐 zw.7 别名包；随包插件集合与版本不变。
+
 ## [0.4.0-rc.5] - 2026-10-21
 
 ### Changed

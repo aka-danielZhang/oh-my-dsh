@@ -62,7 +62,6 @@ overrides:
   '@deepseek-ai/dsh-client-ui-sidebar': npm:@crazx/dsh-client-ui-sidebar@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-client-ui-sidebar-files': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-sidebar-right': 0.2.1-rc.2
-  '@deepseek-ai/dsh-client-ui-sidebar-textpreview': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-skill': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-slots': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-subagent': 0.2.1-rc.2
@@ -73,8 +72,6 @@ overrides:
   '@deepseek-ai/dsh-client-ui-workflow-run': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-workspace': npm:@crazx/dsh-client-ui-workspace@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-client-web': 0.2.1-rc.2
-  '@deepseek-ai/dsh-code-runtime': 0.2.1-rc.2
-  '@deepseek-ai/dsh-code-runtime-worker-thread': 0.2.1-rc.2
   '@deepseek-ai/dsh-command-compact': 0.2.1-rc.2
   '@deepseek-ai/dsh-compaction': 0.2.1-rc.2
   '@deepseek-ai/dsh-compaction-basic': 0.2.1-rc.2
@@ -96,14 +93,9 @@ overrides:
   '@deepseek-ai/dsh-authorization': 0.2.1-rc.2
   '@deepseek-ai/dsh-credentials': 0.2.1-rc.2
   '@deepseek-ai/dsh-credentials-local': 0.2.1-rc.2
-  '@deepseek-ai/dsh-e2b': 0.2.1-rc.2
-  '@deepseek-ai/dsh-fs-e2b': 0.2.1-rc.2
-  '@deepseek-ai/dsh-subprocess-e2b': 0.2.1-rc.2
   '@deepseek-ai/dsh-experimental-agent-team': 0.2.1-rc.2
   '@deepseek-ai/dsh-experimental-agent-team-profile': 0.2.1-rc.2
-  '@deepseek-ai/dsh-experimental-agent-team-web-profile': 0.2.1-rc.2
   '@deepseek-ai/dsh-experimental-client-ui-agent-team': 0.2.1-rc.2
-  '@deepseek-ai/dsh-experimental-code-runtime-python': 0.2.1-rc.2
   '@deepseek-ai/dsh-experimental-inspector': 0.2.1-rc.2
   '@deepseek-ai/dsh-experimental-tool-agent-team': 0.2.1-rc.2
   '@deepseek-ai/dsh-experimental-webworker-packer': 0.2.1-rc.2
@@ -127,7 +119,6 @@ overrides:
   '@deepseek-ai/dsh-tool-goal': 0.2.1-rc.2
   '@deepseek-ai/dsh-repeat-tool-reminder': 0.2.1-rc.2
   '@deepseek-ai/dsh-tool-call-timeout-policy': 0.2.1-rc.2
-  '@deepseek-ai/dsh-todo-completion-guard': 0.2.1-rc.2
   '@deepseek-ai/dsh-hook-protocol': 0.2.1-rc.2
   '@deepseek-ai/dsh-hooks-claude-code': 0.2.1-rc.2
   '@deepseek-ai/dsh-hooks-codex': 0.2.1-rc.2
@@ -160,9 +151,7 @@ overrides:
   '@deepseek-ai/dsh-tool-lsp': 0.2.1-rc.2
   '@deepseek-ai/dsh-mcp-client': npm:@crazx/dsh-mcp-client@0.2.1-rc.2.zw.7
   '@deepseek-ai/dsh-plan-mode': 0.2.1-rc.2
-  '@deepseek-ai/dsh-agent-presets': 0.2.1-rc.2
   '@deepseek-ai/dsh-persona': 0.2.1-rc.2
-  '@deepseek-ai/dsh-invariants': 0.2.1-rc.2
   '@deepseek-ai/dsh-sandbox': 0.2.1-rc.2
   '@deepseek-ai/dsh-sandbox-local': 0.2.1-rc.2
   '@deepseek-ai/dsh-sandbox-policy': 0.2.1-rc.2
@@ -195,7 +184,6 @@ overrides:
   '@deepseek-ai/dsh-session-query-sqlite': 0.2.1-rc.2
   '@deepseek-ai/dsh-tool-session-query': 0.2.1-rc.2
   '@deepseek-ai/dsh-settings': 0.2.1-rc.2
-  '@deepseek-ai/dsh-settings-file': 0.2.1-rc.2
   '@deepseek-ai/dsh-bash-local': 0.2.1-rc.2
   '@deepseek-ai/dsh-bash-sandbox': 0.2.1-rc.2
   '@deepseek-ai/dsh-pwsh-local': 0.2.1-rc.2
@@ -223,7 +211,6 @@ overrides:
   '@deepseek-ai/dsh-subagent-codex': 0.2.1-rc.2
   '@deepseek-ai/dsh-subagent-dsh-sdk': 0.2.1-rc.2
   '@deepseek-ai/dsh-subagent-fork-in-process': 0.2.1-rc.2
-  '@deepseek-ai/dsh-subagent-in-process-driver': 0.2.1-rc.2
   '@deepseek-ai/dsh-subagent-spawn-in-process': 0.2.1-rc.2
   '@deepseek-ai/dsh-tool-subagent': 0.2.1-rc.2
   '@deepseek-ai/dsh-tool-subagent-control': 0.2.1-rc.2
@@ -269,9 +256,6 @@ overrides:
   '@deepseek-ai/dsh-tool-ralph': 0.2.1-rc.2
   '@deepseek-ai/dsh-tool-workflow': 0.2.1-rc.2
   '@deepseek-ai/dsh-workflow': 0.2.1-rc.2
-  '@deepseek-ai/dsh-workflow-worker-thread': 0.2.1-rc.2
   '@deepseek-ai/dsh-workspace': 0.2.1-rc.2
   '@deepseek-ai/dsh': npm:@crazx/dsh@0.2.1-rc.2.zw.7
-  '@deepseek-ai/dsh-desktop': 0.2.1-rc.2
-  '@deepseek-ai/dsh-desktop-host': 0.2.1-rc.2
   '@deepseek-ai/dsh-web-frontend': 0.2.1-rc.2
