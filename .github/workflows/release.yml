@@ -210,12 +210,19 @@ jobs:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
           fetch-depth: 1
 
-      # runtime/build/<full-sha> + pnpm 的 .pnpm 嵌套在冷缓存 electron-rebuild（node-pty）时
-      # 超 MAX_PATH，MSB4018 PathTooLongException——rc.5 前被 runtime 缓存命中掩盖。
-      - name: Enable Windows long paths
-        shell: powershell
+      # runtime/build/<全sha> + pnpm `.pnpm` 嵌套在冷缓存 electron-rebuild（node-pty）时超
+      # MAX_PATH，MSB4018 PathTooLongException（rc.5 前被 runtime 缓存命中掩盖）。
+      # LongPathsEnabled 单独无效：VS18 的 .NET Framework MSBuild 不认；subst 也无效——
+      # Node/TS/pnpm 会 realpath 回真实长路径造成双身份。把真实目录改名到短路径、原位留
+      # junction 兼容 GITHUB_WORKSPACE：realpath 全部收敛到 D:\odsh 且身份一致。
+      - name: Enable Windows long paths + shorten the real workspace path
+        shell: bash
         run: |
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1
+          set -euo pipefail
+          powershell -Command "Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1"
+          cmd //c "move D:\a\oh-my-dsh\oh-my-dsh D:\odsh"
+          cmd //c "mklink /J D:\a\oh-my-dsh\oh-my-dsh D:\odsh"
+          node -e "console.log('realpath:', require('fs').realpathSync('D:/a/oh-my-dsh/oh-my-dsh'))"
 
       - name: Verify release checkout
         shell: bash
@@ -314,12 +321,6 @@ jobs:
           DSH_DESKTOP_USE_CACHED_PLUGIN_LIBS: ${{ steps.plugin-libs.outputs.cache-hit == 'true' && '1' || '' }}
         run: |
           set -euo pipefail
-          # runtime/build/<全sha> + pnpm `.pnpm` 嵌套下的原生模块重建（node-pty）路径超
-          # MAX_PATH；VS18 的 .NET Framework MSBuild 不吃 LongPathsEnabled（TLog 还会把
-          # 项目绝对路径双写进中间目录）。subst 短盘符别名同一物理目录，构建全程以 R: 为
-          # 根；产物落盘位置不变，后续步骤仍从工作区路径读取。
-          cmd //c "subst R: D:\\a\\oh-my-dsh\\oh-my-dsh"
-          cd /r
           pnpm desktop:build -- --win
 
       - name: Stage updater artifacts
