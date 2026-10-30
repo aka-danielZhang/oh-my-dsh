@@ -311,13 +311,15 @@ jobs:
           # MAX_PATH，MSB4018（VS18 的 .NET Framework MSBuild 不认 LongPathsEnabled；subst/
           # junction 会被 Node/TS realpath 穿透造成双身份，workspace 本身又被 runner 进程
           # 占住改不了名）。把 checkout 复制到真实短路径 D:\odsh、在副本里构建，release/
-          # 产物再拷回工作区供后续步骤使用。robocopy 0-7 都是成功语义。
-          cmd //c "robocopy D:\a\oh-my-dsh\oh-my-dsh D:\odsh //E //NFL //NDL //NJH //NJS //MT:16" || true
+          # 产物再拷回工作区供后续步骤使用。robocopy 0-7 都是成功语义；参数双斜杠经 MSYS
+          # 折成单斜杠（直接调用，不经 cmd）。
+          robocopy "D:\\a\\oh-my-dsh\\oh-my-dsh" "D:\\odsh" //E //NFL //NDL //NJH //NJS //MT:16 || true
           [ -d /d/odsh/scripts ] || { echo "::error::robocopy to D:\\odsh failed"; exit 1; }
           cd /d/odsh
           pnpm desktop:build -- --win
-          rm -rf "$GITHUB_WORKSPACE/release"
-          cp -r /d/odsh/release "$GITHUB_WORKSPACE/release"
+          WSU=$(cygpath -u "$GITHUB_WORKSPACE")
+          rm -rf "$WSU/release"
+          cp -r /d/odsh/release "$WSU/release"
 
       - name: Stage updater artifacts
         shell: bash
