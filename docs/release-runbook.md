@@ -41,8 +41,14 @@
 **桌面**：
 
 ```sh
+# 0. CHANGELOG.md 先补非空 `## [version]`（或 `## [Unreleased]`）段落——release.yml 的
+#    publish 与 ci.yml 的 release-notes 步骤都会对当前版本 fail loud（rc.7 实案）。
+#    本地自检，无输出即通过：
+node scripts/release-notes.mjs "$(node -p "JSON.parse(require('fs').readFileSync('package.json','utf8')).version")" > /dev/null
 # 1. 版本号：仓根 package.json 的 version（当前 0.3.0-rc.2）
 # 2. （可选）runtime 升级：fork 打 v<基线>+zw.<补丁> 标签 + 更新 runtime/revision.json
+# 3. main CI 绿了再打 tag：tag 一推就是 40–60 分钟双平台构建，带红发版只是把 CI 的失败
+#    晚一小时在 publish 复发（rc.7 实案：push CI 3 分钟就红了，publish 一小时后撞同一堵墙）
 git tag v0.3.0-rc.2 && git push origin v0.3.0-rc.2
 ```
 
@@ -94,7 +100,7 @@ bash scripts/notarize-mac-artifacts.sh release/*.dmg release/*.zip
 | 热更后 sidecar 起不来 / missing runtime.tar.gz | 确认该 Release 有 `runtime-<sha>-*.tar.gz` 与 `runtime-revision-<triple>.json`，npm 上有 `@crazx/dsh-desktop-runtime-<triple>-0@<版>`，且 `~/.dsh-desktop/runtime/<sha>/.ok` 与 revision 哈希一致；更新必须先下完 zip+runtime 才允许重启 |
 | Windows 冷缓存构建报 MSB4018 PathTooLongException | runtime 缓存 key 含 `runtime/revision.json` / `prepare-runtime.mjs` 哈希，runtime 换代后首轮必是冷缓存，win job 冷态 electron-rebuild（node-pty）在 `runtime/build/<全sha>` + pnpm `.pnpm` 嵌套下超 MAX_PATH；VS18（.NET Framework MSBuild）连 `LongPathsEnabled` 注册表都不认，subst 短盘符也会被 Node/TS realpath 穿透（R: 解析回 D: 长路径，还造成 TS2345/TS6307 双身份）。workspace 本身又被 runner 进程占用无法改名。release.yml「Build NSIS bundle」的解法：robocopy 把 checkout 复制到真实短路径 `D:\odsh`、在副本里构建，`release/` 产物拷回工作区；2026-10-30 rc.6 实案，rc.5 之前一直被缓存命中掩盖 |
 | DMG 安装页退化成默认布局 | `bash scripts/verify-dmg-layout.sh <dmg>` |
-| 平台产物已传 draft 但 Release 还是草稿 | `desktop-publish` 需要 mac/win 双 `success`；`actions/cache` 的 **post 收尾步**偶发 OOM / 拖满超时把 job 染红（rc.27 实案：mac post cache 崩溃、win post cache 卡到 120min 取消），构建/公证/上传其实全成。核对 draft 附件齐（dmg / zip / exe / 双 yml / 双平台 runtime tar），然后站在对应 tag 的 checkout 上本地补跑 publish 三步：`node scripts/release-notes.mjs <ver> > dist/release-notes.md`、`node scripts/tauri-cutover-latest-json.mjs <ver> dist/latest.json`、`gh release upload v<ver> dist/latest.json --clobber && gh release edit v<ver> --draft=false --latest --notes-file dist/release-notes.md`。不要整条 rerun——重烧 40 分钟还可能撞附件 clobber |
+| 平台产物已传 draft 但 Release 还是草稿 | `desktop-publish` 需要 mac/win 双 `success`。失败原因先 `gh run view <run-id> --log-failed` 定位：最常见根因是 CHANGELOG.md 缺当前版本的 `## [version]` 段（rc.7 实案——release-notes.mjs 在 Compose release notes 抛错；同一 guard 在 ci.yml 每次 push 都跑，所以 main 带红就不要推 tag）。补段落到 main 后，在 main 的 checkout 上按本行三步补跑即可——两个脚本只读 CHANGELOG.md 与 package.json，不必 checkout tag（cache-OOM 类失败则 tag 与 main 等价，照旧）；另一类是 `actions/cache` 的 **post 收尾步**偶发 OOM / 拖满超时把 job 染红（rc.27 实案：mac post cache 崩溃、win post cache 卡到 120min 取消），构建/公证/上传其实全成。核对 draft 附件齐（dmg / zip / exe / 双 yml / 双平台 runtime tar），然后站在对应 tag 的 checkout 上本地补跑 publish 三步：`node scripts/release-notes.mjs <ver> > dist/release-notes.md`、`node scripts/tauri-cutover-latest-json.mjs <ver> dist/latest.json`、`gh release upload v<ver> dist/latest.json --clobber && gh release edit v<ver> --draft=false --latest --notes-file dist/release-notes.md`。不要整条 rerun——重烧 40 分钟还可能撞附件 clobber |
 
 ## 5. 开源注意事项
 
