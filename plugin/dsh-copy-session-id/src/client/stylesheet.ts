@@ -36,11 +36,10 @@ export function sessionActionsCss(): string {
     // Click-away veil: a transparent fixed button (not a div) so it stays out
     // of the tab order semantics while still swallowing the next click.
     '.dsh-csid-veil { position: fixed; inset: 0; z-index: 900; background: transparent; border: none; padding: 0; cursor: default; }',
-    // The menu: a raised overlay surface hugging the anchor\'s right edge.
+    // Portaled to document.body: fixed coordinates follow the anchor, and the
+    // body-level no-drag box comes after every in-root window-drag rect.
     '.dsh-csid-menu {',
-    '  position: absolute;',
-    '  top: calc(100% + 6px);',
-    '  right: 0;',
+    '  position: fixed;',
     '  z-index: 901;',
     '  min-width: 200px;',
     '  padding: 4px;',

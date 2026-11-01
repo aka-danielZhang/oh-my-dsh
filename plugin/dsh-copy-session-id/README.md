@@ -17,7 +17,8 @@ re-rendering it rather than growing a second button beside it.
   1. **复制会话 ID / Copy Session ID** — copies the current session id
      through `navigator.clipboard.writeText`, with a hidden-textarea
      `execCommand('copy')` fallback. The item confirms with a check glyph
-     ("已复制" / "copied") for 1.6 s; hovering it shows the full id.
+     ("已复制" / "copied") for 1.6 s. Its hover feedback is identical to
+     the Download Session Log item: only the row background changes.
   2. **下载 Session 日志 / Download Session Log** — the stock action,
      unchanged, driven by the stock controller (see below). It greys out
      while a download is in flight.
@@ -70,7 +71,10 @@ build contract lives in this package's `tsdown.config.ts`; keep
 when it moves. Zero `@deepseek-ai/*` value imports: locale, ui-conversation,
 ui-renderer, and the timer plugin appear only as type-only imports (erased
 at build), so no runtime peer linkage is needed (the bundle's only requires
-are `react` and `react/jsx-runtime`).
+are `react`, `react/jsx-runtime`, and `react-dom` for the menu portal).
+The open menu and click-away veil portal to `document.body`, keeping their
+macOS `no-drag` geometry after the header tab strip's window-drag rectangle;
+otherwise that later rectangle retakes the first menu row.
 
 The stylesheet is pre-claimed with `data-plugin`/`data-plugin-css` and
 dedup-guarded: the client module system attributes every UNTAGGED `<style>`

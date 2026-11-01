@@ -11,9 +11,12 @@
  *   through the `sessionLogDownload` cordis service (never an import);
  * - the download status dialog driven by that controller's state store.
  *
- * Plus the new first item: Copy Session ID.
+ * Plus the new first item: Copy Session ID. The open menu and its veil portal
+ * to document.body so later macOS window-drag rects cannot retake the first
+ * menu row (Electron composes app-region geometry in document order).
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { browserCopyDeps, copyText } from './copy-text.ts'
@@ -37,6 +40,12 @@ const COPIED_FLASH_MS = 1600
 
 /** How long the success status dialog lingers before it closes itself. */
 const SUCCESS_AUTO_CLOSE_MS = 5000
+
+/** Vertical gap between the anchor and the portaled menu. */
+const MENU_GAP_PX = 6
+
+/** Fixed viewport coordinates for the portaled menu. */
+type MenuPosition = { top: number; right: number }
 
 /** The ellipsis glyph of the anchor button (stock moreButton size). */
 function EllipsisIcon(): ReactNode {
@@ -127,6 +136,8 @@ export function SessionActionsMenu(props: SessionActionsMenuProps): ReactNode {
   const [open, setOpen] = useState(false)
   const [copied, setCopied] = useState(false)
   const [entry, setEntry] = useState<SessionLogEntry | null>(null)
+  const anchorRef = useRef<HTMLButtonElement | null>(null)
+  const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null)
 
   useEffect(() => {
     const read = (): void => { setEntry(readDownload()) }
@@ -138,6 +149,26 @@ export function SessionActionsMenu(props: SessionActionsMenuProps): ReactNode {
     if (!copied) return undefined
     return defer(() => { setCopied(false) }, COPIED_FLASH_MS)
   }, [copied, defer])
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setMenuPosition(null)
+      return undefined
+    }
+    const place = (): void => {
+      const rect = anchorRef.current?.getBoundingClientRect()
+      if (!rect) return
+      const next = { top: rect.bottom + MENU_GAP_PX, right: window.innerWidth - rect.right }
+      setMenuPosition(current => current?.top === next.top && current.right === next.right ? current : next)
+    }
+    place()
+    // Sidebar resizing moves the anchor without a window resize event.
+    let frame = requestAnimationFrame(function track() {
+      place()
+      frame = requestAnimationFrame(track)
+    })
+    return () => { cancelAnimationFrame(frame) }
+  }, [open])
 
   const busy = entry !== null && entry.status === 'downloading'
 
@@ -154,6 +185,7 @@ export function SessionActionsMenu(props: SessionActionsMenuProps): ReactNode {
     <span className="dsh-csid-wrap">
       <button
         type="button"
+        ref={anchorRef}
         className="dsh-csid-anchor"
         aria-label={t('header.more')}
         aria-haspopup="menu"
@@ -163,47 +195,48 @@ export function SessionActionsMenu(props: SessionActionsMenuProps): ReactNode {
       >
         <EllipsisIcon />
       </button>
-      {open && (
-        <button
-          type="button"
-          className="dsh-csid-veil"
-          aria-label={t('header.more')}
-          tabIndex={-1}
-          onClick={() => { setOpen(false) }}
-        />
-      )}
-      {open && (
-        <div
-          className="dsh-csid-menu"
-          role="menu"
-          onKeyDown={(event) => { if (event.key === 'Escape') setOpen(false) }}
-        >
+      {open && createPortal(
+        <>
           <button
             type="button"
-            role="menuitem"
-            className="dsh-csid-item"
-            title={String(sessionId)}
-            onClick={onCopy}
+            className="dsh-csid-veil"
+            aria-label={t('header.more')}
+            tabIndex={-1}
+            onClick={() => { setOpen(false) }}
+          />
+          <div
+            className="dsh-csid-menu"
+            role="menu"
+            style={menuPosition ?? { visibility: 'hidden' }}
+            onKeyDown={(event) => { if (event.key === 'Escape') setOpen(false) }}
           >
-            <span className="dsh-csid-item-icon">{copied ? <CheckIcon /> : <CopyIcon />}</span>
-            <span>{copied ? t('menu.copied') : t('menu.copy')}</span>
-          </button>
-          {downloadAvailable && (
             <button
               type="button"
               role="menuitem"
               className="dsh-csid-item"
-              disabled={busy}
-              onClick={() => {
-                setOpen(false)
-                download()
-              }}
+              onClick={onCopy}
             >
-              <span className="dsh-csid-item-icon"><DownloadIcon /></span>
-              <span>{busy ? t('menu.downloading') : t('menu.download')}</span>
+              <span className="dsh-csid-item-icon">{copied ? <CheckIcon /> : <CopyIcon />}</span>
+              <span>{copied ? t('menu.copied') : t('menu.copy')}</span>
             </button>
-          )}
-        </div>
+            {downloadAvailable && (
+              <button
+                type="button"
+                role="menuitem"
+                className="dsh-csid-item"
+                disabled={busy}
+                onClick={() => {
+                  setOpen(false)
+                  download()
+                }}
+              >
+                <span className="dsh-csid-item-icon"><DownloadIcon /></span>
+                <span>{busy ? t('menu.downloading') : t('menu.download')}</span>
+              </button>
+            )}
+          </div>
+        </>,
+        document.body,
       )}
       {entry !== null && entry.open && (
         <DownloadStatusDialog entry={entry} dismiss={dismiss} defer={defer} t={t} />
