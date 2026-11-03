@@ -21,7 +21,6 @@
  *   src/resources/model-image-input.tar.gz (client-only plugin package)
  *   src/resources/send-while-running.tar.gz (client-only plugin package)
  *   src/resources/model-efforts-editor.tar.gz (client-only plugin package)
- *   src/resources/thread.tar.gz          (host + client plugin package)
  *   src/resources/runtime-revision.json   (runtime + plugin hashes/versions)
  *
  * `src/resources/` is gitignored — regenerated per build via

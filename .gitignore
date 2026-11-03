@@ -69,9 +69,6 @@ plugin/dsh-model-efforts-editor/lib/
 # dsh-question-rail：构建产物（scripts/new-plugin.mjs 生成）
 plugin/dsh-question-rail/lib/
 
-# dsh-thread：构建产物
-plugin/dsh-thread/lib/
-
 # dsh-ohmymemo：构建产物（scripts/new-plugin.mjs 生成）
 plugin/dsh-ohmymemo/lib/
 

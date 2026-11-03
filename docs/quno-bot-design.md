@@ -836,13 +836,15 @@ dsh-quno-sense-<name>   各来源感知器（首版两个真实来源，建议�
 - **阶段 B（可用的个人助理）—已完成 2026-10-23**：真实 AgentLoop 分析与主对话投递、关注事项、反馈（按钮 + 自然语言）、安静时段、来源健康、`quno_recall`、委派子任务正常路径 + 任务卡、设置页五个页签、侧栏入口。两个真实 Sense 落地为**本地 iCalendar + RSS/Atom**（消息源当时无可用 API 而延后，现经 yzj-cli 路径解除阻塞，Sense 设计见 §6.11，待实现）；dry-run 由 `config.dryRun` 提供，开启主动汇报由用户决定。
 - **阶段 C（真实使用调优）—机制已落地 2026-10-23**：以确定性模拟验证 125 条积压的有界批次、跨源公平、同主题合并、每小时通知上限与最小间隔、时间驱动的复查、保留期清理与预算；真实数天的误报/漏报调参仍需上线后按 §15 指标迭代。
 - **交互改版（2026-10-23 落地，work/Quno 制）**：§13 全面重写两次后定稿——fork zw.6 增 `sidebar.workspaces.alternate` 接缝，「work」（stock 原样）/「Quno」（联系人视图）双页签；主对话铬件净化（双席位标记 + 接缝 CSS）；右栏 Quno 面板（动态/关注/任务 + `eventsRecent`）；收起态实时胶囊；任务卡 → 面板联动。实机（scratch `DSH_HOME` + 真实浏览器 DOM 断言）全链路通过；偏差 #12–#15。
-- **dsh-thread 退役**：见 §16.1——功能整体不需要，**不依赖 Quno 进度、无能力平价要求**，可提前到任意桌面 Release；本次未执行（属独立发版动作）。
+- **dsh-thread 退役—已执行 2026-11-03**：见 §16.1——功能整体不需要，**不依赖 Quno 进度、无能力平价要求**，随桌面 0.4.0-rc.8 下船（插件整包删除 + `src/install.ts` 退役事务清理存量安装）；执行记录见 `docs/notes/2026-11-03-retire-dsh-thread.md`。
 - **后续明确延期**：审批卡与对外写操作、多 Quno 配置 UI 与跨 Quno 通知仲裁、独立 HTTP push、多设备、复杂 cron、Sense 商店、自然语言编译 Sense。
 - **明确不做**：云端常驻/关机继续运行（产品决策，§17）。
 
 ### 16.1 dsh-thread 退役路径
 
 决策 6（§17）：thread_handoff 的跨会话交接功能**整体不再需要**——不是用 Quno 替换其体验，不存在能力承接，也没有平价验收门槛。dsh-thread 直接退役下船：
+
+> 执行状态（2026-11-03）：已按下列路径落地——插件目录删除、随包清单收紧、壳首启退役事务接入 `RETIRED_DESKTOP_PACKAGES`；记录见 `docs/notes/2026-11-03-retire-dsh-thread.md`。
 
 1. **时机**：不依赖 Quno 进度，由桌面发版节奏决定；建议不晚于 Quno 首版所在 Release（避免两套「任务/交接」叙事并存）。
 2. **下船**：壳首启 Profile 事务把 dsh-thread 从 web Profile 下船——改写 manifest 去依赖与 `dsh.profile.bundles` 条目、删 `node_modules` 链接、提交后删 `~/.dsh-desktop` 下解压副本。**只认桌面自己装的那一份**（依赖钉在解压目录/链接解析进该目录/只剩解析不到的 bundle 条目）；用户从 registry 或自己目录装回的副本一律保留（参照 2026-10-20 dsh-scheduled-tasks 先例）。

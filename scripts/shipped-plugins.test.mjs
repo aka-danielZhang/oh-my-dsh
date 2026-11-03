@@ -22,9 +22,9 @@ const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 
 test('derives the historical tarball and hash keys', () => {
   assert.equal(defaultTarballName('dsh-desktop-bridge'), 'bridge.tar.gz')
-  assert.equal(defaultTarballName('dsh-thread'), 'thread.tar.gz')
+  assert.equal(defaultTarballName('dsh-usage-stats'), 'usage-stats.tar.gz')
   assert.equal(defaultDestRel('dsh-desktop-bridge'), 'bridge')
-  assert.equal(defaultDestRel('dsh-thread'), 'plugins/dsh-thread')
+  assert.equal(defaultDestRel('dsh-usage-stats'), 'plugins/dsh-usage-stats')
   assert.equal(hashKeyForTarball('compaction-hierarchical.tar.gz'), 'compactionHierarchicalTarball')
   assert.equal(hashKeyForTarball('web-search-toggle.tar.gz'), 'webSearchToggleTarball')
   assert.equal(camelCaseStem('model-efforts-editor'), 'modelEffortsEditor')
@@ -42,10 +42,14 @@ test('pack entries carry lib even when specs are listed before the build', () =>
   }
 })
 
-test('lists every ship:true plugin once, including thread', () => {
+test('lists every ship:true plugin once', () => {
   const specs = listShippedPluginSpecs(repoRoot)
   const names = specs.map((spec) => spec.package)
-  assert.deepEqual(names, [
+  // The desktop-owned core. Exact-set assertion so a stray ship flag cannot
+  // quietly board a package; the Quno trio is toggled as a unit by its own
+  // `dsh.desktop.ship` (deferred out of rc.6, re-entering with a later
+  // release), so it is appended only while it ships.
+  const core = [
     'dsh-branding',
     'dsh-compaction-hierarchical',
     'dsh-copy-session-id',
@@ -59,19 +63,26 @@ test('lists every ship:true plugin once, including thread', () => {
     'dsh-reasoning-efforts',
     'dsh-send-while-running',
     'dsh-settings-icons',
-    'dsh-thread',
     'dsh-todo-completion-guard',
     'dsh-usage-stats',
     'dsh-web-search-toggle',
-  ])
-  const thread = specs.find((spec) => spec.package === 'dsh-thread')
-  assert.equal(thread?.tarball, 'thread.tar.gz')
-  assert.equal(thread?.env, 'DSH_DESKTOP_THREAD_PLUGIN')
-  assert.equal(thread?.hashKey, 'threadTarball')
+  ]
+  const qunoTrio = ['dsh-quno', 'dsh-quno-sense-calendar', 'dsh-quno-sense-feed']
+  const qunoShipping = names.includes('dsh-quno')
+  assert.deepEqual(
+    names,
+    qunoShipping ? [...core, ...qunoTrio].sort() : core,
+  )
+  const usageStats = specs.find((spec) => spec.package === 'dsh-usage-stats')
+  assert.equal(usageStats?.tarball, 'usage-stats.tar.gz')
+  assert.equal(usageStats?.env, 'DSH_DESKTOP_USAGE_STATS_PLUGIN')
+  assert.equal(usageStats?.hashKey, 'usageStatsTarball')
   const compaction = specs.find((spec) => spec.package === 'dsh-compaction-hierarchical')
   assert.equal(compaction?.env, 'DSH_DESKTOP_COMPACTION_PLUGIN')
   assert.ok(names.includes('dsh-mcp-settings'))
   assert.ok(!names.includes('dsh-question-rail'))
+  // Retired packages must not come back through a leftover ship:true.
+  assert.ok(!names.includes('dsh-thread'))
 })
 
 test('bare-source plugin overrides its pack entries away from lib', () => {

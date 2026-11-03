@@ -30,6 +30,9 @@ export const RETIRED_DESKTOP_PACKAGES: readonly RetiredDesktopPackage[] = [
   // 0.4.0-rc.3: the stock Automation page replaced this plugin (see
   // docs/notes/2026-10-20-remove-scheduled-tasks.md).
   { package: 'dsh-scheduled-tasks', destRel: 'plugins/dsh-scheduled-tasks' },
+  // 0.4.0-rc.8: cross-session handoff retired outright, no replacement (see
+  // docs/notes/2026-11-03-retire-dsh-thread.md).
+  { package: 'dsh-thread', destRel: 'plugins/dsh-thread' },
 ]
 
 interface ProfileManifest {

@@ -49,7 +49,6 @@ dsh plugin --profile web add <name>                 # mcp-settings 与 provider-
 | [`dsh-reasoning-efforts`](plugin/dsh-reasoning-efforts) | 为手动添加的 OpenAI 兼容模型补推理力度选项 |
 | [`dsh-send-while-running`](plugin/dsh-send-while-running) | 会话运行中也能继续发送新消息 |
 | [`dsh-settings-icons`](plugin/dsh-settings-icons) | 设置导航补三枚语义图标（使用统计 / MCP / 记忆） |
-| [`dsh-thread`](plugin/dsh-thread) | Thread 模式的跨会话 Handoff Draft：接续上一会话的草稿继续工作 |
 | [`dsh-usage-stats`](plugin/dsh-usage-stats) | 设置页「使用统计」：用量摘要卡、活动热力图、模型用量与质量图表 |
 | [`dsh-web-search-toggle`](plugin/dsh-web-search-toggle) | 设置页一键开关原生 Web Search |
 

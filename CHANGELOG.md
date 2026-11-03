@@ -2,6 +2,12 @@
 
 Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的，不在这里重复。发版时 `scripts/release-notes.mjs` 抽取对应 `## [version]`（没有则回退 `## [Unreleased]
 
+## [0.4.0-rc.8] - 2026-11-03
+
+### Removed
+
+- Thread 跨会话交接整体下线（`dsh-thread`）：会话头 Thread 入口、胶囊浮层、侧栏「Thread 分组」视图、`thread_handoff` 工具与「设置→通用→Thread」开关一并移除，不设替代能力。已有安装在下一次启动时由桌面自动下船（只清理桌面自己装的那份），存量 Thread 关系数据保留为只读历史，需要时仍可自行 `plugin add dsh-thread` 装回。
+
 ## [0.4.0-rc.7] - 2026-11-01
 
 ### Fixed
