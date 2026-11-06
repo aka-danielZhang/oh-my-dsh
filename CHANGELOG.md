@@ -2,6 +2,12 @@
 
 Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的，不在这里重复。发版时 `scripts/release-notes.mjs` 抽取对应 `## [version]`（没有则回退 `## [Unreleased]
 
+## [0.4.0-rc.9] - 2026-11-06
+
+### Changed
+
+- runtime 升级到 fork `v0.2.1-rc.2+zw.9`：新增槽注册选项透传、贡献式会话可见性过滤与面板行的对话归属推导，支撑手动接入的扩展在打开会话后保持正确的侧栏选中态。随包插件集合与版本不变；Quno 及其 Sense 仍不随 Desktop 交付。
+
 ## [0.4.0-rc.8] - 2026-11-03
 
 ### Removed
