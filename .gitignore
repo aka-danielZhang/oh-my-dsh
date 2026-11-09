@@ -90,12 +90,12 @@ plugin/dsh-todo-completion-guard/lib/
 # dsh-quno：构建产物（scripts/new-plugin.mjs 生成）
 plugin/dsh-quno/lib/
 
-# dsh-quno-sense-calendar：构建产物（scripts/new-plugin.mjs 生成）
-plugin/dsh-quno-sense-calendar/lib/
+# dsh-quno-collector-calendar：构建产物（scripts/new-plugin.mjs 生成）
+plugin/dsh-quno-collector-calendar/lib/
 
-# dsh-quno-sense-feed：构建产物（scripts/new-plugin.mjs 生成）
-plugin/dsh-quno-sense-feed/lib/
+# dsh-quno-collector-feed：构建产物（scripts/new-plugin.mjs 生成）
+plugin/dsh-quno-collector-feed/lib/
 
-# dsh-quno-sense-yzj：构建产物（scripts/new-plugin.mjs 生成）
-plugin/dsh-quno-sense-yzj/lib/
+# dsh-quno-collector-yzj：构建产物（scripts/new-plugin.mjs 生成）
+plugin/dsh-quno-collector-yzj/lib/
 plugin/dsh-quno/eval-results/

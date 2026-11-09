@@ -33,6 +33,12 @@ export const RETIRED_DESKTOP_PACKAGES: readonly RetiredDesktopPackage[] = [
   // 0.4.0-rc.8: cross-session handoff retired outright, no replacement (see
   // docs/notes/2026-11-03-retire-dsh-thread.md).
   { package: 'dsh-thread', destRel: 'plugins/dsh-thread' },
+  // 2026-11-10 collector redesign: renamed to dsh-quno-collector-calendar /
+  // dsh-quno-collector-feed (contract quno.collector/v2; the old Sense-era
+  // packages refuse to load next to the new Host anyway) — see
+  // docs/notes/2026-11-10-quno-collector-redesign.md. yzj never shipped.
+  { package: 'dsh-quno-sense-calendar', destRel: 'plugins/dsh-quno-sense-calendar' },
+  { package: 'dsh-quno-sense-feed', destRel: 'plugins/dsh-quno-sense-feed' },
 ]
 
 interface ProfileManifest {
