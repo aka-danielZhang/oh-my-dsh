@@ -3,7 +3,11 @@ import { writeFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { DEFAULT_QUNO_CONFIG } from '../src/contracts.ts'
 import { QunoIngress, QunoIngressError } from '../src/ingress.ts'
-import { Router, matchesFilter } from '../src/routing.ts'
+import { QunoStateError } from '../src/core/model.ts'
+import type { TriggerDraft } from '../src/core/model.ts'
+import { Engine } from '../src/core/engine.ts'
+import { SqliteRepository } from '../src/app/store.ts'
+import { buildPolicy } from '../src/core/policy.ts'
 import { QunoStore } from '../src/store.ts'
 import { addSense, batch, envelope, openFixture, scratchHome } from './helpers.ts'
 
@@ -201,115 +205,6 @@ test('ingress: an empty batch advances the checkpoint without creating events', 
   }
 })
 
-test('routing: deliveries are per-Quno, idempotent, and the watermark advances', () => {
-  const fixture = openFixture()
-  try {
-    const sense = addSense(fixture)
-    const ingress = new QunoIngress(fixture.store, 'quno')
-    fixture.store.ensureSubscriptions('quno', [sense.source], fixture.now)
-    ingress.ingest(bindingOf(sense), batch([
-      envelope({ eventKey: 'e1', type: 'calendar/updated' }),
-      envelope({ eventKey: 'e2', type: 'calendar/updated' }),
-    ], { batchKey: 'b1' }), fixture.now)
-
-    const router = new Router(fixture.store, 'quno')
-    const first = router.route(fixture.now)
-    assert.equal(first.scanned, 2)
-    assert.equal(first.inserted, 2)
-    assert.equal(fixture.store.countReadyDeliveries('quno', fixture.now), 2)
-
-    const second = router.route(fixture.now)
-    assert.equal(second.inserted, 0)
-    assert.equal(fixture.store.countReadyDeliveries('quno', fixture.now), 2)
-  } finally {
-    fixture.store.close()
-  }
-})
-
-test('routing: a subscription created from now does not backfill', () => {
-  const fixture = openFixture()
-  try {
-    const sense = addSense(fixture)
-    const ingress = new QunoIngress(fixture.store, 'quno')
-    ingress.ingest(bindingOf(sense), batch([
-      envelope({ eventKey: 'old', type: 'calendar/updated' }),
-    ], { batchKey: 'b1' }), fixture.now)
-    // Subscription starts after the event exists.
-    fixture.store.ensureSubscriptions('quno', [sense.source], fixture.now + 10)
-    ingress.ingest(bindingOf(sense), batch([
-      envelope({ eventKey: 'new', type: 'calendar/updated' }),
-    ], { batchKey: 'b2' }), fixture.now + 20)
-    const router = new Router(fixture.store, 'quno')
-    const result = router.route(fixture.now + 30)
-    assert.equal(result.inserted, 1, 'only the event after the subscription start routes')
-  } finally {
-    fixture.store.close()
-  }
-})
-
-test('routing: deterministic filters keep unrelated events out', () => {
-  const fixture = openFixture()
-  try {
-    const sense = addSense(fixture)
-    const ingress = new QunoIngress(fixture.store, 'quno')
-    ingress.ingest(bindingOf(sense), batch([
-      envelope({ eventKey: 'a', type: 'calendar/updated', summary: '评审改期' }),
-      envelope({ eventKey: 'b', type: 'mail/received', summary: '广告' }),
-    ], { batchKey: 'b1' }), fixture.now)
-    const [first, second] = fixture.store.listEventsAfter(-1, 10)
-    assert.ok(first !== undefined && second !== undefined)
-    const routed = fixture.store.transaction(() => {
-      assert.equal(matchesFilter({ types: ['calendar/updated'] }, first, -1), true)
-      assert.equal(matchesFilter({ types: ['calendar/updated'] }, second, -1), false)
-      assert.equal(matchesFilter({ summaryIncludes: ['评审'] }, first, -1), true)
-      assert.equal(matchesFilter({ summaryIncludes: ['评审'] }, second, -1), false)
-      assert.equal(matchesFilter({ priorityAtLeast: 'p1' }, first, -1), false)
-      return 0
-    })
-    assert.equal(routed, 0)
-  } finally {
-    fixture.store.close()
-  }
-})
-
-test('store: run fence recovery releases claimed deliveries', () => {
-  const fixture = openFixture()
-  try {
-    const sense = addSense(fixture)
-    fixture.store.ensureSubscriptions('quno', [sense.source], fixture.now)
-    const ingress = new QunoIngress(fixture.store, 'quno')
-    ingress.ingest(bindingOf(sense), batch([
-      envelope({ eventKey: 'e1', type: 'x/y' }),
-    ], { batchKey: 'b1' }), fixture.now)
-    new Router(fixture.store, 'quno').route(fixture.now)
-
-    const run = fixture.store.insertRun({
-      id: 'run_1',
-      qunoId: 'quno',
-      kind: 'think',
-      trigger: 'schedule',
-      configRevision: 1,
-      fence: 1,
-      claimExpiresAt: fixture.now + 1000,
-      inputEventIds: [],
-      inputAttentionIds: [],
-      now: fixture.now,
-    })
-    const ready = fixture.store.listReadyDeliveries('quno', fixture.now, 10)
-    fixture.store.claimDeliveries('quno', run.id, ready.map(item => item.eventId), fixture.now)
-    assert.equal(fixture.store.listReadyDeliveries('quno', fixture.now, 10).length, 0)
-
-    const interrupted = fixture.store.expireStaleRuns(fixture.now + 2000)
-    assert.equal(interrupted.length, 1)
-    assert.equal(interrupted[0]?.status, 'interrupted')
-    assert.equal(fixture.store.listReadyDeliveries('quno', fixture.now + 2000, 10).length, 1)
-    const delivery = fixture.store.listDeliveries('quno', 10)[0]
-    assert.equal(delivery?.attempts, 1)
-  } finally {
-    fixture.store.close()
-  }
-})
-
 test('store: outbox dedupes by material revision and merges same-topic pending rows', () => {
   const fixture = openFixture()
   try {
@@ -380,33 +275,85 @@ test('store: attention revision CAS rejects stale writes and records history', (
   }
 })
 
-test('store: retention prunes unreferenced event bodies but keeps evidence under open work', () => {
+
+test('ingress: the domain Trigger sink commits with the batch and rolls back with it', () => {
   const fixture = openFixture()
   try {
     const sense = addSense(fixture)
-    fixture.store.ensureSubscriptions('quno', [sense.source], fixture.now)
-    const ingress = new QunoIngress(fixture.store, 'quno')
-    ingress.ingest(bindingOf(sense), batch([
-      envelope({ eventKey: 'pending', type: 'x/y' }),
-      envelope({ eventKey: 'orphan', type: 'x/y' }),
-    ], { batchKey: 'b1' }), fixture.now)
-    new Router(fixture.store, 'quno').route(fixture.now)
-    const rowsAfterRoute = fixture.store.listEventsAfter(-1, 10)
-    const orphan = rowsAfterRoute.find(row => row.eventKey === 'orphan')
-    assert.ok(orphan !== undefined)
-    fixture.store.settleDeliveryDirect('quno', orphan.id, 'processed', 'test', fixture.now)
-    const later = fixture.now + 40 * 24 * 60 * 60 * 1000
-    const pruned = fixture.store.pruneExpiredEvents(later, 30)
-    assert.equal(pruned, 1)
-    const rows = fixture.store.listEventsAfter(-1, 10)
-    for (const row of rows) {
-      if (row.eventKey === 'orphan') {
-        assert.equal(row.data, null)
-        assert.equal(row.prunedAt, later)
-      } else {
-        assert.notEqual(row.data, null, 'an unsettled delivery keeps its evidence')
-      }
+    const repo = new SqliteRepository(fixture.store)
+    const engine = new Engine({
+      repo,
+      qunoId: 'quno',
+      policy: () => ({ configRevision: 1, paused: false, acceptMode: 'auto', evalTimeoutMs: 60_000, rules: [] }),
+      policySnapshot: (state) => buildPolicy({
+        version: 'v1',
+        paused: state.paused,
+        acceptMode: state.acceptMode,
+        evalTimeoutMs: state.evalTimeoutMs,
+        rules: state.rules,
+      }),
+      nextId: (() => { let index = 0; return (prefix: string) => `${prefix}_${String(++index)}` })(),
+      defaultCwd: '/tmp',
+    })
+    let fail = false
+    const sink = {
+      receive: (input: { envelope: { eventKey: string; type: string; summary?: string }; sourceId: string; receivedAt: number; configRevision: number; contentHash: string }) => {
+        if (fail) throw new QunoStateError('thread-unresolved', 'forced sink failure')
+        const draft: TriggerDraft = {
+          qunoId: 'quno',
+          sourceId: input.sourceId,
+          eventKey: input.envelope.eventKey,
+          type: input.envelope.type,
+          schema: 'quno.event/v1',
+          threads: [{ source: input.sourceId, id: 'subject-1' }],
+          actor: { source: input.sourceId, id: 'u1' },
+          human: true,
+          addressed: 'mention',
+          occurredAt: input.receivedAt,
+          observedAt: input.receivedAt,
+          receivedAt: input.receivedAt,
+          summary: input.envelope.summary ?? null,
+          data: null,
+          contentRef: null,
+          channel: null,
+          operation: 'upsert',
+          priority: 'p2',
+          deadline: null,
+          correlationKeys: [],
+          supersedesTriggerIds: [],
+          parentTriggerIds: [],
+          provenance: { kind: 'observed' },
+          contentHash: input.contentHash,
+          configRevision: input.configRevision,
+          expiresAt: null,
+        }
+        engine.receive(draft, input.receivedAt)
+      },
     }
+    const ingress = new QunoIngress(fixture.store, 'quno', {}, sink)
+    const ack = ingress.ingest(bindingOf(sense), batch([
+      envelope({ eventKey: 'ok-1', type: 'test/changed' }),
+    ], { batchKey: 'b-sink-1' }), fixture.now)
+    assert.equal(ack.acceptedCount, 1)
+    const threads = repo.listThreads('quno', { limit: 10 })
+    assert.equal(threads.length, 1)
+    assert.equal(threads[0]?.threadKey, 'subject-1')
+    assert.equal(repo.countPending(threads[0]?.id ?? ''), 1)
+
+    fail = true
+    let refused: unknown
+    try {
+      ingress.ingest(bindingOf(sense), batch([
+        envelope({ eventKey: 'bad-1', type: 'test/changed' }),
+      ], { batchKey: 'b-sink-2' }), fixture.now)
+    } catch (error) {
+      refused = error
+    }
+    assert.ok(refused instanceof QunoIngressError)
+    assert.equal(refused.shape.code, 'thread-unresolved')
+    assert.equal(fixture.store.dbFindEventId(sense.source.id, 'bad-1'), undefined, 'the event row rolled back')
+    assert.equal(fixture.store.findBatch(sense.source.id, 'b-sink-2'), undefined, 'no receipt for a failed T1')
+    fail = false
   } finally {
     fixture.store.close()
   }

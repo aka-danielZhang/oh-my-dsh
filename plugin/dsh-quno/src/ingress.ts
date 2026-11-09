@@ -17,10 +17,12 @@
 
 import { contentHashOf, newId, sha256, stableStringify, toMillis } from './util.ts'
 import { parseIngestBatch } from './contracts.ts'
-import type { QunoStore } from './store.ts'
+import { QunoConflictError, QunoStateError } from './core/model.ts'
+import { QunoStore } from './store.ts'
 import type {
   BatchId,
   EventEnvelope,
+  EventId,
   EventRecord,
   IngestAck,
   IngestAckItem,
@@ -47,6 +49,24 @@ export interface IngressBinding {
   readonly configRevision: number
 }
 
+/**
+ * The domain trigger seam: called for every accepted envelope INSIDE the same
+ * transaction as the event row, the batch receipt and the checkpoint, so a
+ * crash cannot leave "received but never routed" state behind.
+ */
+export interface IngressTriggerSink {
+  receive(input: {
+    readonly envelope: EventEnvelope
+    readonly eventId: EventId
+    readonly sourceId: SourceId
+    readonly qunoId: string
+    readonly contentHash: string
+    readonly ingestSeq: number
+    readonly receivedAt: number
+    readonly configRevision: number
+  }): { readonly triggerId: EventId } | void
+}
+
 /** Hooks the ingress fires after a durable commit (outside the transaction). */
 export interface IngressHooks {
   /** A batch committed: route promptly and wake the scheduler. */
@@ -61,6 +81,7 @@ export class QunoIngress {
     private readonly store: QunoStore,
     private readonly qunoId: string,
     private readonly hooks: IngressHooks = {},
+    private readonly triggers?: IngressTriggerSink,
   ) {}
 
   /**
@@ -153,8 +174,26 @@ export class QunoIngress {
           }
           seq += 1
           const id = newId('evt')
-          this.insertEvent(id, binding, envelope, hash, seq, now)
-          statuses.push({ eventId: id, eventKey: envelope.eventKey, status: 'accepted' })
+          let committedId: EventId = id
+          if (this.triggers === undefined) {
+            // Legacy write path: the ingress owns the event row.
+            this.insertEvent(id, binding, envelope, hash, seq, now)
+          } else {
+            // Domain write path: Engine.receive writes the Trigger (the events
+            // table IS the Trigger store) inside this same transaction.
+            const received = this.triggers.receive({
+              envelope,
+              eventId: id,
+              sourceId: binding.source.id,
+              qunoId: this.qunoId,
+              contentHash: hash,
+              ingestSeq: seq,
+              receivedAt: now,
+              configRevision: binding.configRevision,
+            })
+            committedId = received?.triggerId ?? id
+          }
+          statuses.push({ eventId: committedId, eventKey: envelope.eventKey, status: 'accepted' })
           acceptedCount += 1
         }
 
@@ -164,6 +203,22 @@ export class QunoIngress {
             checkpoint: { value: batch.checkpointAfter.value, revision: checkpointRevision },
             now,
           })
+        }
+        if (batch.checkpointPatch !== undefined && batch.checkpointPatch !== null) {
+          try {
+            this.store.applyCheckpointPatch(
+              binding.instance.id,
+              batch.checkpointPatch,
+              now,
+              QunoStore.CHECKPOINT_ENTRIES_CAPACITY,
+            )
+          } catch (error) {
+            throw new QunoIngressError({
+              code: 'quota-exceeded',
+              message: `checkpoint patch refused: ${(error as Error).message}`,
+              retryable: false,
+            })
+          }
         }
         if (acceptedCount > 0) {
           this.store.updateSenseInstance(binding.instance.id, { lastEventAt: now, now })
@@ -192,6 +247,9 @@ export class QunoIngress {
       })
     } catch (error) {
       if (error instanceof QunoIngressError) throw error
+      if (error instanceof QunoConflictError || error instanceof QunoStateError) {
+        throw new QunoIngressError({ code: error.code, message: error.message, retryable: false })
+      }
       throw new QunoIngressError({
         code: 'temporarily-unavailable',
         message: `event batch could not be committed: ${(error as Error).message}`,

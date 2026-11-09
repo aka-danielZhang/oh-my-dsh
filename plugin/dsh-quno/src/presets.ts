@@ -5,13 +5,14 @@
  * half; the agent-facing composition lives here so it can carry Quno-specific
  * tools and the aggressive compaction policy without editing a user preset.
  *
- * `quno` — the permanent main conversation (full capability surface).
+ * `quno` — the permanent routing conversation (no direct execution tools).
  * `quno-task` — the read-only child used by delegated tasks (v1 boundary).
  *
  * @module dsh-quno/presets
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { WORKER_TOOL_NAMES } from './app/worker-tools.ts'
 
 /** One plugin row of a preset declaration. */
 interface PresetRow {
@@ -45,6 +46,8 @@ export const READ_ONLY_TOOLS: readonly string[] = [
   'todo_write',
   'ask_user_question',
   'present',
+  // Quno worker control surface (reports and thread ownership), not execution.
+  ...WORKER_TOOL_NAMES,
 ]
 
 /** Aggressive compaction knobs for a permanent conversation (design §4.3). */
@@ -71,35 +74,23 @@ function compactionGroup(config: Record<string, unknown>): PresetRow {
   }
 }
 
-/** The main conversation composition. */
+/** The main conversation composition: route, remember, clarify and report, never execute. */
 export function qunoPresetRows(): PresetRow[] {
-  const windows = process.platform === 'win32'
   return [
     {
       id: 'persona',
       name: '@deepseek-ai/dsh-persona',
       config: {
-        prefix: 'You are Quno, the user\'s persistent personal assistant. You have one lifelong conversation with the user. Be warm but concise; report what changed and what you need from the user, never dump raw event payloads.',
+        prefix: 'You are Quno, the user\'s persistent personal assistant and routing secretary. You have one lifelong conversation with the user. Answer briefly, delegate every execution task, and report results when they return.',
       },
     },
     { id: 'agent-instructions', name: '@deepseek-ai/dsh-agent-instructions', config: { maxBytes: 65_536 } },
     { id: 'time-context', name: '@deepseek-ai/dsh-time-context' },
-    { id: 'tool-bash', name: '@deepseek-ai/dsh-tool-bash', disabled: windows },
-    { id: 'tool-pwsh', name: '@deepseek-ai/dsh-tool-pwsh', disabled: !windows },
-    { id: 'tool-fs', name: '@deepseek-ai/dsh-tool-fs' },
-    { id: 'tool-fs-search', name: '@deepseek-ai/dsh-tool-fs-search', config: { sampleOverCapGlobResults: false } },
-    { id: 'tool-jobs', name: '@deepseek-ai/dsh-tool-jobs' },
     { id: 'tool-schedule', name: '@deepseek-ai/dsh-tool-schedule' },
-    { id: 'skill-filesystem', name: '@deepseek-ai/dsh-skill-filesystem' },
-    { id: 'tool-skill', name: '@deepseek-ai/dsh-tool-skill' },
-    { id: 'command-goal', name: '@deepseek-ai/dsh-command-goal' },
-    { id: 'tool-goal', name: '@deepseek-ai/dsh-tool-goal' },
     { id: 'tool-ask-user', name: '@deepseek-ai/dsh-tool-ask-user' },
-    { id: 'tool-todo', name: '@deepseek-ai/dsh-tool-todo', config: { allowParallelInProgress: true } },
-    { id: 'tool-web', name: '@deepseek-ai/dsh-tool-web', config: { fetch: true, searchTimeoutMs: 60_000 } },
     { id: 'present', name: '@deepseek-ai/dsh-tool-present' },
     // Quno-owned capability surface: recall, attention management, delegation,
-    // short-term mute. The row also removes `thread_handoff` (retired).
+    // short-term mute. Direct execution tools deliberately stay out of the main preset.
     { id: 'quno-tools', name: 'dsh-quno/preset' },
     compactionGroup(QUNO_COMPACTION),
   ]
@@ -144,7 +135,7 @@ export async function registerQunoPresets(ctx: Context): Promise<() => Promise<v
     disposers.push(await registry.register({
       id: 'quno',
       name: 'Quno 主对话',
-      description: 'Quno 的永久主对话：完整能力 + quno_recall + 关注事项 + 委派任务 + 激进压缩。',
+      description: 'Quno 的永久主对话：只负责路由与转述，所有实际工作委派子 agent；支持历史召回、关注事项、提醒与激进压缩。',
       order: 2,
       plugins: qunoPresetRows(),
     }))

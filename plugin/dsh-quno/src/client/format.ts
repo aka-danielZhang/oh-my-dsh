@@ -39,3 +39,13 @@ export function toneOf(health: string, stale: boolean): 'ok' | 'warn' | 'error' 
 export function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, Math.max(0, max - 1))}…`
 }
+
+/** Format an elapsed duration compactly (never a negative or bogus value). */
+export function formatDuration(ms: number | null): string {
+  if (ms === null) return '—'
+  const seconds = Math.max(0, Math.round(ms / 1000))
+  if (seconds < 60) return `${String(seconds)}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${String(minutes)}m ${String(seconds % 60)}s`
+  return `${String(Math.floor(minutes / 60))}h ${String(minutes % 60)}m`
+}

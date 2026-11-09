@@ -3,6 +3,15 @@
  * wrappers over the `quno` Remote namespace. Components never touch the
  * Remote directly; slot `inject` hands them this store.
  *
+ * The snapshot separates three cache layers so a detail view never forces a
+ * full 15s refresh: the polled `state`, on-demand `noticeDetails` for
+ * historical reports, and bounded `eventDetails` for evidence drill-downs.
+ * `probes` holds explicit probe results, which are deliberately NOT health.
+ *
+ * Async reads are values, not `T | undefined`: a pending read, a failed read
+ * and a record the Host reported as `null` are three different facts, and the
+ * panel must not collapse them into "no content".
+ *
  * @module dsh-quno/client/store
  */
 
@@ -10,14 +19,34 @@ import type { RemoteResult } from '@deepseek-ai/dsh-typert-protocol'
 import type {
   CheckNowResult,
   EnsureMainResult,
+  EventDetailWire,
   EventWire,
+  NoticeDetailWire,
   QunoWireState,
+  SenseOptionsPageWire,
+  SenseProbeWire,
 } from '../api-types.ts'
+
+/**
+ * One asynchronous read.
+ * - `loading`: the request is in flight (and no older value is being kept);
+ * - `ready`: the Host returned a value;
+ * - `missing`: the Host explicitly returned `null` — the record does not exist;
+ * - `error`: the transport or the Host rejected the read.
+ */
+export type AsyncValue<T> =
+  | { readonly status: 'loading' }
+  | { readonly status: 'ready'; readonly data: T }
+  | { readonly status: 'missing' }
+  | { readonly status: 'error'; readonly message: string }
+
+/** Freshness of the recent-events list, tracked apart from the polled state. */
+export type EventsStatus = 'loading' | 'ready' | 'error'
 
 /** Structural face of the mounted Remote namespace. */
 export interface QunoRemoteFace {
   state(): Promise<RemoteResult<QunoWireState>>
-  ensureMain(request: { cwd: string }): Promise<RemoteResult<EnsureMainResult>>
+  ensureMain(request: { cwd: string; workspaceId?: string }): Promise<RemoteResult<EnsureMainResult>>
   updateConfig(request: { patch: Record<string, unknown> }): Promise<RemoteResult<QunoWireState>>
   updateProfile(request: {
     name?: string
@@ -47,7 +76,17 @@ export interface QunoRemoteFace {
     label?: string
     config?: Record<string, unknown>
   }): Promise<RemoteResult<QunoWireState>>
-  taskCommand(request: { taskId: string; action: 'resume' | 'abandon' }): Promise<RemoteResult<QunoWireState>>
+  probeSense(request: { instanceId: string }): Promise<RemoteResult<SenseProbeWire>>
+  senseOptions(request: {
+    type: string
+    field: string
+    config?: Record<string, unknown>
+    page?: number
+    limit?: number
+  }): Promise<RemoteResult<SenseOptionsPageWire>>
+  noticeDetail(request: { notificationId: string }): Promise<RemoteResult<NoticeDetailWire | null>>
+  eventDetail(request: { eventId: string }): Promise<RemoteResult<EventDetailWire | null>>
+  taskCommand(request: { taskId: string; action: 'resume' | 'abandon' | 'cancel' }): Promise<RemoteResult<QunoWireState>>
   mute(request: { minutes?: number; until?: string; cancel?: boolean }): Promise<RemoteResult<QunoWireState>>
   eventsRecent(request: { limit?: number }): Promise<RemoteResult<{ events: EventWire[] }>>
 }
@@ -58,11 +97,34 @@ export interface QunoSnapshot {
   readonly state: QunoWireState | null
   /** Recent Sense events (动态 view); a failed fetch keeps the previous list. */
   readonly events: readonly EventWire[]
+  /** Whether `events` is current. `error` never rewrites the list to empty. */
+  readonly eventsStatus: EventsStatus
+  readonly eventsError: string | null
+  /** Explicit probe results, keyed by instance id (never merged into health). */
+  readonly probes: Readonly<Record<string, SenseProbeWire>>
+  /** Historical notices fetched on demand, keyed by notification id. */
+  readonly noticeDetails: Readonly<Record<string, AsyncValue<NoticeDetailWire>>>
+  /** Evidence payloads fetched on demand, keyed by event id. */
+  readonly eventDetails: Readonly<Record<string, AsyncValue<EventDetailWire>>>
   readonly error: string | null
   readonly busy: boolean
 }
 
-const INITIAL: QunoSnapshot = { phase: 'idle', state: null, events: [], error: null, busy: false }
+const INITIAL: QunoSnapshot = {
+  phase: 'idle',
+  state: null,
+  events: [],
+  eventsStatus: 'loading',
+  eventsError: null,
+  probes: {},
+  noticeDetails: {},
+  eventDetails: {},
+  error: null,
+  busy: false,
+}
+
+/** Bounded on-demand caches: history reads stay small and never grow forever. */
+const DETAIL_CACHE_LIMIT = 40
 
 /** Polling store + command surface. */
 export class QunoClientStore {
@@ -70,6 +132,9 @@ export class QunoClientStore {
   private readonly listeners = new Set<() => void>()
   private timer: ReturnType<typeof setInterval> | undefined
   private polling = false
+  /** Per-record request order: a slow answer must never overwrite a newer one. */
+  private readonly noticeSeq = new Map<string, number>()
+  private readonly eventSeq = new Map<string, number>()
 
   constructor(private readonly remote: QunoRemoteFace) {}
 
@@ -100,43 +165,26 @@ export class QunoClientStore {
     }
   }
 
-  /** Pull one fresh snapshot. */
+  /**
+   * Pull one fresh snapshot. The state and the recent-events list fail
+   * independently: a failed state read keeps the previous state (and reports
+   * `error` only while nothing was ever loaded), a failed events read keeps
+   * the previous list and marks the list stale.
+   */
   async refresh(): Promise<void> {
     if (this.polling) return
     this.polling = true
-    if (this.snapshot.phase === 'idle') this.set({ ...this.snapshot, phase: 'loading' })
     try {
-      const result = await this.remote.state()
-      if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
-      const events = await this.refreshEvents()
-      this.set({ phase: 'ready', state: result.value, events, error: null, busy: this.snapshot.busy })
-    } catch (error) {
-      this.set({
-        phase: this.snapshot.state === null ? 'error' : 'ready',
-        state: this.snapshot.state,
-        events: this.snapshot.events,
-        error: (error as Error).message,
-        busy: this.snapshot.busy,
-      })
+      await this.refreshState()
+      await this.refreshEvents()
     } finally {
       this.polling = false
     }
   }
 
-  /** Fetch the recent-events summary; a failure degrades to the previous list. */
-  private async refreshEvents(): Promise<readonly EventWire[]> {
-    try {
-      const result = await this.remote.eventsRecent({ limit: 20 })
-      if (!result.ok) return this.snapshot.events
-      return result.value.events
-    } catch {
-      return this.snapshot.events
-    }
-  }
-
   /** Bind or create the main conversation and return its id. */
-  async ensureMain(cwd: string): Promise<string> {
-    const value = await this.run(() => this.remote.ensureMain({ cwd }))
+  async ensureMain(cwd: string, workspaceId?: string): Promise<string> {
+    const value = await this.run(() => this.remote.ensureMain({ cwd, ...(workspaceId === undefined ? {} : { workspaceId }) }))
     return value.sessionId
   }
 
@@ -193,8 +241,93 @@ export class QunoClientStore {
     await this.run(() => this.remote.senseCommand(request))
   }
 
-  /** Resume or abandon one task. */
-  async taskCommand(taskId: string, action: 'resume' | 'abandon'): Promise<void> {
+  /**
+   * Run a real probe. The result is stored beside the polled snapshot and is
+   * never written into the instance's health.
+   */
+  async probeSense(instanceId: string): Promise<SenseProbeWire> {
+    const result = await this.call(() => this.remote.probeSense({ instanceId }))
+    this.set({
+      ...this.snapshot,
+      probes: { ...this.snapshot.probes, [instanceId]: result },
+    })
+    return result
+  }
+
+  /** Discover one field's options from the Sense implementation. */
+  async listSenseOptions(request: {
+    type: string
+    field: string
+    config?: Record<string, unknown>
+    page?: number
+    limit?: number
+  }): Promise<SenseOptionsPageWire> {
+    return await this.call(() => this.remote.senseOptions(request))
+  }
+
+  /**
+   * Read one notice (with its current linked items) on demand.
+   * A cached `ready`/`loading`/`missing` answer is returned as-is; `error`
+   * answers are retried, so an explicit retry action is meaningful.
+   */
+  async loadNoticeDetail(notificationId: string): Promise<AsyncValue<NoticeDetailWire>> {
+    const cached = this.snapshot.noticeDetails[notificationId]
+    if (cached !== undefined && cached.status !== 'error') return cached
+
+    const seq = this.nextSeq(this.noticeSeq, notificationId)
+    this.patchNotice(notificationId, { status: 'loading' })
+
+    let next: AsyncValue<NoticeDetailWire>
+    try {
+      const result = await this.remote.noticeDetail({ notificationId })
+      next = !result.ok
+        ? { status: 'error', message: `${result.error.code}: ${result.error.message}` }
+        : result.value === null
+          ? { status: 'missing' }
+          : { status: 'ready', data: result.value }
+    } catch (error) {
+      next = { status: 'error', message: (error as Error).message }
+    }
+
+    if (this.noticeSeq.get(notificationId) !== seq) {
+      return this.snapshot.noticeDetails[notificationId] ?? { status: 'loading' }
+    }
+    this.patchNotice(notificationId, next)
+    return next
+  }
+
+  /**
+   * Read one event payload on demand. Same `AsyncValue` discipline as
+   * {@link loadNoticeDetail}: `missing` only when the Host says `null`.
+   */
+  async loadEventDetail(eventId: string): Promise<AsyncValue<EventDetailWire>> {
+    const cached = this.snapshot.eventDetails[eventId]
+    if (cached !== undefined && cached.status !== 'error') return cached
+
+    const seq = this.nextSeq(this.eventSeq, eventId)
+    this.patchEvent(eventId, { status: 'loading' })
+
+    let next: AsyncValue<EventDetailWire>
+    try {
+      const result = await this.remote.eventDetail({ eventId })
+      next = !result.ok
+        ? { status: 'error', message: `${result.error.code}: ${result.error.message}` }
+        : result.value === null
+          ? { status: 'missing' }
+          : { status: 'ready', data: result.value }
+    } catch (error) {
+      next = { status: 'error', message: (error as Error).message }
+    }
+
+    if (this.eventSeq.get(eventId) !== seq) {
+      return this.snapshot.eventDetails[eventId] ?? { status: 'loading' }
+    }
+    this.patchEvent(eventId, next)
+    return next
+  }
+
+  /** Resume, abandon or cancel one task. */
+  async taskCommand(taskId: string, action: 'resume' | 'abandon' | 'cancel'): Promise<void> {
     await this.run(() => this.remote.taskCommand({ taskId, action }))
   }
 
@@ -203,20 +336,104 @@ export class QunoClientStore {
     await this.run(() => this.remote.mute(request))
   }
 
+  /** Read the polled state; failures keep whatever was already loaded. */
+  private async refreshState(): Promise<void> {
+    if (this.snapshot.phase === 'idle') this.set({ ...this.snapshot, phase: 'loading' })
+    try {
+      const result = await this.remote.state()
+      if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+      this.set({ ...this.snapshot, phase: 'ready', state: result.value, error: null })
+    } catch (error) {
+      this.set({
+        ...this.snapshot,
+        phase: this.snapshot.state === null ? 'error' : 'ready',
+        error: (error as Error).message,
+      })
+    }
+  }
+
+  /**
+   * Read the recent-events summary independently of the polled state. The
+   * status only degrades to `loading` on a first read: a background retry
+   * never blanks a list the user is already reading.
+   */
+  private async refreshEvents(): Promise<void> {
+    try {
+      const result = await this.remote.eventsRecent({ limit: 20 })
+      if (!result.ok) {
+        this.set({
+          ...this.snapshot,
+          eventsStatus: 'error',
+          eventsError: `${result.error.code}: ${result.error.message}`,
+        })
+        return
+      }
+      this.set({
+        ...this.snapshot,
+        events: result.value.events,
+        eventsStatus: 'ready',
+        eventsError: null,
+      })
+    } catch (error) {
+      this.set({ ...this.snapshot, eventsStatus: 'error', eventsError: (error as Error).message })
+    }
+  }
+
   private async run<T>(operation: () => Promise<RemoteResult<T>>): Promise<T> {
     this.set({ ...this.snapshot, busy: true })
     try {
-      const result = await operation()
-      if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+      const value = await this.call(operation)
       await this.refresh()
-      return result.value
+      return value
+    } catch (error) {
+      // A rejected command is the moment the local revision is most likely
+      // stale (an attention CAS conflict, another window's edit). Refresh
+      // before rethrowing so the retry copy can point at real data.
+      await this.refresh()
+      throw error
     } finally {
       this.set({ ...this.snapshot, busy: false })
     }
+  }
+
+  private async call<T>(operation: () => Promise<RemoteResult<T>>): Promise<T> {
+    const result = await operation()
+    if (!result.ok) throw new Error(`${result.error.code}: ${result.error.message}`)
+    return result.value
+  }
+
+  private patchNotice(notificationId: string, value: AsyncValue<NoticeDetailWire>): void {
+    this.set({
+      ...this.snapshot,
+      noticeDetails: bounded({ ...this.snapshot.noticeDetails, [notificationId]: value }),
+    })
+  }
+
+  private patchEvent(eventId: string, value: AsyncValue<EventDetailWire>): void {
+    this.set({
+      ...this.snapshot,
+      eventDetails: bounded({ ...this.snapshot.eventDetails, [eventId]: value }),
+    })
+  }
+
+  private nextSeq(map: Map<string, number>, key: string): number {
+    const seq = (map.get(key) ?? 0) + 1
+    map.set(key, seq)
+    return seq
   }
 
   private set(next: QunoSnapshot): void {
     this.snapshot = next
     for (const listener of this.listeners) listener()
   }
+}
+
+/** Keep the most recently inserted entries of a record cache. */
+function bounded<T>(record: Record<string, T>): Record<string, T> {
+  const keys = Object.keys(record)
+  if (keys.length <= DETAIL_CACHE_LIMIT) return record
+  const drop = keys.slice(0, keys.length - DETAIL_CACHE_LIMIT)
+  const next = { ...record }
+  for (const key of drop) delete next[key]
+  return next
 }

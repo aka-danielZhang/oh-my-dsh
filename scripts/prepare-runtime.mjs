@@ -112,6 +112,9 @@ const skipped = []
 // `dsh-client-shortcuts` joined it (desktop runtime = keyboard-bridge capability).
 // zw.4 added `dsh-client-ui-sidebar`: its `sidebar.header.action` seat is what
 // carries the updater at the sidebar's top edge.
+// zw.9 added `dsh-client-ui-slots`: slot-declared registration options ride the
+// stored entry's options bag, which is what lets a sidebar row stand for a
+// Conversation preset (Quno's row keeps its selected state after the hand-off).
 const FORK_MODIFIED = new Set([
   '@deepseek-ai/dsh',
   '@deepseek-ai/dsh-agent-default-model',
@@ -120,6 +123,7 @@ const FORK_MODIFIED = new Set([
   '@deepseek-ai/dsh-client-shortcuts',
   '@deepseek-ai/dsh-client-ui-model-selection',
   '@deepseek-ai/dsh-client-ui-sidebar',
+  '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-ui-workspace',
   '@deepseek-ai/dsh-cordis-client-runner',
   '@deepseek-ai/dsh-host-frontend-static',

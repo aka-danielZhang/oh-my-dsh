@@ -1,6 +1,13 @@
 /**
- * The Quno settings section: configuration, sources, attention, runs and
- * tasks in one place (design §13.1 — configuration and state are one product).
+ * Quno settings: one quiet single-page form (2026-10-28 plan). Only
+ * configuration lives here — enablement and cadence, notifications, role and
+ * model, source configuration, and bounded budgets. Run state (health, gaps,
+ * events, attention, tasks, runs, pause / resume / probe) stays in the
+ * conversation's right panel.
+ *
+ * Every field auto-saves through one serialized queue: minimal patches, no
+ * whole-config overwrite, drafts kept on failure, and polling never re-seeds a
+ * field while the user is editing it.
  *
  * @module dsh-quno/client/settings
  */
@@ -9,627 +16,584 @@ import React from 'react'
 import { Button, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
-import type { QunoConfig } from '../types.ts'
-import type { QunoWireState, SenseWire } from '../api-types.ts'
+import type { QunoBudget, QunoConfig } from '../types.ts'
+import type { QunoWireState, SenseTypeWire, SenseWire } from '../api-types.ts'
 import type { QunoLocaleKey } from './locales.ts'
 import type { QunoClientStore } from './store.ts'
 import { format } from './locales.ts'
-import { Card, Empty, ErrorBanner, Field, SectionTitle, Select, TextArea, TextInput } from './ui.tsx'
-import { formatClock, parseJsonObject, toneOf } from './format.ts'
+import { Empty, ErrorBanner, Field, Select, TextArea, TextInput } from './ui.tsx'
+import { onboarding } from './sense-onboarding.tsx'
+import { sourceSummary, sourceSummaryText } from './sense-summary.ts'
+
+/** One selectable provider/model route, as listed by the model settings. */
+export interface ModelChoice {
+  readonly provider: string
+  readonly model: string
+  readonly name: string
+}
 
 /** Injected face of the settings section. */
 export interface QunoSettingsInjected {
   readonly store: QunoClientStore
   readonly t: (key: QunoLocaleKey, params?: Record<string, string | number>) => string
-  readonly openSession: (sessionId: string) => void
-  readonly locale: () => 'zh' | 'en'
+  /** Live provider/model routes for the model selector. */
+  readonly listModelChoices?: () => Promise<ModelChoice[]>
 }
 
-type Tab = 'config' | 'sources' | 'attention' | 'runs' | 'tasks'
+interface SaveStatus {
+  readonly key: string
+  readonly phase: 'idle' | 'saving' | 'saved' | 'error'
+  readonly error?: string
+}
 
-/** Render the top-level Quno settings section. */
+interface ProfileDraft {
+  name: string
+  persona: string
+  instructions: string
+  modelProvider: string
+  model: string
+  reasoningEffort: string | null
+}
+
+/** Common IANA zones for the searchable time-zone input (free text stays valid). */
+const TIME_ZONES = [
+  'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Singapore', 'Asia/Tokyo', 'Asia/Seoul',
+  'Asia/Bangkok', 'Asia/Dubai', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Amsterdam',
+  'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Vancouver',
+  'Australia/Sydney', 'Pacific/Auckland', 'UTC',
+] as const
+
+/** Render the Quno settings section. */
 export function QunoSettingsSection(props: PropsRuntime<'settings.section'> & QunoSettingsInjected): React.ReactElement {
   const snapshot = React.useSyncExternalStore(props.store.subscribe, props.store.getSnapshot, props.store.getSnapshot)
-  const [tab, setTab] = React.useState<Tab>('config')
-  const { t, store } = props
-  const locale = props.locale()
   const state = snapshot.state
-
   if (state === null) {
     return (
-      <div style={page}>
+      <div style={styles.page}>
         {snapshot.phase === 'error'
-          ? <ErrorBanner>{format(t('error'), { error: snapshot.error ?? '' })}</ErrorBanner>
-          : <Empty>{t('loading')}</Empty>}
+          ? (
+            <div style={styles.stack}>
+              <ErrorBanner>{format(props.t('error'), { error: snapshot.error ?? '' })}</ErrorBanner>
+              <div><Button size="sm" variant="outline" onClick={() => { void props.store.refresh() }}>{props.t('saveRetry')}</Button></div>
+            </div>
+          )
+          : <Empty>{props.t('loading')}</Empty>}
       </div>
     )
   }
-
-  const tabs: { readonly id: Tab; readonly label: QunoLocaleKey }[] = [
-    { id: 'config', label: 'tabConfig' },
-    { id: 'sources', label: 'tabSources' },
-    { id: 'attention', label: 'tabAttention' },
-    { id: 'runs', label: 'tabRuns' },
-    { id: 'tasks', label: 'tabTasks' },
-  ]
-
-  return (
-    <div style={page}>
-      <header style={header}>
-        <div>
-          <h2 style={h2}>{t('settingsTitle')}</h2>
-          <p style={subtitle}>{t('settingsSubtitle')}</p>
-        </div>
-        <div style={headerActions}>
-          <MainBinding state={state} t={t} store={store} openSession={props.openSession} />
-          <Button size="sm" variant="outline" onClick={() => { void store.refresh() }}>{t('refresh')}</Button>
-        </div>
-      </header>
-
-      {snapshot.error !== null && <ErrorBanner>{format(t('error'), { error: snapshot.error })}</ErrorBanner>}
-
-      <nav style={tabBar}>
-        {tabs.map(entry => (
-          <button
-            key={entry.id}
-            type="button"
-            className="dsh-quno-tab"
-            data-active={tab === entry.id ? 'true' : undefined}
-            style={tabButton}
-            onClick={() => { setTab(entry.id) }}
-          >
-            {t(entry.label)}
-          </button>
-        ))}
-      </nav>
-
-      {tab === 'config' && <ConfigTab state={state} store={store} t={t} locale={locale} />}
-      {tab === 'sources' && <SourcesTab state={state} store={store} t={t} />}
-      {tab === 'attention' && <AttentionTab state={state} store={store} t={t} locale={locale} />}
-      {tab === 'runs' && <RunsTab state={state} store={store} t={t} locale={locale} />}
-      {tab === 'tasks' && <TasksTab state={state} store={store} t={t} locale={locale} openSession={props.openSession} />}
-    </div>
-  )
+  return <QunoSettingsForm {...props} state={state} snapshotError={snapshot.error} />
 }
 
-function MainBinding(props: {
+function QunoSettingsForm(props: QunoSettingsInjected & {
   readonly state: QunoWireState
-  readonly t: QunoSettingsInjected['t']
-  readonly store: QunoClientStore
-  readonly openSession: (sessionId: string) => void
-}): React.ReactElement {
-  const { state, t } = props
-  const [busy, setBusy] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-  const open = async (): Promise<void> => {
-    setBusy(true)
-    setError(null)
-    try {
-      const cwd = state.main.sessionId === null
-        ? (state.config.timeZone === '' ? '/' : '/')
-        : '/'
-      void cwd
-      const sessionId = state.main.sessionId ?? await props.store.ensureMain(defaultCwd())
-      props.openSession(sessionId)
-    } catch (reason) {
-      setError((reason as Error).message)
-    } finally {
-      setBusy(false)
-    }
-  }
-  const tone = state.main.state === 'ok' ? 'ok' : state.main.state === 'unbound' ? 'idle' : 'error'
-  const label = state.main.state === 'ok' ? t('mainBound') : state.main.state === 'unbound' ? t('mainUnbound') : state.main.state === 'missing' ? t('mainMissing') : t('mainBlocked')
-  return (
-    <div style={mainBinding}>
-      <span style={{ ...dot, background: tone === 'ok' ? 'var(--dsw-alias-state-success-primary)' : tone === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-tertiary)' }} />
-      <span style={mainLabel}>{label}</span>
-      {state.main.state === 'ok'
-        ? <Button size="sm" variant="primary" disabled={busy} onClick={() => { void open() }}>{t('openMain')}</Button>
-        : <Button size="sm" variant="primary" disabled={busy} onClick={() => { void open() }}>{t('createMain')}</Button>}
-      {error !== null && <span style={smallError}>{error}</span>}
-    </div>
-  )
-}
-
-function ConfigTab(props: {
-  readonly state: QunoWireState
-  readonly store: QunoClientStore
-  readonly t: QunoSettingsInjected['t']
-  readonly locale: 'zh' | 'en'
+  readonly snapshotError: string | null
 }): React.ReactElement {
   const { state, store, t } = props
-  const [draft, setDraft] = React.useState<QunoConfig>(state.config)
-  const [profile, setProfile] = React.useState({
+  const [config, setConfig] = React.useState<QunoConfig>(state.config)
+  const [profile, setProfile] = React.useState<ProfileDraft>({
     name: state.quno.name,
     persona: state.quno.persona,
     instructions: state.quno.instructions,
     modelProvider: state.quno.modelProvider,
     model: state.quno.model,
+    reasoningEffort: state.quno.reasoningEffort,
   })
-  const [message, setMessage] = React.useState<string | null>(null)
-  const [error, setError] = React.useState<string | null>(null)
-  const [saving, setSaving] = React.useState(false)
+  const [status, setStatus] = React.useState<SaveStatus>({ key: '', phase: 'idle' })
+  const [choices, setChoices] = React.useState<readonly ModelChoice[]>([])
+  const queue = React.useRef<Promise<void>>(Promise.resolve())
+  const lastFailed = React.useRef<{ readonly key: string; readonly retry: () => void } | null>(null)
 
   React.useEffect(() => {
-    setDraft(state.config)
-  }, [state.quno.configRevision])
+    let live = true
+    void (async () => {
+      if (props.listModelChoices === undefined) return
+      try {
+        const list = await props.listModelChoices()
+        if (live) setChoices(list)
+      } catch { /* selector degrades to manual entry */ }
+    })()
+    return () => { live = false }
+  }, [props.listModelChoices])
 
-  const save = async (): Promise<void> => {
-    setSaving(true)
-    setMessage(null)
-    setError(null)
-    try {
-      await store.updateConfig(draft as unknown as Record<string, unknown>)
-      await store.updateProfile(profile)
-      setMessage(t('saved'))
-    } catch (reason) {
-      setError(format(t('saveFailed'), { error: (reason as Error).message }))
-    } finally {
-      setSaving(false)
-    }
+  // Success is a transient acknowledgement; a failure stays until it is fixed
+  // or retried, and the draft is never dropped by either path.
+  React.useEffect(() => {
+    if (status.phase !== 'saved') return
+    const savedKey = status.key
+    const timer = setTimeout(() => {
+      setStatus(current => current.phase === 'saved' && current.key === savedKey ? { key: '', phase: 'idle' } : current)
+    }, 1600)
+    return () => { clearTimeout(timer) }
+  }, [status])
+
+  const enqueue = (key: string, run: () => Promise<unknown>): void => {
+    const retry = (): void => { enqueue(key, run) }
+    setStatus({ key, phase: 'saving' })
+    queue.current = queue.current.then(async () => {
+      try {
+        await run()
+        lastFailed.current = null
+        setStatus({ key, phase: 'saved' })
+        void store.refresh()
+      } catch (reason) {
+        lastFailed.current = { key, retry }
+        setStatus({ key, phase: 'error', error: reason instanceof Error ? reason.message : String(reason) })
+      }
+    })
   }
 
-  const quiet = draft.quietHours
+  const patchConfig = (key: string, patch: Partial<QunoConfig>, save: boolean): void => {
+    setConfig(current => mergeDraft(current, patch))
+    if (save) enqueue(key, () => store.updateConfig(patch as unknown as Record<string, unknown>))
+  }
+  const commitConfig = (key: string, patch: Partial<QunoConfig>): void => {
+    enqueue(key, () => store.updateConfig(patch as unknown as Record<string, unknown>))
+  }
+  const patchProfile = (key: string, patch: Partial<ProfileDraft>, save: boolean): void => {
+    setProfile(current => ({ ...current, ...patch }))
+    if (save) enqueue(key, () => store.updateProfile(patch as unknown as Record<string, unknown>))
+  }
+  const commitProfile = (key: string, patch: Partial<ProfileDraft>): void => {
+    enqueue(key, () => store.updateProfile(patch as unknown as Record<string, unknown>))
+  }
+
+  const policy = config.notificationPolicy
+  const quiet = config.quietHours
+  const budget = config.budget
+  const hint = (prefix: string): React.ReactElement | null => (
+    <SaveHint status={status} prefix={prefix} t={t} onRetry={() => {
+      const failed = lastFailed.current
+      if (failed !== null && failed.key === status.key) failed.retry()
+    }} />
+  )
+
   return (
-    <div style={stack}>
-      <Card title={t('enabled')} aside={
-        <Switch
-          checked={draft.enabled}
+    <div style={styles.page}>
+      <header>
+        <h1 style={styles.title}>{t('nav')}</h1>
+        <p style={styles.intro}>{t('settingsIntro')}</p>
+      </header>
+      {props.snapshotError !== null && <ErrorBanner>{format(t('error'), { error: props.snapshotError })}</ErrorBanner>}
+
+      <Group title={t('settingsBasic')} saveHint={hint('basic.')}>
+        <SwitchRow
           label={t('enabled')}
-          onChange={enabled => { setDraft({ ...draft, enabled }) }}
+          hint={t('settingsEnabledHint')}
+          checked={config.enabled}
+          onChange={enabled => { patchConfig('basic.enabled', { enabled }, true) }}
         />
-      }>
-        <div style={grid2}>
-          <Field label={t('checkInterval')}>
-            <TextInput type="number" min={60} value={draft.checkIntervalSec}
-              onChange={(event) => { setDraft({ ...draft, checkIntervalSec: Number(event.target.value) }) }} />
+        <div style={styles.pair}>
+          <NumberField
+            t={t}
+            label={t('checkInterval')}
+            value={config.checkIntervalSec}
+            min={60}
+            onCommit={value => { patchConfig('basic.interval', { checkIntervalSec: value }, false); commitConfig('basic.interval', { checkIntervalSec: value }) }}
+          />
+          <Field label={t('timeZone')} hint={t('timeZoneHint')}>
+            <TextInput
+              list="quno-time-zones"
+              value={config.timeZone}
+              onChange={event => { patchConfig('basic.zone', { timeZone: event.target.value }, false) }}
+              onBlur={() => { commitConfig('basic.zone', { timeZone: config.timeZone.trim() === '' ? Intl.DateTimeFormat().resolvedOptions().timeZone : config.timeZone.trim() }) }}
+            />
           </Field>
-          <Field label={t('timeZone')}>
-            <TextInput value={draft.timeZone}
-              onChange={(event) => { setDraft({ ...draft, timeZone: event.target.value }) }} />
-          </Field>
+        </div>
+        <datalist id="quno-time-zones">
+          {TIME_ZONES.map(zone => <option key={zone} value={zone} />)}
+        </datalist>
+      </Group>
+
+      <Group title={t('settingsNotifications')} saveHint={hint('notify.')}>
+        <Field label={t('notifyMode')}>
+          <Select
+            value={policy.mode}
+            onChange={(event) => {
+              const mode = event.target.value === 'every-run' ? 'every-run' : 'meaningful'
+              patchConfig('notify.mode', { notificationPolicy: { ...policy, mode } }, true)
+            }}
+          >
+            <option value="meaningful">{t('modeMeaningful')}</option>
+            <option value="every-run">{t('modeEveryRun')}</option>
+          </Select>
+        </Field>
+        <SwitchRow
+          label={t('quietEnable')}
+          hint={quiet === null ? t('quietDisabledHint') : `${quiet.start} – ${quiet.end}`}
+          checked={quiet !== null}
+          onChange={(enabled) => {
+            const next = enabled ? { start: quiet?.start ?? '22:00', end: quiet?.end ?? '08:00' } : null
+            patchConfig('notify.quiet', { quietHours: next }, true)
+          }}
+        />
+        <div style={styles.pair}>
           <Field label={t('quietStart')}>
-            <TextInput type="time" value={quiet?.start ?? ''} disabled={quiet === null}
-              onChange={(event) => { setDraft({ ...draft, quietHours: { start: event.target.value, end: quiet?.end ?? '08:00' } }) }} />
+            <TextInput
+              type="time"
+              disabled={quiet === null}
+              value={quiet?.start ?? ''}
+              onChange={event => { patchConfig('notify.quietStart', { quietHours: { start: event.target.value, end: quiet?.end ?? '08:00' } }, false) }}
+              onBlur={() => { if (quiet !== null) commitConfig('notify.quietStart', { quietHours: quiet }) }}
+            />
           </Field>
           <Field label={t('quietEnd')}>
-            <TextInput type="time" value={quiet?.end ?? ''} disabled={quiet === null}
-              onChange={(event) => { setDraft({ ...draft, quietHours: { start: quiet?.start ?? '22:00', end: event.target.value } }) }} />
+            <TextInput
+              type="time"
+              disabled={quiet === null}
+              value={quiet?.end ?? ''}
+              onChange={event => { patchConfig('notify.quietEnd', { quietHours: { start: quiet?.start ?? '22:00', end: event.target.value } }, false) }}
+              onBlur={() => { if (quiet !== null) commitConfig('notify.quietEnd', { quietHours: quiet }) }}
+            />
           </Field>
         </div>
-        <div style={inline}>
-          <Switch
-            checked={quiet !== null}
-            label={t('quietStart')}
-            onChange={(enabled) => { setDraft({ ...draft, quietHours: enabled ? { start: '22:00', end: '08:00' } : null }) }}
+        <details style={styles.details}>
+          <summary style={styles.summary}>{t('advancedNotify')}</summary>
+          <div style={styles.detailsBody}>
+            <div style={styles.pair}>
+              <NumberField
+            t={t}
+                label={t('minGap')}
+                value={policy.minGapSec}
+                min={0}
+                onCommit={value => { commitConfig('notify.minGap', { notificationPolicy: { ...policy, minGapSec: value } }) }}
+              />
+              <NumberField
+            t={t}
+                label={t('maxPerHour')}
+                value={policy.maxPerHour}
+                min={1}
+                onCommit={value => { commitConfig('notify.maxPerHour', { notificationPolicy: { ...policy, maxPerHour: value } }) }}
+              />
+            </div>
+            <SwitchRow
+              label={t('allowUrgent')}
+              checked={policy.allowUrgentWake}
+              onChange={allowUrgentWake => { patchConfig('notify.urgent', { notificationPolicy: { ...policy, allowUrgentWake } }, true) }}
+            />
+            <SwitchRow
+              label={t('urgentQuiet')}
+              disabled={!policy.allowUrgentWake}
+              checked={policy.urgentMayBreakQuietHours}
+              onChange={urgentMayBreakQuietHours => { patchConfig('notify.urgentQuiet', { notificationPolicy: { ...policy, urgentMayBreakQuietHours } }, true) }}
+            />
+            <SwitchRow
+              label={t('dryRun')}
+              hint={t('dryRunHint')}
+              checked={config.dryRun}
+              onChange={dryRun => { patchConfig('notify.dryRun', { dryRun }, true) }}
+            />
+          </div>
+        </details>
+      </Group>
+
+      <Group title={t('settingsProfile')} saveHint={hint('profile.')}>
+        <Field label={t('name')}>
+          <TextInput
+            value={profile.name}
+            onChange={event => { patchProfile('profile.name', { name: event.target.value }, false) }}
+            onBlur={() => { commitProfile('profile.name', { name: profile.name }) }}
           />
-          <span style={muted}>{props.locale === 'zh' ? '启用安静时段' : 'Enable quiet hours'}</span>
-        </div>
-        <div style={grid2}>
-          <Field label={t('notifyMode')}>
-            <Select value={draft.notificationPolicy.mode}
+        </Field>
+        <div style={styles.pair}>
+          <ModelField
+            t={t}
+            choices={choices}
+            value={profile}
+            onChange={(modelProvider, model) => { patchProfile('profile.model', { modelProvider, model }, true) }}
+          />
+          <Field label={t('reasoningEffort')}>
+            <Select
+              value={profile.reasoningEffort ?? ''}
               onChange={(event) => {
-                setDraft({
-                  ...draft,
-                  notificationPolicy: {
-                    ...draft.notificationPolicy,
-                    mode: event.target.value === 'every-run' ? 'every-run' : 'meaningful',
-                  },
-                })
-              }}>
-              <option value="meaningful">{t('modeMeaningful')}</option>
-              <option value="every-run">{t('modeEveryRun')}</option>
+                const value = event.target.value === '' ? null : event.target.value
+                patchProfile('profile.effort', { reasoningEffort: value }, true)
+              }}
+            >
+              <option value="">{t('reasoningDefault')}</option>
+              <option value="low">low</option>
+              <option value="medium">medium</option>
+              <option value="high">high</option>
+              {profile.reasoningEffort !== null && !['low', 'medium', 'high'].includes(profile.reasoningEffort) && (
+                <option value={profile.reasoningEffort}>{profile.reasoningEffort}</option>
+              )}
             </Select>
           </Field>
-          <Field label={t('minGap')}>
-            <TextInput type="number" min={0} value={draft.notificationPolicy.minGapSec}
-              onChange={(event) => {
-                setDraft({ ...draft, notificationPolicy: { ...draft.notificationPolicy, minGapSec: Number(event.target.value) } })
-              }} />
-          </Field>
-          <Field label={t('maxPerHour')}>
-            <TextInput type="number" min={1} value={draft.notificationPolicy.maxPerHour}
-              onChange={(event) => {
-                setDraft({ ...draft, notificationPolicy: { ...draft.notificationPolicy, maxPerHour: Number(event.target.value) } })
-              }} />
-          </Field>
-          <Field label={t('dryRun')}>
-            <Switch checked={draft.dryRun} label={t('dryRun')} onChange={dryRun => { setDraft({ ...draft, dryRun }) }} />
-          </Field>
         </div>
-        <div style={inline}>
-          <Switch checked={draft.notificationPolicy.allowUrgentWake} label={t('allowUrgent')}
-            onChange={allowUrgentWake => {
-              setDraft({ ...draft, notificationPolicy: { ...draft.notificationPolicy, allowUrgentWake } })
-            }} />
-          <span style={muted}>{t('allowUrgent')}</span>
-        </div>
-        <div style={inline}>
-          <Switch checked={draft.notificationPolicy.urgentMayBreakQuietHours} label={t('urgentQuiet')}
-            disabled={!draft.notificationPolicy.allowUrgentWake}
-            onChange={urgentMayBreakQuietHours => {
-              setDraft({ ...draft, notificationPolicy: { ...draft.notificationPolicy, urgentMayBreakQuietHours } })
-            }} />
-          <span style={muted}>{t('urgentQuiet')}</span>
-        </div>
-      </Card>
-
-      <Card title={t('budgetEvents')}>
-        <div style={grid2}>
-          <Field label={t('budgetEvents')}>
-            <TextInput type="number" min={1} value={draft.budget.maxEventsPerRun}
-              onChange={(event) => { setDraft({ ...draft, budget: { ...draft.budget, maxEventsPerRun: Number(event.target.value) } }) }} />
-          </Field>
-          <Field label={t('budgetContext')}>
-            <TextInput type="number" min={2000} value={draft.budget.maxContextChars}
-              onChange={(event) => { setDraft({ ...draft, budget: { ...draft.budget, maxContextChars: Number(event.target.value) } }) }} />
-          </Field>
-          <Field label={t('budgetRuns')}>
-            <TextInput type="number" min={1} value={draft.budget.dailyModelRuns}
-              onChange={(event) => { setDraft({ ...draft, budget: { ...draft.budget, dailyModelRuns: Number(event.target.value) } }) }} />
-          </Field>
-        </div>
-      </Card>
-
-      <Card title={t('persona')}>
         <Field label={t('persona')}>
-          <TextArea value={profile.persona} onChange={(event) => { setProfile({ ...profile, persona: event.target.value }) }} />
+          <TextArea
+            rows={3}
+            value={profile.persona}
+            onChange={event => { patchProfile('profile.persona', { persona: event.target.value }, false) }}
+            onBlur={() => { commitProfile('profile.persona', { persona: profile.persona }) }}
+          />
         </Field>
-        <Field label={t('instructions')}>
-          <TextArea value={profile.instructions} onChange={(event) => { setProfile({ ...profile, instructions: event.target.value }) }} />
+        <Field label={t('instructions')} hint={t('instructionsHint')}>
+          <TextArea
+            rows={5}
+            value={profile.instructions}
+            onChange={event => { patchProfile('profile.instructions', { instructions: event.target.value }, false) }}
+            onBlur={() => { commitProfile('profile.instructions', { instructions: profile.instructions }) }}
+          />
         </Field>
-        <div style={grid2}>
-          <Field label={t('modelProvider')}>
-            <TextInput value={profile.modelProvider} onChange={(event) => { setProfile({ ...profile, modelProvider: event.target.value }) }} />
-          </Field>
-          <Field label={t('model')}>
-            <TextInput value={profile.model} onChange={(event) => { setProfile({ ...profile, model: event.target.value }) }} />
-          </Field>
+      </Group>
+
+      <Group
+        title={t('settingsSources')}
+        action={<Button size="sm" variant="outline" onClick={() => { onboarding.open({ kind: 'create' }) }}>{t('connectSource')}</Button>}
+      >
+        {state.senses.length === 0
+          ? <p style={styles.hint}>{t('settingsSourcesHint')}</p>
+          : state.senses.map((sense) => {
+            const type = state.senseTypes.find(candidate => candidate.type === sense.type)
+            const fields = type?.configFields ?? sense.configFields
+            const derived = sourceSummary(sense.config, fields)
+            const summary = derived.kind === 'none' ? '' : sourceSummaryText(derived, type?.displayName ?? sense.type, t)
+            return (
+              <div key={sense.id} style={styles.sourceRow}>
+                <div style={styles.sourceText}>
+                  <div style={styles.rowLabel}>{sense.label === '' ? (type?.displayName ?? sense.type) : sense.label}</div>
+                  <div style={styles.hint}>{typeLabel(state.senseTypes, sense)}{summary === '' ? '' : ` · ${summary}`}</div>
+                </div>
+                <Button size="sm" variant="ghost" onClick={() => { onboarding.open({ kind: 'edit', instanceId: sense.id, type: sense.type }) }}>
+                  {t('senseEdit')}
+                </Button>
+              </div>
+            )
+          })}
+      </Group>
+
+      <Group title={t('settingsAdvanced')} saveHint={hint('advanced.')} collapsible>
+        <div style={styles.pair}>
+          <NumberField
+            t={t}
+            label={t('budgetEvents')}
+            value={budget.maxEventsPerRun}
+            min={1}
+            onCommit={value => { commitConfig('advanced.events', { budget: { ...budget, maxEventsPerRun: value } }) }}
+          />
+          <NumberField
+            t={t}
+            label={t('budgetContext')}
+            value={budget.maxContextChars}
+            min={2000}
+            onCommit={value => { commitConfig('advanced.context', { budget: { ...budget, maxContextChars: value } }) }}
+          />
+          <NumberField
+            t={t}
+            label={t('budgetRuns')}
+            value={budget.dailyModelRuns}
+            min={1}
+            onCommit={value => { commitConfig('advanced.runs', { budget: { ...budget, dailyModelRuns: value } }) }}
+          />
         </div>
-      </Card>
-
-      <div style={inline}>
-        <Button variant="primary" size="sm" disabled={saving} onClick={() => { void save() }}>{t('save')}</Button>
-        {message !== null && <span style={okText}>{message}</span>}
-        {error !== null && <span style={smallError}>{error}</span>}
-      </div>
+      </Group>
     </div>
   )
 }
 
-function SourcesTab(props: {
-  readonly state: QunoWireState
-  readonly store: QunoClientStore
-  readonly t: QunoSettingsInjected['t']
+/** One titled group; `collapsible` renders a details element for advanced fields. */
+function Group(props: {
+  readonly title: string
+  readonly children: React.ReactNode
+  readonly saveHint?: React.ReactNode
+  readonly action?: React.ReactNode
+  readonly collapsible?: boolean
 }): React.ReactElement {
-  const { state, store, t } = props
-  if (state.senseTypes.length === 0) return <Empty>{t('noSenses')}</Empty>
+  const head = (
+    <div style={styles.groupHead}>
+      <span style={styles.groupTitle}>{props.title}</span>
+      {props.action}
+    </div>
+  )
+  if (props.collapsible === true) {
+    return (
+      <details style={styles.group}>
+        <summary style={styles.groupSummary}>{head}</summary>
+        <div style={styles.groupBody}>{props.children}</div>
+        {props.saveHint}
+      </details>
+    )
+  }
   return (
-    <div style={stack}>
-      {state.senseTypes.map(type => (
-        <Card key={type.type} title={type.displayName} aside={<span style={muted}>{type.type}</span>}>
-          <p style={bodyText}>{type.description}</p>
-          {state.senses.filter(instance => instance.type === type.type).map(instance => (
-            <SenseInstanceCard key={instance.id} instance={instance} store={store} t={t} fields={type.configFields} />
-          ))}
-          {state.senses.every(instance => instance.type !== type.type) && <Empty>{t('noInstances')}</Empty>}
-          <CreateSenseForm type={type.type} fields={type.configFields} store={store} t={t} />
-        </Card>
-      ))}
-      {state.gaps.map(gap => (
-        <ErrorBanner key={`${gap.sourceId}-${String(gap.at)}`}>{format(t('gap'), { reason: gap.reason })}</ErrorBanner>
-      ))}
+    <section style={styles.group}>
+      {head}
+      <div style={styles.groupBody}>{props.children}</div>
+      {props.saveHint}
+    </section>
+  )
+}
+
+/** Label + hint on the left, switch on the right. */
+function SwitchRow(props: {
+  readonly label: string
+  readonly hint?: string
+  readonly checked: boolean
+  readonly disabled?: boolean
+  readonly onChange: (checked: boolean) => void
+}): React.ReactElement {
+  return (
+    <div style={styles.switchRow}>
+      <div style={styles.switchText}>
+        <div style={styles.rowLabel}>{props.label}</div>
+        {props.hint !== undefined && <div style={styles.hint}>{props.hint}</div>}
+      </div>
+      <Switch checked={props.checked} disabled={props.disabled} label={props.label} onChange={props.onChange} />
     </div>
   )
 }
 
-function SenseInstanceCard(props: {
-  readonly instance: SenseWire
-  readonly store: QunoClientStore
+/** A number input that keeps invalid text in place and only commits valid integers. */
+function NumberField(props: {
+  readonly label: string
+  readonly value: number
+  readonly min: number
   readonly t: QunoSettingsInjected['t']
-  readonly fields: QunoWireState['senseTypes'][number]['configFields']
+  readonly onCommit: (value: number) => void
 }): React.ReactElement {
-  const { instance, store, t } = props
-  const [configText, setConfigText] = React.useState(JSON.stringify(instance.config, null, 2))
-  const [label, setLabel] = React.useState(instance.label)
-  const [error, setError] = React.useState<string | null>(null)
+  const [text, setText] = React.useState(String(props.value))
+  const [bad, setBad] = React.useState(false)
+  const focused = React.useRef(false)
   React.useEffect(() => {
-    setConfigText(JSON.stringify(instance.config, null, 2))
-    setLabel(instance.label)
-  }, [instance.configRevision, instance.id])
-  const tone = toneOf(instance.health, instance.stale)
-  const command = async (action: 'pause' | 'resume' | 'disable' | 'remove' | 'reconfigure'): Promise<void> => {
-    setError(null)
-    try {
-      if (action === 'reconfigure') {
-        const parsed = parseJsonObject(configText)
-        if (!parsed.ok) throw new Error(parsed.error)
-        await store.senseCommand({ instanceId: instance.id, action, label, config: parsed.value })
-      } else {
-        await store.senseCommand({ instanceId: instance.id, action })
-      }
-    } catch (reason) {
-      setError((reason as Error).message)
+    if (!focused.current) setText(String(props.value))
+  }, [props.value])
+  const commit = (): void => {
+    const parsed = Number(text)
+    if (!Number.isInteger(parsed) || parsed < props.min) {
+      setBad(true)
+      return
     }
+    setBad(false)
+    props.onCommit(parsed)
   }
   return (
-    <div style={instanceCard}>
-      <div style={instanceHeader}>
-        <StatusLine tone={tone} text={`${instance.label} · ${instance.health}${instance.stale ? ` · ${t('stale')}` : ''}`} />
-        <span style={muted}>{instance.desiredState} / {instance.lifecycle}</span>
-      </div>
-      <div style={metaRow}>
-        <span>{t('lastSuccess')}：{instance.lastSuccessAt === null ? t('never') : formatClock(instance.lastSuccessAt)}</span>
-        <span>{t('lastEvent')}：{instance.lastEventAt === null ? t('never') : formatClock(instance.lastEventAt)}</span>
-        <span>{t('checkpoint')}：{instance.checkpointRevision}</span>
-      </div>
-      {instance.healthDetail?.detail !== undefined && <p style={bodyText}>{instance.healthDetail.detail}</p>}
-      <Field label={t('senseLabel')}>
-        <TextInput value={label} onChange={(event) => { setLabel(event.target.value) }} />
-      </Field>
-      <Field label={t('senseConfig')}>
-        <TextArea value={configText} onChange={(event) => { setConfigText(event.target.value) }} />
-      </Field>
-      <div style={inline}>
-        <Button size="sm" variant="outline" onClick={() => { void command('reconfigure') }}>{t('reconfigure')}</Button>
-        {instance.desiredState === 'enabled'
-          ? <Button size="sm" variant="ghost" onClick={() => { void command('pause') }}>{t('pause')}</Button>
-          : <Button size="sm" variant="ghost" onClick={() => { void command('resume') }}>{t('resume')}</Button>}
-        <Button size="sm" variant="ghost" onClick={() => { void command('disable') }}>{t('disable')}</Button>
-        <Button size="sm" variant="ghost" onClick={() => { void command('remove') }}>{t('remove')}</Button>
-      </div>
-      {error !== null && <ErrorBanner>{error}</ErrorBanner>}
-    </div>
+    <Field label={props.label} hint={bad ? props.t('integerInvalid') : undefined}>
+      <TextInput
+        type="number"
+        min={props.min}
+        value={text}
+        onFocus={() => { focused.current = true }}
+        onBlur={() => { focused.current = false; commit() }}
+        onKeyDown={(event) => { if (event.key === 'Enter') commit() }}
+        onChange={(event) => { setText(event.target.value); setBad(false) }}
+      />
+    </Field>
   )
 }
 
-function CreateSenseForm(props: {
-  readonly type: string
-  readonly fields: QunoWireState['senseTypes'][number]['configFields']
-  readonly store: QunoClientStore
+/** Provider/model selector from the live route list, with a manual fallback. */
+function ModelField(props: {
   readonly t: QunoSettingsInjected['t']
+  readonly choices: readonly ModelChoice[]
+  readonly value: ProfileDraft
+  readonly onChange: (provider: string, model: string) => void
 }): React.ReactElement {
-  const initial = React.useMemo(() => {
-    const config: Record<string, unknown> = {}
-    for (const field of props.fields) {
-      if (field.defaultValue !== undefined) config[field.key] = field.defaultValue
-      else if (field.type === 'boolean') config[field.key] = false
-    }
-    return JSON.stringify(config, null, 2)
-  }, [props.type])
-  const [open, setOpen] = React.useState(false)
-  const [label, setLabel] = React.useState('')
-  const [configText, setConfigText] = React.useState(initial)
-  const [error, setError] = React.useState<string | null>(null)
-  if (!open) {
-    return <Button size="sm" variant="outline" onClick={() => { setOpen(true); setConfigText(initial) }}>{props.t('addSense')}</Button>
+  const current = `${props.value.modelProvider}::${props.value.model}`
+  const [text, setText] = React.useState(props.value.modelProvider === '' ? props.value.model : `${props.value.modelProvider}/${props.value.model}`)
+  const focused = React.useRef(false)
+  React.useEffect(() => {
+    if (!focused.current) setText(props.value.modelProvider === '' ? props.value.model : `${props.value.modelProvider}/${props.value.model}`)
+  }, [props.value.model, props.value.modelProvider])
+  if (props.choices.length === 0) {
+    return (
+      <Field label={props.t('model')} hint={props.t('modelFallbackHint')}>
+        <TextInput
+          value={text}
+          onFocus={() => { focused.current = true }}
+          onBlur={() => {
+            focused.current = false
+            const [provider = '', model = ''] = text.includes('/') ? text.split('/', 2) : ['', text]
+            props.onChange(provider.trim(), model.trim())
+          }}
+          onChange={(event) => { setText(event.target.value) }}
+        />
+      </Field>
+    )
   }
+  const known = props.choices.some(choice => `${choice.provider}::${choice.model}` === current)
   return (
-    <div style={instanceCard}>
-      <Field label={props.t('senseLabel')}>
-        <TextInput value={label} onChange={(event) => { setLabel(event.target.value) }} />
-      </Field>
-      <Field label={props.t('senseConfig')} hint={props.fields.map(field => `${field.key}: ${field.label}`).join(' · ')}>
-        <TextArea value={configText} onChange={(event) => { setConfigText(event.target.value) }} />
-      </Field>
-      <div style={inline}>
-        <Button size="sm" variant="primary" onClick={() => {
-          const parsed = parseJsonObject(configText)
-          if (!parsed.ok) {
-            setError(parsed.error)
-            return
-          }
-          void props.store.createSense({
-            type: props.type,
-            ...(label.trim() === '' ? {} : { label: label.trim() }),
-            config: parsed.value,
-            desiredState: 'enabled',
-          }).then(() => { setOpen(false); setLabel('') }, (reason: unknown) => { setError((reason as Error).message) })
-        }}>{props.t('create')}</Button>
-        <Button size="sm" variant="ghost" onClick={() => { setOpen(false) }}>{props.t('disable')}</Button>
-      </div>
-      {error !== null && <ErrorBanner>{error}</ErrorBanner>}
-    </div>
-  )
-}
-
-function AttentionTab(props: {
-  readonly state: QunoWireState
-  readonly store: QunoClientStore
-  readonly t: QunoSettingsInjected['t']
-  readonly locale: 'zh' | 'en'
-}): React.ReactElement {
-  const { state, store, t } = props
-  const [filter, setFilter] = React.useState<'active' | 'all'>('active')
-  const items = filter === 'active'
-    ? state.attention.filter(item => item.status === 'open' || item.status === 'waiting' || item.status === 'snoozed')
-    : state.attention
-  if (items.length === 0) return <Empty>{t('attentionEmpty')}</Empty>
-  return (
-    <div style={stack}>
-      <div style={inline}>
-        <Select value={filter} onChange={(event) => { setFilter(event.target.value === 'all' ? 'all' : 'active') }}>
-          <option value="active">{t('filterAll')}</option>
-          <option value="all">{t('filterAll')}</option>
-        </Select>
-      </div>
-      {items.map(item => (
-        <Card key={item.id} title={item.title} aside={<span style={muted}>{statusLabel(item.status, t)} · {t('revision')} {item.revision}</span>}>
-          <p style={bodyText}>{item.summary}</p>
-          <div style={metaRow}>
-            <span>{item.topicKey}</span>
-            {item.nextReviewAt !== null && <span>{t('nextReview')}：{formatClock(item.nextReviewAt)}</span>}
-            {item.evidence.slice(0, 2).map(point => <span key={point.eventId ?? point.quote}>{point.quote ?? point.eventId}</span>)}
-          </div>
-          <div style={inline}>
-            <Button size="sm" variant="primary" onClick={() => {
-              void store.actAttention({ itemId: item.id, action: 'processed', expectedRevision: item.revision })
-            }}>{t('actProcessed')}</Button>
-            <Button size="sm" variant="outline" onClick={() => {
-              void store.actAttention({ itemId: item.id, action: 'later', expectedRevision: item.revision, snoozeMinutes: 60 })
-            }}>{t('actLater')}</Button>
-            <Button size="sm" variant="ghost" onClick={() => {
-              void store.actAttention({ itemId: item.id, action: 'dismiss', expectedRevision: item.revision })
-            }}>{t('actDismiss')}</Button>
-            {(item.status === 'resolved' || item.status === 'dismissed') && (
-              <Button size="sm" variant="ghost" onClick={() => {
-                void store.actAttention({ itemId: item.id, action: 'resume', expectedRevision: item.revision })
-              }}>{t('actResume')}</Button>
-            )}
-          </div>
-        </Card>
-      ))}
-    </div>
-  )
-}
-
-function RunsTab(props: {
-  readonly state: QunoWireState
-  readonly store: QunoClientStore
-  readonly t: QunoSettingsInjected['t']
-  readonly locale: 'zh' | 'en'
-}): React.ReactElement {
-  const { state, store, t } = props
-  return (
-    <div style={stack}>
-      <div style={inline}>
-        <Button size="sm" variant="primary" onClick={() => { void store.checkNow() }}>{t('runNow')}</Button>
-        <span style={muted}>{format(t('metrics'), {
-          pending: state.metrics.deliveries['pending'] ?? 0,
-          attention: state.metrics.attentionOpen,
-          runs: state.metrics.runsToday,
-        })}</span>
-      </div>
-      {state.runs.length === 0
-        ? <Empty>{t('runsEmpty')}</Empty>
-        : state.runs.map(run => (
-          <Card key={run.id} title={`${t('runKindThink')} · ${run.trigger}`} aside={<span style={muted}>{formatClock(run.startedAt)}</span>}>
-            <div style={metaRow}>
-              <span>{run.status}</span>
-              <span>{run.provider ?? '—'} / {run.model ?? '—'}</span>
-              <span>{run.committed} events · {run.notices} notices</span>
-              {run.cost !== null && <span>{Math.round(run.cost.durationMs / 1000)}s · {run.cost.promptChars} chars</span>}
-            </div>
-            {run.error !== null && <ErrorBanner>{run.error.code}: {run.error.message}</ErrorBanner>}
-          </Card>
+    <Field label={props.t('model')}>
+      <Select
+        value={current}
+        onChange={(event) => {
+          const [provider = '', model = ''] = event.target.value.split('::')
+          props.onChange(provider, model)
+        }}
+      >
+        {!known && <option value={current}>{current === '::' ? props.t('modelFallback') : `${props.value.modelProvider}/${props.value.model}`}</option>}
+        {props.choices.map(choice => (
+          <option key={`${choice.provider}::${choice.model}`} value={`${choice.provider}::${choice.model}`}>
+            {choice.name} · {choice.provider}
+          </option>
         ))}
-      <SectionTitle>{t('noticesTitle')}</SectionTitle>
-      {state.notices.length === 0
-        ? <Empty>{t('noticesEmpty')}</Empty>
-        : state.notices.map(notice => (
-          <Card key={notice.id} title={notice.title} aside={<span style={muted}>{notice.status}</span>}>
-            <p style={bodyText}>{notice.body}</p>
-            <div style={metaRow}>
-              <span>{t('whyNotified')}：{notice.why}</span>
-              <span>{formatClock(notice.createdAt)}</span>
-              {notice.reason !== null && <span>{notice.reason}</span>}
-            </div>
-          </Card>
-        ))}
-    </div>
+      </Select>
+    </Field>
   )
 }
 
-function TasksTab(props: {
-  readonly state: QunoWireState
-  readonly store: QunoClientStore
+/** Small per-group save feedback. */
+function SaveHint(props: {
+  readonly status: SaveStatus
+  readonly prefix: string
   readonly t: QunoSettingsInjected['t']
-  readonly locale: 'zh' | 'en'
-  readonly openSession: (sessionId: string) => void
-}): React.ReactElement {
-  const { state, store, t } = props
-  if (state.tasks.length === 0) return <Empty>{t('tasksEmpty')}</Empty>
+  readonly onRetry: () => void
+}): React.ReactElement | null {
+  if (!props.status.key.startsWith(props.prefix)) return null
+  if (props.status.phase === 'idle') return null
+  if (props.status.phase === 'saving') return <div style={styles.saveLine}>{props.t('saveSaving')}</div>
+  if (props.status.phase === 'saved') return <div style={styles.saveLine}>{props.t('saveSaved')}</div>
   return (
-    <div style={stack}>
-      {state.tasks.map(task => (
-        <Card
-          key={task.id}
-          title={task.title}
-          aside={<span style={muted}>{taskStatusLabel(task.status, t)}</span>}
-        >
-          {task.result !== null && <p style={bodyText}>{task.result.slice(0, 1200)}</p>}
-          {task.error !== null && <ErrorBanner>{task.error.message}</ErrorBanner>}
-          {task.artifacts.length > 0 && (
-            <div style={metaRow}>
-              {task.artifacts.map(artifact => <span key={artifact.uri}>{artifact.label}（{artifact.kind}）</span>)}
-            </div>
-          )}
-          <div style={inline}>
-            {task.childSessionId !== null && (
-              <Button size="sm" variant="outline" onClick={() => { if (task.childSessionId !== null) props.openSession(task.childSessionId) }}>{t('taskOpen')}</Button>
-            )}
-            {(task.status === 'interrupted' || task.status === 'failed') && (
-              <>
-                <Button size="sm" variant="primary" onClick={() => { void store.taskCommand(task.id, 'resume') }}>{t('taskResume')}</Button>
-                <Button size="sm" variant="ghost" onClick={() => { void store.taskCommand(task.id, 'abandon') }}>{t('taskAbandon')}</Button>
-              </>
-            )}
-          </div>
-        </Card>
-      ))}
+    <div style={styles.saveError}>
+      <span>{format(props.t('saveFailed'), { error: props.status.error ?? '' })}</span>
+      <Button size="sm" variant="ghost" onClick={props.onRetry}>{props.t('saveRetry')}</Button>
     </div>
   )
 }
 
-function StatusLine(props: { readonly tone: 'ok' | 'warn' | 'error' | 'idle'; readonly text: string }): React.ReactElement {
-  return (
-    <span style={metaRow}>
-      <span style={{ ...dot, background: props.tone === 'ok' ? 'var(--dsw-alias-state-success-primary)' : props.tone === 'warn' ? 'var(--dsw-alias-state-warn-primary)' : props.tone === 'error' ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-tertiary)' }} />
-      <span>{props.text}</span>
-    </span>
-  )
-}
-
-function statusLabel(status: string, t: QunoSettingsInjected['t']): string {
-  switch (status) {
-    case 'open': return t('statusOpen')
-    case 'waiting': return t('statusWaiting')
-    case 'snoozed': return t('statusSnoozed')
-    case 'resolved': return t('statusResolved')
-    case 'dismissed': return t('statusDismissed')
-    case 'expired': return t('statusExpired')
-    default: return status
+/** Deep-merge the three nested config objects the patch path also merges. */
+function mergeDraft(current: QunoConfig, patch: Partial<QunoConfig>): QunoConfig {
+  return {
+    ...current,
+    ...patch,
+    notificationPolicy: patch.notificationPolicy === undefined ? current.notificationPolicy : { ...current.notificationPolicy, ...patch.notificationPolicy },
+    budget: patch.budget === undefined ? current.budget : { ...current.budget, ...patch.budget } as QunoBudget,
+    retention: patch.retention === undefined ? current.retention : { ...current.retention, ...patch.retention },
   }
 }
 
-function taskStatusLabel(status: string, t: QunoSettingsInjected['t']): string {
-  switch (status) {
-    case 'running': return t('taskStatusRunning')
-    case 'done': return t('taskStatusDone')
-    case 'failed': return t('taskStatusFailed')
-    case 'interrupted': return t('taskStatusInterrupted')
-    case 'cancelled': return t('taskStatusCancelled')
-    default: return status
-  }
+/** Declared display name for one instance's type, falling back to the raw type. */
+function typeLabel(types: readonly SenseTypeWire[], sense: SenseWire): string {
+  return types.find(candidate => candidate.type === sense.type)?.displayName ?? sense.type
 }
 
-function defaultCwd(): string {
-  return '/'
-}
+const styles = {
+  page: { display: 'flex', flexDirection: 'column', gap: 16, padding: '2px 2px 24px', minWidth: 0 },
+  stack: { display: 'flex', flexDirection: 'column', gap: 10 },
+  title: { margin: 0, fontSize: 16, lineHeight: '24px', fontWeight: 500, color: 'var(--dsw-alias-label-primary)' },
+  intro: { margin: '4px 0 0', fontSize: 14, lineHeight: '22px', color: 'var(--dsw-alias-label-secondary)' },
+  group: {
+    display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 14,
+    borderTop: '1px solid var(--dsw-alias-border-l1)',
+  },
+  groupHead: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  groupSummary: { cursor: 'pointer', listStyle: 'none' },
+  groupTitle: { fontSize: 13, lineHeight: '20px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' },
+  groupBody: { display: 'flex', flexDirection: 'column', gap: 12 },
+  pair: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 },
+  switchRow: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 },
+  switchText: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 },
+  rowLabel: { fontSize: 14, lineHeight: '22px', color: 'var(--dsw-alias-label-primary)' },
+  hint: { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)', overflowWrap: 'anywhere' },
+  details: { borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: 10 },
+  summary: { cursor: 'pointer', fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-secondary)' },
+  detailsBody: { display: 'flex', flexDirection: 'column', gap: 10, paddingTop: 10 },
+  sourceRow: {
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+    padding: '9px 11px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 10,
+    background: 'var(--dsw-alias-bg-layer-1)',
+  },
+  sourceText: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 },
+  saveLine: { fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' },
+  saveError: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-state-error-primary)' },
+} as const
 
-const page = { display: 'flex', flexDirection: 'column', gap: 14, padding: '4px 2px 24px' } as const
-const header = { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 } as const
-const headerActions = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' } as const
-const mainBinding = { display: 'inline-flex', alignItems: 'center', gap: 6 } as const
-const mainLabel = { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } as const
-const h2 = { margin: 0, fontSize: 18, fontWeight: 650, color: 'var(--dsw-alias-label-primary)' } as const
-const subtitle = { margin: '4px 0 0', fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } as const
-const tabBar = { display: 'flex', gap: 4, borderBottom: '1px solid var(--dsw-alias-border-l1)', paddingBottom: 4 } as const
-const tabButton = {
-  border: 0, background: 'transparent', color: 'var(--dsw-alias-label-secondary)', font: 'inherit',
-  fontSize: 12, padding: '6px 10px', borderRadius: 8, cursor: 'pointer',
-} as const
-const stack = { display: 'flex', flexDirection: 'column', gap: 12 } as const
-const grid2 = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10 } as const
-const inline = { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } as const
-const metaRow = { display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11, color: 'var(--dsw-alias-label-secondary)' } as const
-const bodyText = { margin: 0, fontSize: 12, lineHeight: 1.6, color: 'var(--dsw-alias-label-primary)', whiteSpace: 'pre-wrap' } as const
-const muted = { fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' } as const
-const smallError = { fontSize: 11, color: 'var(--dsw-alias-state-error-primary)' } as const
-const okText = { fontSize: 11, color: 'var(--dsw-alias-state-success-primary)' } as const
-const dot = { width: 7, height: 7, borderRadius: 4, display: 'inline-block' } as const
-const instanceCard = {
-  display: 'flex', flexDirection: 'column', gap: 8, padding: 10,
-  border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 10, background: 'var(--dsw-alias-bg-layer-2)',
-} as const
-const instanceHeader = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } as const
+export {}

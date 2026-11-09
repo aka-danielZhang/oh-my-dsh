@@ -95,3 +95,7 @@ plugin/dsh-quno-sense-calendar/lib/
 
 # dsh-quno-sense-feed：构建产物（scripts/new-plugin.mjs 生成）
 plugin/dsh-quno-sense-feed/lib/
+
+# dsh-quno-sense-yzj：构建产物（scripts/new-plugin.mjs 生成）
+plugin/dsh-quno-sense-yzj/lib/
+plugin/dsh-quno/eval-results/

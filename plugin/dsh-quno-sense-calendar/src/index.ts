@@ -41,11 +41,11 @@ export const definition: SenseDefinition = {
   configFields: [
     { key: 'directory', label: '日历目录', type: 'path', required: false, placeholder: '~/Calendar', help: '读取该目录下的 .ics 文件；与单文件二选一' },
     { key: 'file', label: '单个日历文件', type: 'path', required: false, placeholder: '~/Calendar/work.ics' },
-    { key: 'intervalSec', label: '轮询间隔（秒）', type: 'number', defaultValue: 60, help: '最小 30 秒' },
-    { key: 'maxFiles', label: '最多文件数', type: 'number', defaultValue: 50 },
     { key: 'timeZone', label: '浮动时间所属时区', type: 'string', defaultValue: 'Asia/Shanghai', help: '未带 TZID/Z 的时间按此时区解释' },
-    { key: 'lookaheadDays', label: '向后看多少天', type: 'number', defaultValue: 30 },
-    { key: 'freshnessThresholdSec', label: '陈旧阈值（秒）', type: 'number', defaultValue: 600 },
+    { key: 'intervalSec', label: '轮询间隔（秒）', type: 'number', min: 30, step: 30, defaultValue: 60, help: '最小 30 秒' },
+    { key: 'lookaheadDays', label: '向后看多少天', type: 'number', min: 1, max: 365, step: 1, defaultValue: 30 },
+    { key: 'maxFiles', label: '最多文件数', type: 'number', min: 1, max: 500, step: 1, defaultValue: 50, advanced: true },
+    { key: 'freshnessThresholdSec', label: '陈旧阈值（秒）', type: 'number', min: 60, step: 60, defaultValue: 600, advanced: true },
   ],
   permissions: {
     reads: ['local iCalendar files under the configured directory or file'],
@@ -66,6 +66,9 @@ export const definition: SenseDefinition = {
     gapDetection: 'explicit',
     readOriginal: true,
   },
+  // The first run emits the current snapshot (and anything in the lookahead
+  // window) as observed events; it is not a zero-event baseline.
+  firstSync: 'snapshot-events',
   defaults: {
     intervalSec: 60,
     maxFiles: 50,

@@ -6,6 +6,7 @@
  */
 
 import React from 'react'
+import { QUNO_MARK_DATA_URI, QUNO_MARK_DATA_URI_DARK } from './quno-mark.tsx'
 
 /** One bordered surface. */
 export function Card(props: { readonly children: React.ReactNode; readonly title?: string; readonly aside?: React.ReactNode }): React.ReactElement {
@@ -91,6 +92,42 @@ export function ErrorBanner(props: { readonly children: React.ReactNode }): Reac
   return <div style={styles.error}>{props.children}</div>
 }
 
+/** One chat/panel card with the accent bar from §13.8. */
+export function QunoCard(props: {
+  readonly children: React.ReactNode
+  /** Left accent bar color; defaults to the brand accent. */
+  readonly accent?: string
+  readonly variant?: 'chat' | 'panel'
+  readonly style?: React.CSSProperties
+}): React.ReactElement {
+  return (
+    <div
+      className={props.variant === 'panel' ? 'dsh-quno-card dsh-quno-card--panel' : 'dsh-quno-card'}
+      style={{ ...(props.accent === undefined ? {} : { '--quno-bar': props.accent }), ...props.style } as React.CSSProperties}
+    >
+      {props.children}
+    </div>
+  )
+}
+
+/** One status chip (open / waiting / snoozed / done / failed). */
+export function QunoStat(props: {
+  readonly tone: 'open' | 'wait' | 'snooze' | 'done' | 'fail'
+  readonly children: React.ReactNode
+}): React.ReactElement {
+  return <span className={`dsh-quno-stat dsh-quno-stat--${props.tone}`}>{props.children}</span>
+}
+
+/** One label/value row used by the Sense and task details. */
+export function QunoKV(props: { readonly k: string; readonly v: React.ReactNode }): React.ReactElement {
+  return (
+    <div className="dsh-quno-kv">
+      <span className="dsh-quno-kv__k">{props.k}</span>
+      <span className="dsh-quno-kv__v">{props.v}</span>
+    </div>
+  )
+}
+
 /** QUNO_SKIN_CSS（design §13.9）：单一幂等样式表，七块结构——皮肤 token、
  * 消息头像、会话头身份/欢迎块、对话内胶囊、卡片规格、铬件隐藏、
  * 调色板与安静对话页（2026-10-23「连成一体，安静对话」提案）。
@@ -99,32 +136,48 @@ export function ErrorBanner(props: { readonly children: React.ReactNode }): Reac
  * `--quno-*` 调色板双写暗色。侧栏回归 stock（Quno 入口为原生面板行，
  * 无页签、无面板分裂）。 */
 export const QUNO_CSS = `
-/* ── 1. 皮肤 token 作用域 ── */
+/* ── 1. 皮肤 token 作用域 ──
+   头像占据列首独立行槽：indent 是正文左缘（与输入框列对齐，勿动），头像
+   占 0..26px、不悬出列缘、与正文留 10px——头像在正文气泡之外，永不与
+   引用块/代码块内边距叠加。回复底部动作行随正文缩进（见 7.7），因此头像
+   右缘 26px 恒在复制按钮盒左缘 30px 左侧，两者分列两轴（2026-10-23 二次
+   裁定：头像必须在复制按钮垂直线的左侧，不能正上方）。 */
 [data-quno-main] {
   --quno-avatar-size: 26px;
-  --quno-avatar-gap: 10px;
+  --quno-avatar-indent: 36px;
+}
+
+/* Flat brand disc: one mist-blue fill, no outer shadow. The dark theme lifts
+   the fill a step and tints the hairline so the circle edge stays visible. */
+:root {
+  --quno-mark-bg: #48669D;
+  --quno-mark-ring: rgba(255, 255, 255, 0.22);
+  --quno-mark-message-image: url("${QUNO_MARK_DATA_URI}");
+  /* Theme-aware elevation for floating surfaces; never a fixed black shadow. */
+  --quno-elevation: var(--dsw-shadow-lv3, 0 8px 28px rgba(23, 26, 31, 0.16));
+}
+body[data-ds-dark-theme] {
+  --quno-mark-bg: #4E6DA4;
+  --quno-mark-ring: rgba(142, 169, 210, 0.45);
+  --quno-mark-message-image: url("${QUNO_MARK_DATA_URI_DARK}");
 }
 
 /* ── 2. 消息头像：assistant 段落左侧圆形头像，流式时呼吸 ── */
 [data-quno-main] [data-chat-flow-kind="assistant-step"] {
   position: relative;
-  padding-left: calc(var(--quno-avatar-size) + var(--quno-avatar-gap));
+  padding-left: var(--quno-avatar-indent);
 }
 [data-quno-main] [data-chat-flow-kind="assistant-step"]::before {
-  content: "Q";
+  content: "";
   position: absolute;
   left: 0;
   top: 2px;
   width: var(--quno-avatar-size);
   height: var(--quno-avatar-size);
   border-radius: 999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 700;
-  background: var(--dsw-alias-brand-primary);
-  color: var(--dsw-alias-bg-base);
+  background-image: var(--quno-mark-message-image);
+  background-size: contain;
+  background-repeat: no-repeat;
 }
 [data-quno-main] [data-chat-flow-kind="assistant-step"]:has([data-streaming])::before {
   animation: quno-avatar-breath 1.6s ease-in-out infinite;
@@ -133,8 +186,7 @@ export const QUNO_CSS = `
   50% { opacity: 0.55; }
 }
 
-/* ── 3. 会话头身份 / hero 欢迎块（组件内联样式，此处仅 stock 鲸鱼座退场） ── */
-[data-quno-main] [data-slot="conversation.hero.brand.mark"] { display: none !important; }
+/* ── 3. 会话头身份 / hero 欢迎块（组件内联样式；Hero 本体保持 stock） ── */
 
 /* ── 4. 对话内胶囊（组件内联样式） ── */
 
@@ -143,11 +195,102 @@ export const QUNO_CSS = `
 /* ── 6. 铬件隐藏：工作区（hero/空态选择器、面包屑）与模式（preset 控件） ── */
 .dsh-quno-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .dsh-quno-action:hover { background: var(--dsw-alias-bg-layer-2); }
-.dsh-quno-tab[data-active="true"] { background: var(--dsw-alias-bg-layer-2); color: var(--dsw-alias-label-primary); }
-.dsh-quno-tab:hover { color: var(--dsw-alias-label-primary); }
+/* The active tab cannot rely on a layer tint: the pane surface and bg-layer-2
+   sit a few points apart in dark mode, which reads as "no selection". Tint with
+   the interaction colour and add a brand underline instead. */
+.dsh-quno-tab { position: relative; background: transparent; color: var(--dsw-alias-label-secondary); }
+.dsh-quno-tab:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.dsh-quno-tab[data-active="true"] {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 600;
+}
+.dsh-quno-tab[data-active="true"]::after {
+  content: ""; position: absolute; left: 26%; right: 26%; bottom: 1px;
+  height: 2px; border-radius: 2px; background: var(--dsw-alias-brand-primary);
+}
 [data-quno-main] [data-slot="conversation.hero.workspace"],
 [data-quno-main] [data-slot="conversation.hero.agentPreset"],
 [data-quno-main] [data-slot="conversation.session.header.lineage"] { display: none !important; }
+
+/* ── 6c. 卡片、状态芯片与键值行（§13.8 统一规格；聊天与面板共用） ──
+   汇报卡/任务卡 = 16px 圆角 + 左缘 3px 状态条；面板卡收窄为 10px。 */
+.dsh-quno-card {
+  position: relative; box-sizing: border-box; overflow: hidden;
+  border: 1px solid var(--dsw-alias-border-l1); border-radius: 16px;
+  background: var(--dsw-alias-bg-layer-1); padding: 12px 14px;
+}
+.dsh-quno-card::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--quno-bar, var(--dsw-alias-brand-primary));
+}
+.dsh-quno-card--panel { border-radius: 10px; padding: 10px; }
+.dsh-quno-card__hd { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.dsh-quno-card__label { flex: none; font-size: 11px; font-weight: 600; color: var(--dsw-alias-brand-primary); }
+.dsh-quno-card__title { flex: 1; min-width: 0; font-size: 13px; color: var(--dsw-alias-label-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-quno-card__meta { flex: none; font-size: 11px; color: var(--dsw-alias-label-tertiary); display: inline-flex; align-items: center; gap: 5px; }
+.dsh-quno-card__body { margin: 6px 0 0; font-size: 14px; line-height: 1.7; color: var(--dsw-alias-label-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.dsh-quno-card--panel .dsh-quno-card__body { font-size: 12px; line-height: 1.6; color: var(--dsw-alias-label-secondary); }
+.dsh-quno-card__src { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--dsw-alias-label-tertiary); }
+.dsh-quno-chip { background: var(--dsw-alias-bg-layer-2); border-radius: 6px; padding: 1px 7px; font-size: 11.5px; color: var(--dsw-alias-label-secondary); }
+.dsh-quno-stat { flex: none; font-size: 10.5px; font-weight: 600; border-radius: 6px; padding: 1px 7px; }
+/* Chip tints come from the theme's state tokens, so light and dark are not a
+   fixed-RGBA inversion of each other. */
+.dsh-quno-stat--open { color: var(--dsw-alias-brand-primary); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 14%, transparent); }
+.dsh-quno-stat--wait { color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-2); }
+.dsh-quno-stat--snooze { color: var(--dsw-alias-state-warn-primary); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 14%, transparent); }
+.dsh-quno-stat--done { color: var(--dsw-alias-state-success-primary); background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 14%, transparent); }
+.dsh-quno-stat--fail { color: var(--dsw-alias-state-error-primary); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent); }
+.dsh-quno-kv { display: flex; gap: 8px; min-height: 22px; font-size: 12px; }
+.dsh-quno-kv__k { flex: none; width: 78px; color: var(--dsw-alias-label-tertiary); }
+.dsh-quno-kv__v { flex: 1; min-width: 0; color: var(--dsw-alias-label-primary); overflow-wrap: anywhere; }
+.dsh-quno-relchip { font-size: 10.5px; font-weight: 500; color: var(--dsw-alias-label-secondary); background: var(--dsw-alias-bg-layer-2); border-radius: 6px; padding: 2px 7px; }
+.dsh-quno-authcard {
+  border: 1px solid var(--dsw-alias-state-warn-primary);
+  background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 8%, transparent);
+  border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 6px;
+}
+.dsh-quno-codepill {
+  display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px;
+  color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-layer-2);
+  border: 1px solid var(--dsw-alias-border-l1); border-radius: 8px; padding: 6px 10px;
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+/* ── 6d. 面板列表行与骨架：hover 走主题交互色，骨架只在首次加载出现 ── */
+.dsh-quno-listrow[data-interactive="true"]:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-quno-listrow[data-interactive="true"]:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.dsh-quno-danger { transition: background 120ms ease; }
+.dsh-quno-danger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-danger); }
+.dsh-quno-danger[data-confirm="true"]:hover:not(:disabled) { filter: brightness(0.94); }
+.dsh-quno-danger:disabled { opacity: 0.4; cursor: not-allowed; }
+.dsh-quno-skeleton { animation: quno-skeleton 1.4s ease-in-out infinite; }
+@keyframes quno-skeleton { 50% { opacity: 0.55; } }
+
+/* ── 6e. 对话内悬浮胶囊（Portal 到 [data-conversation-content]） ──
+   胶囊不在会话头按钮区：正文容器本身 position: relative，胶囊贴其右上角，
+   因此不随消息滚动、不依赖头部高度、左右栏变化时自然跟随。 */
+[data-quno-capsule-root] {
+  position: absolute; top: 8px; right: 12px; z-index: 6;
+  display: flex; flex-direction: column; align-items: flex-end;
+  max-width: calc(100% - 24px);
+}
+[data-quno-capsule-flyout] {
+  position: absolute; top: calc(100% + 6px); right: 0;
+  width: var(--quno-capsule-width, 300px);
+  max-height: var(--quno-capsule-max-height, 60vh);
+  overflow-y: auto;
+  animation: quno-capsule-in 120ms ease-out;
+}
+@keyframes quno-capsule-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: none; }
+}
+.dsh-quno-capsule-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.dsh-quno-capsule-row:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) {
+  [data-quno-capsule-flyout] { animation: none; }
+}
 
 /* ── Quno 调色板（「连成一体，安静对话」提案值；暗色随主题双写） ──
    提案浅色参考：强调 #48669D、气泡冷灰、标题 #23272E。暗色取主题
@@ -163,12 +306,40 @@ body[data-ds-dark-theme] [data-quno-main] {
   --quno-bubble: rgba(255, 255, 255, 0.06);
 }
 
+/* ── 6b. 接入向导（shell.overlay + platform Modal）──
+   三栏布局需要比设置弹窗更宽；Modal 自带 portal/焦点/Escape/遮罩，
+   插件只覆盖卡片尺寸与内边距（自有命名空间，不依赖对话标记）。 */
+.dsh-quno-onboarding-dialog {
+  width: min(1120px, calc(100vw - 64px));
+  height: min(720px, calc(100vh - 2 * max(24px, var(--dsh-frame-overlay-top, 24px))));
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+@media (max-width: 719px) {
+  .dsh-quno-onboarding-dialog { width: calc(100vw - 24px); }
+}
+
 /* ── 7. 安静对话页（仅 [data-quno-main] 作用域） ── */
 
-/* 7.1 头部两行左对齐：第一行身份，第二行「对话/轨迹」居其下（不贴右）；
-   会话标题行退场 */
-[data-quno-main] header { flex-direction: column; align-items: flex-start; gap: 2px; min-height: 60px; }
-[data-quno-main] [data-slot="conversation.session.header"] > div:nth-child(1) { display: none; }
+/* 7.1 头部两行：第一行身份居左、胶囊与面板开关居右上；第二行「对话/轨迹」
+   居左。会话标题簇（面包屑+动作）退场——注意只藏 titleCluster，utilities
+   （胶囊/标记）与 corner（面板开关）必须存活。 */
+[data-quno-main] header { display: flex; flex-wrap: wrap; align-items: center; row-gap: 2px; min-height: 60px; }
+[data-quno-main] [data-slot="conversation.session.header"] { display: contents; }
+[data-quno-main] [data-slot="conversation.session.header"] > div:nth-child(1) { display: contents; }
+[data-quno-main] [data-slot="conversation.session.header"] > div:nth-child(1) > div:nth-child(1) { display: none; }
+[data-quno-main] [data-slot="conversation.session.header"] > div:nth-child(1) > div:nth-child(2) { margin-left: auto; }
+[data-quno-main] [data-slot="conversation.session.header"] > div:nth-child(2) { flex-basis: 100%; }
+
+/* macOS 收起态安全区：Quno 把 stock 带避让的 titleRow 拆成 display: contents，
+   其 clearance 补偿不再生效，而身份区仍在独立的 headerLeading（grid-column 1）
+   里——需自行消费框架发布的 --dsh-frame-leading-clearance（AppFrame，仅在
+   darwin 收起态非零），公式与 stock titleRow 一致：头部已垫 20px 故减 20。
+   展开态变量回退 0，max 取 0，布局不变；全屏收起自动用框架的 84px。 */
+[data-quno-main] [data-conversation-header-leading] {
+  padding-inline-start: max(0px, calc(var(--dsh-frame-leading-clearance, 0px) - 20px));
+}
 
 /* 7.2 消息列与输入框同宽居中（提案 800–840px） */
 [data-quno-main] div:has(> [data-slot="conversation.chat.flow"]) { max-width: min(800px, 100%); margin: 0 auto; }
@@ -177,8 +348,8 @@ body[data-ds-dark-theme] [data-quno-main] {
   border-radius: 16px; box-shadow: 0 1px 2px rgba(35, 39, 46, 0.05);
 }
 
-/* 7.3 头像缩小；连续输出与工具过程后不重复插头像（相邻同 Kind 撤销） */
-[data-quno-main] { --quno-avatar-size: 26px; --quno-avatar-gap: 10px; }
+/* 7.3 头像尺寸/间距统一由块 1 声明；连续输出与工具过程后不重复插头像
+   （相邻同 Kind 撤销） */
 [data-quno-main] [data-chat-flow-kind="tool-call"] + [data-chat-flow-kind="assistant-step"]::before,
 [data-quno-main] [data-chat-flow-kind="assistant-step"] + [data-chat-flow-kind="assistant-step"]::before { content: none; }
 
@@ -200,10 +371,24 @@ body[data-ds-dark-theme] [data-quno-main] {
 [data-quno-main] button[aria-label="Remove rating"],
 [data-quno-main] button[aria-label="Branch into a new conversation"] { display: none; }
 
+/* 复制与用量/时间簇贴合行内相邻按钮的 8px 节奏：stock 的 meta 簇自带
+   margin-left 8px，评价/分支在场时是分组呼吸，只剩复制一颗按钮时读作
+   空洞（2026-10-23 用户裁定：参考原页面按钮节奏收拢）。锚为
+   [data-turn-tail] 行的末个 meta span，stock 改结构时规则失效、间距
+   回落 stock 值（fail-open，不误伤）。 */
+[data-quno-main] [data-turn-tail] > :last-child > span:last-child { margin-left: 0; }
+
 /* 7.6 用户气泡冷灰、发送钮雾蓝 */
 [data-quno-main] { --dsw-specific-bubble: var(--quno-bubble); }
 [data-quno-main] [data-composer-card] button[aria-label="发送消息"],
 [data-quno-main] [data-composer-card] button[aria-label="Send message"] { background: var(--quno-accent); }
+
+/* 7.7 动作行随正文缩进：turn-tail 行右移一个正文 indent，头像列（0..26px）
+   因此与复制按钮（stock 自带 -6px，盒左缘 30px、图标左缘 36px 与正文齐）
+   分列两轴；tail 槽里的 Quno 主动汇报卡随之与正文左对齐。锚为
+   [data-turn-tail]（stock 属性），改结构时规则失效、动作行回落列左缘
+   （fail-open：头像与按钮重新同列，不遮挡）。 */
+[data-quno-main] [data-turn-tail] { padding-left: var(--quno-avatar-indent); }
 `
 
 const styles = {
@@ -229,9 +414,9 @@ const styles = {
   input: {
     boxSizing: 'border-box',
     width: '100%',
-    border: '1px solid var(--dsw-alias-border-l1)',
+    border: '0.5px solid var(--dsw-alias-border-l4)',
     borderRadius: 8,
-    background: 'var(--dsw-alias-bg-base)',
+    background: 'var(--dsw-alias-bg-layer-1)',
     color: 'var(--dsw-alias-label-primary)',
     padding: '6px 8px',
     font: 'inherit',
@@ -241,9 +426,9 @@ const styles = {
     boxSizing: 'border-box',
     width: '100%',
     minHeight: 70,
-    border: '1px solid var(--dsw-alias-border-l1)',
+    border: '0.5px solid var(--dsw-alias-border-l4)',
     borderRadius: 8,
-    background: 'var(--dsw-alias-bg-base)',
+    background: 'var(--dsw-alias-bg-layer-1)',
     color: 'var(--dsw-alias-label-primary)',
     padding: '6px 8px',
     font: 'inherit',

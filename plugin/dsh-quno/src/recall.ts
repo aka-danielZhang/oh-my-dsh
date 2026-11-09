@@ -47,6 +47,8 @@ export interface RecallDeps {
   readonly store: QunoStore
   readonly qunoId: string
   readonly mainSessionId: () => string | null
+  /** Background executor sessions of open/recent Tickets (new model). */
+  readonly backgroundSessions?: () => readonly { readonly sessionId: string; readonly kind: 'task' }[]
   readonly logger?: { warn: (message: string) => void }
 }
 
@@ -119,6 +121,10 @@ function collectTargets(
   const main = deps.mainSessionId()
   if (main !== null && (scope === 'main' || scope === 'all')) targets.push({ sessionId: main, kind: 'main' })
   if (scope === 'tasks' || scope === 'all') {
+    const provided = deps.backgroundSessions?.()
+    if (provided !== undefined) {
+      targets.push(...provided)
+    }
     for (const task of deps.store.listTasks(deps.qunoId, undefined, 20)) {
       if (task.childSessionId !== null) targets.push({ sessionId: task.childSessionId, kind: 'task' })
     }

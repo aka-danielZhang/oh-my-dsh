@@ -32,6 +32,13 @@ export const LIMITS = {
   maxDataDepth: 16,
   maxBatchKeyChars: 200,
   maxEventKeyChars: 200,
+  // Keyed checkpoint entries (`checkpoint-entries/v1`, redesign §5): per-patch
+  // and per-entry budgets. Storage capacity itself lives on the store.
+  maxPatchEntries: 200,
+  // The v2→v3 migration snapshot entry carries the whole legacy blob; align
+  // with the root checkpoint ceiling. Session entries stay well under this.
+  maxPatchEntryBytes: 200_000,
+  maxPatchEntryKeyChars: 200,
 } as const
 
 /** The only accepted Sense contract major version. */
@@ -93,6 +100,26 @@ export const eventEnvelopeSchema = z.object({
     bytes: z.number().int().nonnegative().optional(),
   })).max(20).optional(),
   expiresAt: optionalIsoDate,
+  // Source-bound authorship and admission hints. Without these the engine
+  // sees every trigger as anonymous bot traffic — @mentions and direct
+  // messages lose their explicit strength (found by the link evaluator).
+  actor: z.object({
+    source: z.string().min(1).max(200),
+    id: z.string().max(200),
+  }).optional(),
+  human: z.boolean().optional(),
+  addressed: z.enum(['mention', 'direct']).nullable().optional(),
+  channel: z.object({
+    source: z.string().min(1).max(200),
+    thread: z.string().min(1).max(400),
+    address: z.record(z.string(), z.string().max(400)),
+  }).nullable().optional(),
+  contentRef: z.union([
+    z.object({ kind: z.literal('session-message'), sessionId: z.string().min(1).max(200), messageId: z.string().min(1).max(200) }),
+    z.object({ kind: z.literal('session-seq'), sessionId: z.string().min(1).max(200), seq: z.number().int().nonnegative() }),
+    z.object({ kind: z.literal('quno-event'), eventId: z.string().min(1).max(200) }),
+    z.object({ kind: z.literal('blob'), ref: z.string().min(1).max(2000), sha256: z.string().max(128).optional() }),
+  ]).nullable().optional(),
 })
 
 /** One batch submission. */
@@ -115,6 +142,15 @@ export const ingestBatchSchema = z.object({
     }),
     z.null(),
   ]).optional(),
+  // `checkpoint-entries/v1`: keyed state entries committed in the SAME
+  // transaction as the events, the root checkpoint and the batch receipt.
+  checkpointPatch: z.object({
+    upserts: z.array(z.object({
+      key: z.string().min(1).max(LIMITS.maxPatchEntryKeyChars),
+      value: z.string().min(1).max(LIMITS.maxPatchEntryBytes),
+    })).max(LIMITS.maxPatchEntries).optional(),
+    deletes: z.array(z.string().min(1).max(LIMITS.maxPatchEntryKeyChars)).max(LIMITS.maxPatchEntries).optional(),
+  }).optional(),
 })
 
 const configFieldSchema = z.object({
@@ -126,6 +162,27 @@ const configFieldSchema = z.object({
   placeholder: z.string().max(300).optional(),
   help: z.string().max(1000).optional(),
   defaultValue: z.union([z.string(), z.number(), z.boolean()]).optional(),
+  min: z.number().finite().optional(),
+  max: z.number().finite().optional(),
+  step: z.number().positive().optional(),
+  options: z.array(z.object({
+    value: z.string().min(1).max(400),
+    label: z.string().min(1).max(300),
+    description: z.string().max(400).optional(),
+  })).max(200).optional(),
+  multiple: z.boolean().optional(),
+  discover: z.boolean().optional(),
+  advanced: z.boolean().optional(),
+}).superRefine((field, ctx) => {
+  if (field.min !== undefined && field.max !== undefined && field.min > field.max) {
+    ctx.addIssue({ code: 'custom', path: ['min'], message: 'min must not exceed max' })
+  }
+  if (field.options !== undefined && field.discover === true) {
+    ctx.addIssue({ code: 'custom', path: ['discover'], message: 'a field chooses static options or discovery, not both' })
+  }
+  if (field.discover === true && field.type !== 'string') {
+    ctx.addIssue({ code: 'custom', path: ['discover'], message: 'only string fields can discover their options' })
+  }
 })
 
 const relativeSeconds = z.number().int().nonnegative()
@@ -170,7 +227,13 @@ export const senseDefinitionSchema = z.object({
     gapDetection: z.enum(['explicit', 'partial', 'none']),
     readOriginal: z.boolean(),
   }),
+  firstSync: z.enum(['baseline-only', 'snapshot-events', 'current-window-events', 'unknown']).optional(),
   defaults: z.record(z.string(), z.unknown()).optional(),
+  // Organ capabilities carry functions (resolveThreads/handleRequest/…); they
+  // pass through unvalidated. Without this field zod stripped the whole organ
+  // surface at registration, silently disabling exchanges and thread
+  // resolution for every organ-capable Sense (found by the link evaluator).
+  organ: z.unknown().optional(),
 }).superRefine((definition, ctx) => {
   if (definition.runtime.minIntervalSec > definition.runtime.defaultIntervalSec) {
     ctx.addIssue({
@@ -189,8 +252,28 @@ export const senseDefinitionSchema = z.object({
 })
 
 /** One health report a Sense submits. */
+export const healthIssueSchema = z.object({
+  code: z.string().min(1).max(100),
+  detail: z.string().min(1).max(400),
+  count: z.number().int().nonnegative().optional(),
+})
+
+export const healthProgressSchema = z.object({
+  trackedConversations: z.number().int().nonnegative().optional(),
+  pendingConversations: z.number().int().nonnegative().optional(),
+  blockedConversations: z.number().int().nonnegative().optional(),
+  oldestPendingAt: z.number().int().nullable().optional(),
+  lastDirectoryProgressAt: z.number().int().nullable().optional(),
+  lastSweepCompletedAt: z.number().int().nullable().optional(),
+  nextDiscoveryPage: z.number().int().nonnegative().optional(),
+  requestBudgetPerMinute: z.number().int().nonnegative().optional(),
+  checkpointEntries: z.number().int().nonnegative().optional(),
+}).passthrough()
+
 export const senseHealthSchemaShape = z.object({
   state: senseHealthSchema,
+  progress: healthProgressSchema.optional(),
+  issues: z.array(healthIssueSchema).max(50).optional(),
   detail: z.string().max(2000).optional(),
   lastAttemptAt: z.number().int().nullable().optional(),
   lastSuccessfulSyncAt: z.number().int().nullable().optional(),
@@ -236,6 +319,8 @@ export const DEFAULT_QUNO_CONFIG: QunoConfig = {
     noticeDays: 30,
   },
   dryRun: false,
+  acceptMode: 'observe',
+  autoSourceIds: [],
 }
 
 export const qunoConfigSchema = z.object({
@@ -272,6 +357,8 @@ export const qunoConfigSchema = z.object({
     noticeDays: z.number().int().min(1).max(3650),
   }),
   dryRun: z.boolean(),
+  acceptMode: z.enum(['off', 'observe', 'auto']),
+  autoSourceIds: z.array(z.string().min(1).max(200)).max(50),
 })
 
 /** Run output — the only shape the runner accepts as a commit candidate. */

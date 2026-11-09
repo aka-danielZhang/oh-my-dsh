@@ -59,12 +59,12 @@ overrides:
   '@deepseek-ai/dsh-client-ui-settings-models': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-settings-plugin-inventory': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-settings-plugins': 0.2.1-rc.2
-  '@deepseek-ai/dsh-client-ui-sidebar': npm:@crazx/dsh-client-ui-sidebar@0.2.1-rc.2.zw.7
+  '@deepseek-ai/dsh-client-ui-sidebar': npm:@crazx/dsh-client-ui-sidebar@0.2.1-rc.2.zw.9
   '@deepseek-ai/dsh-client-ui-sidebar-files': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-sidebar-right': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-sidebar-textpreview': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-skill': 0.2.1-rc.2
-  '@deepseek-ai/dsh-client-ui-slots': 0.2.1-rc.2
+  '@deepseek-ai/dsh-client-ui-slots': npm:@crazx/dsh-client-ui-slots@0.2.1-rc.2.zw.9
   '@deepseek-ai/dsh-client-ui-subagent': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-theme': 0.2.1-rc.2
   '@deepseek-ai/dsh-client-ui-tool': 0.2.1-rc.2
@@ -151,7 +151,7 @@ overrides:
   '@deepseek-ai/dsh-deepseek-llm-api-extensions': 0.2.1-rc.2
   '@deepseek-ai/dsh-llm': 0.2.1-rc.2
   '@deepseek-ai/dsh-llm-deepseek': 0.2.1-rc.2
-  '@deepseek-ai/dsh-llm-pi-ai': npm:@crazx/dsh-llm-pi-ai@0.2.1-rc.2.zw.7
+  '@deepseek-ai/dsh-llm-pi-ai': npm:@crazx/dsh-llm-pi-ai@0.2.1-rc.2.zw.9
   '@deepseek-ai/dsh-llm-retry': 0.2.1-rc.2
   '@deepseek-ai/dsh-plugin-package-inventory-deepseek': 0.2.1-rc.2
   '@deepseek-ai/dsh-token-meter': 0.2.1-rc.2

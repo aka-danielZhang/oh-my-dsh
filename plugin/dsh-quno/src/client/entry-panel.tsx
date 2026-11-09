@@ -15,6 +15,7 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { QunoLocaleKey } from './locales.ts'
 import type { QunoClientStore } from './store.ts'
+import { QunoMark } from './quno-mark.tsx'
 
 /** Injected face of the entry panel (bound in client/index.tsx). */
 export interface QunoEntryInjected {
@@ -23,9 +24,36 @@ export interface QunoEntryInjected {
   readonly openSession: (sessionId: string) => void
   /** Return the layout from this hand-off panel to the Conversation view. */
   readonly backToConversation: () => void
+  /** First sidebar workspace, so the chat opens ready to type. */
+  readonly defaultWorkspaceId?: () => string | undefined
 }
 
 type EntryPanelProps = PropsRuntime<'main'> & QunoEntryInjected
+
+/**
+ * The slot framework contains entry render crashes silently (keyed entries
+ * abdicate one-shot), which turns a broken hand-off into a dead sidebar row.
+ * Surface the crash on screen so it can be diagnosed at all.
+ */
+class EntryCrashBoundary extends React.Component<{ children: React.ReactNode }, { error: Error | null }> {
+  override state: { error: Error | null } = { error: null }
+  static getDerivedStateFromError(error: Error): { error: Error } {
+    return { error }
+  }
+  override componentDidCatch(error: Error, info: React.ErrorInfo): void {
+    console.error('[dsh-quno] entry panel crashed:', error, info.componentStack)
+  }
+  override render(): React.ReactNode {
+    if (this.state.error !== null) {
+      return <div style={{ ...styles.holder, color: 'var(--dsw-alias-label-danger, #f66)', textAlign: 'left' }}>
+        {'Quno 入口崩溃：'}
+        {this.state.error.message}
+        <pre style={{ fontSize: 11, whiteSpace: 'pre-wrap' }}>{this.state.error.stack}</pre>
+      </div>
+    }
+    return this.props.children
+  }
+}
 
 /** Open the one main conversation, then hand the layout back. */
 export function QunoEntryPanel(props: EntryPanelProps): React.ReactElement {
@@ -35,11 +63,22 @@ export function QunoEntryPanel(props: EntryPanelProps): React.ReactElement {
     void (async () => {
       try {
         const state = props.store.getSnapshot().state
-        const sessionId = state?.main.sessionId ?? await props.store.ensureMain('')
+        const sessionId = state?.main.sessionId ?? await props.store.ensureMain('', props.defaultWorkspaceId?.())
         if (!alive) return
-        props.openSession(sessionId)
+        ;(window as unknown as { __qunoDebug?: unknown[] }).__qunoDebug ??= []
+        ;(window as unknown as { __qunoDebug: unknown[] }).__qunoDebug.push({ step: 'before-back' })
+        // Hand the layout back FIRST: uiWorkspace.openSession only lands while
+        // the Conversation view is the active main panel — called while this
+        // hand-off panel owns the region it silently does nothing (2026-10-30
+        // entry regression; breadcrumbs proved the chain ran, the view just
+        // never switched).
         props.backToConversation()
+        ;(window as unknown as { __qunoDebug: unknown[] }).__qunoDebug.push({ step: 'after-back' })
+        props.openSession(sessionId)
+        ;(window as unknown as { __qunoDebug: unknown[] }).__qunoDebug.push({ step: 'after-open', sessionId })
       } catch (cause) {
+        ;(window as unknown as { __qunoDebug?: unknown[] }).__qunoDebug ??= []
+        ;(window as unknown as { __qunoDebug: unknown[] }).__qunoDebug.push({ step: 'threw', error: cause instanceof Error ? cause.stack : String(cause) })
         if (alive) setError(cause instanceof Error ? cause.message : String(cause))
       }
     })()
@@ -48,27 +87,14 @@ export function QunoEntryPanel(props: EntryPanelProps): React.ReactElement {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   if (error !== '') {
-    return <div style={styles.holder}>{props.t('error', { error })}</div>
+    return <div style={styles.holder}>{`Quno 打开失败：${error}`}</div>
   }
-  return <div style={styles.holder}>{props.t('loading')}</div>
+  return <EntryCrashBoundary><div style={styles.holder}>{'正在读取 Quno…'}</div></EntryCrashBoundary>
 }
 
-/** The row glyph: the round Q mark, at the edge the sidebar asks for. */
+/** The row glyph: the Quno brand mark at the edge the sidebar asks for. */
 export function QunoEntryGlyph({ size }: PropsRuntime<'sidebar.panellist'>): ReactNode {
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-        width: size, height: size, borderRadius: 999,
-        background: 'var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-bg-base)',
-        fontSize: Math.round(size * 0.55), fontWeight: 700, lineHeight: 1,
-        userSelect: 'none',
-      }}
-    >
-      Q
-    </span>
-  )
+  return <QunoMark size={size} />
 }
 
 const styles = {

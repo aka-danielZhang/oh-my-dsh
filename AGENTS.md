@@ -71,6 +71,7 @@ docs/                        权威契约文档 + packaging-playbook.md + notes/
 | `dsh-quno` | dual | Quno 常驻个人助理：Sense 事件流 + 单主对话投递 + 关注/反馈 + 只读委派 + 主动压缩 preset |
 | `dsh-quno-sense-calendar` | host-only | Quno 日历 Sense：本地 .ics 快照差分（新增/改期/撤回） |
 | `dsh-quno-sense-feed` | host-only | Quno 订阅源 Sense：RSS/Atom 条件请求，条目内容修订去重 |
+| `dsh-quno-sense-yzj` | host-only | Quno 云之家群聊 Sense：经宿主机 yzj-cli 按 msgId 游标增量采集（只读） |
 | `dsh-usage-stats` | dual | 设置页「使用统计」：JSONL 事实源 + 手写 SVG 图表 |
 | `dsh-copy-session-id` | browser-only | 会话头「⋯」菜单加「复制会话 ID」并重渲染下载日志项 |
 | `dsh-settings-icons` | browser-only | 设置导航三枚语义图标（usage-stats/mcp/memory） |
