@@ -2,7 +2,7 @@
  * The Quno Host service: the process-wide composition root.
  *
  * It owns exactly one SQLite store, one domain Engine, one Effect outbox, one
- * pass loop, one executor and one notification outbox, wires the Sense layer's
+ * pass loop, one executor and one notification outbox, wires the Collector layer's
  * ingress into `Engine.receive` (same transaction), registers the agent presets
  * and exposes the narrow ops the preset tools and the browser half call.
  *
@@ -37,7 +37,7 @@ import { buildPolicy } from './core/policy.ts'
 import type { PolicyRule } from './core/policy.ts'
 import { QunoStateError as QunoDomainError, routerEndpoint } from './core/model.ts'
 import type { EffectKind, EffectRecord, ExchangeKind, ThreadRef, TriggerDraft } from './core/model.ts'
-import type { OrganEndpointView, SenseDefinition, SenseInstanceRecord } from './types.ts'
+import type { CollectorEndpointView, CollectorDefinition, CollectorInstanceRecord } from './types.ts'
 import { SessionTransport } from './app/transport.ts'
 import { EffectRetryError, EffectsRuntime } from './app/effects.ts'
 import type { EffectHandler } from './app/effects.ts'
@@ -48,7 +48,7 @@ import { computeMetrics } from './app/metrics.ts'
 import type { EngineMetrics } from './app/metrics.ts'
 import { latestHumanMessageId, currentEvalId } from './app/turn-kind.ts'
 import { Scheduler } from './scheduler.ts'
-import { QunoSensesService } from './senses.ts'
+import { QunoCollectorsService } from './collectors.ts'
 import { Outbox, type HistoryReader, type MainConversationFace } from './outbox.ts'
 import { registerQunoPresets } from './presets.ts'
 import { recall, type RecallRequest, type RecallResult } from './recall.ts'
@@ -71,8 +71,8 @@ import type {
   ExchangeDetailWire,
   NoticeDetailWire,
   QunoWireState,
-  SenseOptionsPageWire,
-  SenseProbeWire,
+  CollectorOptionsPageWire,
+  CollectorProbeWire,
   ThreadDetailWire,
   TicketDetailWire,
   TriggerDetailWire,
@@ -117,45 +117,44 @@ export interface QunoHostOptions {
 }
 
 /**
- * The organ gate (plan note 2026-11-08 F3): an endpoint is answerable only
+ * The query gate (plan note 2026-11-08 F3): an endpoint is answerable only
  * when its instance is mounted AND its type declares the handler this kind
- * needs. A gate that fails refuses at the tool layer, so the misleading
- * "accepted, then capability-unavailable" two-stage path cannot happen.
+ * needs. Since the query face is request-only, a `command` exchange has no
+ * answerer anywhere — the gate refuses it at the tool layer, so the
+ * misleading "accepted, then capability-unavailable" path cannot happen.
  */
-export function organGateAdvertises(
-  organ: SenseDefinition['organ'] | undefined,
+export function queryAdvertises(
+  query: CollectorDefinition['query'] | undefined,
   kind: 'request' | 'command',
 ): boolean {
-  const handler = kind === 'command' ? organ?.handleCommand : organ?.handleRequest
-  return handler !== undefined
+  return kind === 'request' && query?.handleRequest !== undefined
 }
 
 /**
- * Project mounted instances into the discovery view. Only exchange-facing
- * instances (at least one declared handler) are listed — an endpoint on this
+ * Project mounted instances into the discovery view. Only query-facing
+ * instances (a declared `handleRequest`) are listed — an endpoint on this
  * list is one the gate will let through, so the model can act on it without
  * guessing.
  */
-export function organEndpointsOf(
-  instances: readonly SenseInstanceRecord[],
-  organFor: (instanceId: string) => SenseDefinition['organ'] | undefined,
-): readonly OrganEndpointView[] {
-  const organs: OrganEndpointView[] = []
+export function collectorEndpointsOf(
+  instances: readonly CollectorInstanceRecord[],
+  queryFor: (instanceId: string) => CollectorDefinition['query'] | undefined,
+): readonly CollectorEndpointView[] {
+  const endpoints: CollectorEndpointView[] = []
   for (const instance of instances) {
-    const organ = organFor(instance.id)
-    if (organ?.handleRequest === undefined && organ?.handleCommand === undefined) continue
-    organs.push({
-      endpoint: `organ:${instance.id}`,
+    const query = queryFor(instance.id)
+    if (query?.handleRequest === undefined) continue
+    endpoints.push({
+      endpoint: `collector:${instance.id}`,
       label: instance.label,
       type: instance.type,
       capabilities: {
-        request: organ.handleRequest !== undefined,
-        command: organ.handleCommand !== undefined,
+        request: query.handleRequest !== undefined,
       },
       health: instance.health,
     })
   }
-  return organs
+  return endpoints
 }
 
 /** Quno's default data directory under the active DSH home. */
@@ -181,7 +180,7 @@ export class QunoHost implements QunoServiceFace {
   readonly executor: Executor
   readonly effects: EffectsRuntime
   readonly watchdog: Watchdog
-  readonly senses: QunoSensesService
+  readonly collectors: QunoCollectorsService
   private readonly scheduler: Scheduler
   private readonly outbox: Outbox
   private readonly history: HistoryReader
@@ -274,8 +273,8 @@ export class QunoHost implements QunoServiceFace {
       maxTokens: () => this.store.getQuno(this.qunoId, { required: false })?.config.budget.maxOutputTokens ?? 8192,
       defaultCwd: homedir(),
       maxWorkers: 4,
-      resolveExchangeResponder: (endpoint, kind) => this.organAdvertises(endpoint, kind),
-      listOrgans: () => this.organEndpoints(),
+      resolveExchangeResponder: (endpoint, kind) => this.queryAdvertises(endpoint, kind),
+      listCollectors: () => this.collectorEndpoints(),
       onChange: () => {},
     })
     this.effects = new EffectsRuntime({
@@ -312,7 +311,7 @@ export class QunoHost implements QunoServiceFace {
         void this.outbox.kick()
       },
     })
-    this.senses = new QunoSensesService({
+    this.collectors = new QunoCollectorsService({
       store: this.store,
       qunoId: this.qunoId,
       logger,
@@ -351,7 +350,7 @@ export class QunoHost implements QunoServiceFace {
     } catch (error) {
       this.logger.warn(`dsh-quno: domain recovery failed: ${(error as Error).message}`)
     }
-    this.senses.startAll()
+    this.collectors.startAll()
     try {
       await this.outbox.reconcile()
     } catch (error) {
@@ -361,7 +360,7 @@ export class QunoHost implements QunoServiceFace {
     void this.outbox.kick()
     this.armMaintenance()
     this.logger.info(
-      `dsh-quno: started (main=${quno.mainSessionId ?? 'unbound'}, senses=${String(this.store.listSenseInstances(this.qunoId).length)})`,
+      `dsh-quno: started (main=${quno.mainSessionId ?? 'unbound'}, collectors=${String(this.store.listCollectorInstances(this.qunoId).length)})`,
     )
   }
 
@@ -373,7 +372,7 @@ export class QunoHost implements QunoServiceFace {
     this.scheduler.stop()
     this.effects.stop()
     this.executor.stop()
-    await this.senses.stopAll().catch(() => {})
+    await this.collectors.stopAll().catch(() => {})
     await this.disposePresets?.().catch(() => {})
     this.store.close()
   }
@@ -523,7 +522,7 @@ export class QunoHost implements QunoServiceFace {
   // -------------------------------------------------------------- domain sink
 
   /**
-   * The Sense ingress sink. Runs INSIDE the batch transaction (T1): the
+   * The Collector ingress sink. Runs INSIDE the batch transaction (T1): the
    * Trigger, its Threads, the fan-out inputs and the pending Eval slot commit
    * together with the event row and the checkpoint.
    */
@@ -573,17 +572,6 @@ export class QunoHost implements QunoServiceFace {
 
   /** Resolve the Threads of one envelope without guessing identities. */
   private threadsFor(envelope: EventEnvelope, sourceId: string): readonly ThreadRef[] {
-    const organ = this.senses.capabilitiesForSource(sourceId)
-    if (organ?.resolveThreads !== undefined) {
-      try {
-        const resolution = organ.resolveThreads(envelope)
-        if (resolution.status === 'resolved' && resolution.threads.length > 0) {
-          return resolution.threads.map(thread => ({ source: thread.source, id: thread.id }))
-        }
-      } catch (error) {
-        this.logger.warn(`dsh-quno: thread resolution failed: ${(error as Error).message}`)
-      }
-    }
     if (envelope.subject !== undefined && envelope.subject.key !== '') {
       return [{ source: sourceId, id: envelope.subject.key }]
     }
@@ -608,29 +596,29 @@ export class QunoHost implements QunoServiceFace {
     return quno !== undefined && !quno.config.enabled
   }
 
-  private organAdvertises(endpoint: string, kind: 'request' | 'command'): boolean {
-    if (!endpoint.startsWith('organ:')) return false
-    const instanceId = endpoint.slice('organ:'.length)
-    return organGateAdvertises(this.senses.organCapabilitiesForInstance(instanceId), kind)
+  private queryAdvertises(endpoint: string, kind: 'request' | 'command'): boolean {
+    if (!endpoint.startsWith('collector:')) return false
+    const instanceId = endpoint.slice('collector:'.length)
+    return queryAdvertises(this.collectors.queryCapabilitiesForInstance(instanceId), kind)
   }
 
   /**
    * The exchange-facing instances, as the discovery surface advertises them.
    * Membership is the truth the gate enforces: everything listed here passes
-   * `organAdvertises`, so the model can act on this list without guessing.
+   * `queryAdvertises`, so the model can act on this list without guessing.
    */
-  organEndpoints(): readonly OrganEndpointView[] {
-    return organEndpointsOf(
-      this.store.listSenseInstances(this.qunoId),
-      instanceId => this.senses.organCapabilitiesForInstance(instanceId),
+  collectorEndpoints(): readonly CollectorEndpointView[] {
+    return collectorEndpointsOf(
+      this.store.listCollectorInstances(this.qunoId),
+      instanceId => this.collectors.queryCapabilitiesForInstance(instanceId),
     )
   }
 
-  /** One-line organ directory for refusal messages; empty says so explicitly. */
-  private organDirectoryText(): string {
-    const organs = this.organEndpoints()
-    if (organs.length === 0) return '当前没有任何可应答的 organ。'
-    return `当前可用：${organs.map(organ => `${organ.endpoint}（${organ.label}）`).join('、')}。`
+  /** One-line collector directory for refusal messages; empty says so explicitly. */
+  private queryDirectoryText(): string {
+    const collectors = this.collectorEndpoints()
+    if (collectors.length === 0) return '当前没有任何可应答的采集器。'
+    return `当前可用：${collectors.map(collector => `${collector.endpoint}（${collector.label}）`).join('、')}。`
   }
 
   // ------------------------------------------------------------- effect plan
@@ -689,17 +677,17 @@ export class QunoHost implements QunoServiceFace {
     }
   }
 
-  /** Dispatch one durable Exchange to its responding Organ. */
+  /** Dispatch one durable Exchange to its responding collector query face. */
   private async deliverExchange(effect: EffectRecord, signal: AbortSignal): Promise<void> {
     const payload = effect.payload as { readonly exchangeId?: string; readonly responder?: string }
     if (payload.exchangeId === undefined || payload.responder === undefined) return
     const exchange = this.repo.getExchange(payload.exchangeId)
     if (exchange === undefined || (exchange.status !== 'pending' && exchange.status !== 'delivered')) return
     const endpoint = exchange.responder
-    const instanceId = endpoint.startsWith('organ:') ? endpoint.slice('organ:'.length) : ''
-    const organ = instanceId === '' ? undefined : this.senses.organCapabilitiesForInstance(instanceId)
+    const instanceId = endpoint.startsWith('collector:') ? endpoint.slice('collector:'.length) : ''
+    const query = instanceId === '' ? undefined : this.collectors.queryCapabilitiesForInstance(instanceId)
     const requestMessage = this.repo.getExchangeMessages(exchange.id).find(message => message.kind === 'request')
-    const handler = exchange.kind === 'command' ? organ?.handleCommand : organ?.handleRequest
+    const handler = exchange.kind === 'request' ? query?.handleRequest : undefined
     if (handler === undefined || requestMessage === undefined) {
       this.engine.failExchange({
         exchangeId: exchange.id,
@@ -714,7 +702,7 @@ export class QunoHost implements QunoServiceFace {
     const timeout = Math.max(1000, exchange.deadline - this.now())
     const dispatchSignal = AbortSignal.any([signal, AbortSignal.timeout(timeout)])
     try {
-      await handler.call(organ, {
+      await handler.call(query, {
         exchangeId: exchange.id,
         endpoint,
         payload: requestMessage.payload,
@@ -862,7 +850,7 @@ export class QunoHost implements QunoServiceFace {
       mode: ticket.mode,
       question: ticket.question,
     }))
-    return { found: true, threads, triggers, tickets, organs: this.organEndpoints() }
+    return { found: true, threads, triggers, tickets, collectors: this.collectorEndpoints() }
   }
 
   /** Bounded object-graph read for the current Eval. */
@@ -1052,8 +1040,8 @@ export class QunoHost implements QunoServiceFace {
     readonly payload: unknown
     readonly timeoutMs?: number
   }): { readonly requestId: string; readonly deadline: number; readonly message: string } {
-    if (!this.organAdvertises(input.responder, input.kind ?? 'request')) {
-      throw new QunoStateError('unknown-responder', `没有挂载可响应 ${input.responder} 的器官。${this.organDirectoryText()} 端点先用 quno_read 的 organs 列表查询，不要猜。`)
+    if (!this.queryAdvertises(input.responder, input.kind ?? 'request')) {
+      throw new QunoStateError('unknown-responder', `没有挂载可响应 ${input.responder} 的采集器。${this.queryDirectoryText()} 端点先用 quno_read 的 collectors 列表查询，不要猜。`)
     }
     const exchange = this.engine.requestExchange({
       kind: input.kind ?? 'request',
@@ -1180,7 +1168,7 @@ export class QunoHost implements QunoServiceFace {
     const effects = this.repo.listDueEffects(this.now(), 200)
     const waitingEvals = this.repo.listEvals(this.qunoId, { status: ['delivering', 'waiting-decision'], limit: 200 })
     const watchdog = this.watchdog.inspect()
-    const senses = this.senses.healthSnapshot().types.flatMap(view => view.instances.map(instance => ({
+    const collectors = this.collectors.healthSnapshot().types.flatMap(view => view.instances.map(instance => ({
       label: instance.label,
       type: instance.type,
       health: instance.health,
@@ -1205,7 +1193,7 @@ export class QunoHost implements QunoServiceFace {
         running: tickets.filter(ticket => ticket.question === null).length,
         interrupted: tickets.filter(ticket => ticket.question !== null).length,
       },
-      senses,
+      collectors,
       notices: {
         pending: notices.filter(notice => notice.status === 'pending').length,
         inboxDurable: notices.filter(notice => notice.status === 'inbox-durable').length,
@@ -1292,14 +1280,14 @@ export class QunoHost implements QunoServiceFace {
     return { kind: result.kind, at: result.at }
   }
 
-  /** Create a Sense instance. */
-  async createSense(request: {
+  /** Create a Collector instance. */
+  async createCollector(request: {
     readonly type: string
     readonly label?: string
     readonly config?: Record<string, unknown>
     readonly desiredState?: 'enabled' | 'paused' | 'disabled'
   }): Promise<QunoWireState> {
-    const result = this.senses.createInstance({
+    const result = this.collectors.createInstance({
       type: request.type,
       ...(request.label === undefined ? {} : { label: request.label }),
       config: request.config ?? {},
@@ -1309,20 +1297,20 @@ export class QunoHost implements QunoServiceFace {
     return await this.state()
   }
 
-  /** Pause/resume/disable/remove/reconfigure one Sense instance. */
-  async senseCommand(request: {
+  /** Pause/resume/disable/remove/reconfigure one Collector instance. */
+  async collectorCommand(request: {
     readonly instanceId: string
     readonly action: 'pause' | 'resume' | 'disable' | 'remove' | 'reconfigure'
     readonly label?: string
     readonly config?: Record<string, unknown>
   }): Promise<QunoWireState> {
     switch (request.action) {
-      case 'pause': await this.senses.pause(request.instanceId); break
-      case 'resume': await this.senses.resume(request.instanceId); break
-      case 'disable': await this.senses.disable(request.instanceId); break
-      case 'remove': await this.senses.remove(request.instanceId); break
+      case 'pause': await this.collectors.pause(request.instanceId); break
+      case 'resume': await this.collectors.resume(request.instanceId); break
+      case 'disable': await this.collectors.disable(request.instanceId); break
+      case 'remove': await this.collectors.remove(request.instanceId); break
       case 'reconfigure': {
-        const result = await this.senses.reconfigureInstance(request.instanceId, {
+        const result = await this.collectors.reconfigureInstance(request.instanceId, {
           ...(request.label === undefined ? {} : { label: request.label }),
           ...(request.config === undefined ? {} : { config: request.config }),
         })
@@ -1337,8 +1325,8 @@ export class QunoHost implements QunoServiceFace {
    * Probe one instance for real (no restart, no config revision bump, no
    * checkpoint movement, and explicitly NOT reported as a successful sync).
    */
-  async probeSense(request: { readonly instanceId: string }): Promise<SenseProbeWire> {
-    const result = await this.senses.probeInstance(request.instanceId)
+  async probeCollector(request: { readonly instanceId: string }): Promise<CollectorProbeWire> {
+    const result = await this.collectors.probeInstance(request.instanceId)
     return {
       ok: result.ok,
       code: result.code,
@@ -1349,14 +1337,14 @@ export class QunoHost implements QunoServiceFace {
   }
 
   /** Field-level option discovery (cloud groups, calendars, …). */
-  async senseOptions(request: {
+  async collectorOptions(request: {
     readonly type: string
     readonly field: string
     readonly config?: Record<string, unknown>
     readonly page?: number
     readonly limit?: number
-  }): Promise<SenseOptionsPageWire> {
-    const page = await this.senses.listFieldOptions({
+  }): Promise<CollectorOptionsPageWire> {
+    const page = await this.collectors.listFieldOptions({
       type: request.type,
       field: request.field,
       ...(request.config === undefined ? {} : { config: request.config }),

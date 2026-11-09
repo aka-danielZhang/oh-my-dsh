@@ -9,9 +9,9 @@ import { Engine } from '../src/core/engine.ts'
 import { SqliteRepository } from '../src/app/store.ts'
 import { buildPolicy } from '../src/core/policy.ts'
 import { QunoStore } from '../src/store.ts'
-import { addSense, batch, envelope, openFixture, scratchHome } from './helpers.ts'
+import { addCollector, batch, envelope, openFixture, scratchHome } from './helpers.ts'
 
-function bindingOf(fixture: ReturnType<typeof addSense>) {
+function bindingOf(fixture: ReturnType<typeof addCollector>) {
   return {
     instance: fixture.instance,
     source: fixture.source,
@@ -59,9 +59,9 @@ test('store: a live foreign lock refuses a second writer', () => {
 test('ingress: a batch commits events, receipt and checkpoint atomically', () => {
   const fixture = openFixture()
   try {
-    const sense = addSense(fixture)
+    const collectors = addCollector(fixture)
     const ingress = new QunoIngress(fixture.store, 'quno')
-    const ack = ingress.ingest(bindingOf(sense), batch([
+    const ack = ingress.ingest(bindingOf(collectors), batch([
       envelope({ eventKey: 'e1', type: 'calendar/updated', subject: { key: 'evt-1', revision: '2' } }),
       envelope({ eventKey: 'e2', type: 'calendar/updated', subject: { key: 'evt-2', revision: '1' } }),
     ], {
@@ -73,10 +73,10 @@ test('ingress: a batch commits events, receipt and checkpoint atomically', () =>
     assert.equal(ack.duplicateCount, 0)
     assert.equal(ack.checkpointRevision, 1)
     assert.equal(fixture.store.maxIngestSeq(), 1)
-    const instance = fixture.store.getSenseInstance(sense.instance.id)
+    const instance = fixture.store.getCollectorInstance(collectors.instance.id)
     assert.deepEqual(instance.checkpoint, { value: 'cursor-1', revision: 1 })
     assert.equal(instance.lastEventAt, fixture.now)
-    assert.equal(fixture.store.findBatch(sense.source.id, 'b1')?.acceptedCount, 2)
+    assert.equal(fixture.store.findBatch(collectors.source.id, 'b1')?.acceptedCount, 2)
   } finally {
     fixture.store.close()
   }
@@ -85,18 +85,18 @@ test('ingress: a batch commits events, receipt and checkpoint atomically', () =>
 test('ingress: a replayed batch returns the stored ACK and creates nothing', () => {
   const fixture = openFixture()
   try {
-    const sense = addSense(fixture)
+    const collectors = addCollector(fixture)
     const ingress = new QunoIngress(fixture.store, 'quno')
     const payload = batch([
       envelope({ eventKey: 'e1', type: 'calendar/updated' }),
     ], { batchKey: 'same', checkpointAfter: { value: 'c1', revision: 0 } })
-    const first = ingress.ingest(bindingOf(sense), payload, fixture.now)
+    const first = ingress.ingest(bindingOf(collectors), payload, fixture.now)
     const before = fixture.store.maxIngestSeq()
-    const second = ingress.ingest(bindingOf(sense), payload, fixture.now + 5000)
+    const second = ingress.ingest(bindingOf(collectors), payload, fixture.now + 5000)
     assert.equal(second.batchId, first.batchId)
     assert.equal(second.acceptedCount, 1)
     assert.equal(fixture.store.maxIngestSeq(), before)
-    assert.equal(fixture.store.getSenseInstance(sense.instance.id).checkpoint.revision, 1)
+    assert.equal(fixture.store.getCollectorInstance(collectors.instance.id).checkpoint.revision, 1)
   } finally {
     fixture.store.close()
   }
@@ -105,12 +105,12 @@ test('ingress: a replayed batch returns the stored ACK and creates nothing', () 
 test('ingress: the same event key with different content is an explicit conflict', () => {
   const fixture = openFixture()
   try {
-    const sense = addSense(fixture)
+    const collectors = addCollector(fixture)
     const ingress = new QunoIngress(fixture.store, 'quno')
-    ingress.ingest(bindingOf(sense), batch([
+    ingress.ingest(bindingOf(collectors), batch([
       envelope({ eventKey: 'e1', type: 'calendar/updated', summary: 'version one' }),
     ], { batchKey: 'b1' }), fixture.now)
-    const conflict = () => ingress.ingest(bindingOf(sense), batch([
+    const conflict = () => ingress.ingest(bindingOf(collectors), batch([
       envelope({ eventKey: 'e1', type: 'calendar/updated', summary: 'version two' }),
     ], { batchKey: 'b2' }), fixture.now + 1)
     assert.throws(conflict, (error: unknown) => {
@@ -129,12 +129,12 @@ test('ingress: the same event key with different content is an explicit conflict
 test('ingress: a whole batch is rejected when one event conflicts', () => {
   const fixture = openFixture()
   try {
-    const sense = addSense(fixture)
+    const collectors = addCollector(fixture)
     const ingress = new QunoIngress(fixture.store, 'quno')
-    ingress.ingest(bindingOf(sense), batch([
+    ingress.ingest(bindingOf(collectors), batch([
       envelope({ eventKey: 'e1', type: 'calendar/updated', summary: 'one' }),
     ], { batchKey: 'b1' }), fixture.now)
-    assert.throws(() => ingress.ingest(bindingOf(sense), batch([
+    assert.throws(() => ingress.ingest(bindingOf(collectors), batch([
       envelope({ eventKey: 'e2', type: 'calendar/updated' }),
       envelope({ eventKey: 'e1', type: 'calendar/updated', summary: 'different' }),
     ], { batchKey: 'b2' }), fixture.now), /already exists with different content/)
@@ -147,12 +147,12 @@ test('ingress: a whole batch is rejected when one event conflicts', () => {
 test('ingress: a stale checkpoint revision is refused and retryable', () => {
   const fixture = openFixture()
   try {
-    const sense = addSense(fixture)
+    const collectors = addCollector(fixture)
     const ingress = new QunoIngress(fixture.store, 'quno')
-    ingress.ingest(bindingOf(sense), batch([
+    ingress.ingest(bindingOf(collectors), batch([
       envelope({ eventKey: 'e1', type: 'x/y' }),
     ], { batchKey: 'b1', checkpointAfter: { value: 'c1', revision: 0 } }), fixture.now)
-    assert.throws(() => ingress.ingest(bindingOf(sense), batch([
+    assert.throws(() => ingress.ingest(bindingOf(collectors), batch([
       envelope({ eventKey: 'e2', type: 'x/y' }),
     ], { batchKey: 'b2', checkpointAfter: { value: 'c2', revision: 0 } }), fixture.now), (error: unknown) => {
       assert.ok(error instanceof QunoIngressError)
@@ -169,14 +169,14 @@ test('ingress: a stale checkpoint revision is refused and retryable', () => {
 test('ingress: an old generation may not write after a restart', () => {
   const fixture = openFixture()
   try {
-    const sense = addSense(fixture)
+    const collectors = addCollector(fixture)
     const ingress = new QunoIngress(fixture.store, 'quno')
-    const generation = fixture.store.bumpGeneration(sense.instance.id, fixture.now)
+    const generation = fixture.store.bumpGeneration(collectors.instance.id, fixture.now)
     assert.throws(() => ingress.ingest({
-      instance: fixture.store.getSenseInstance(sense.instance.id),
-      source: sense.source,
+      instance: fixture.store.getCollectorInstance(collectors.instance.id),
+      source: collectors.source,
       generation: generation - 1,
-      configRevision: fixture.store.getSenseInstance(sense.instance.id).configRevision,
+      configRevision: fixture.store.getCollectorInstance(collectors.instance.id).configRevision,
     }, batch([envelope({ eventKey: 'e1', type: 'x/y' })], { batchKey: 'b1' }), fixture.now), (error: unknown) => {
       assert.ok(error instanceof QunoIngressError)
       assert.equal(error.shape.code, 'stale-generation')
@@ -190,9 +190,9 @@ test('ingress: an old generation may not write after a restart', () => {
 test('ingress: an empty batch advances the checkpoint without creating events', () => {
   const fixture = openFixture()
   try {
-    const sense = addSense(fixture)
+    const collectors = addCollector(fixture)
     const ingress = new QunoIngress(fixture.store, 'quno')
-    const ack = ingress.ingest(bindingOf(sense), {
+    const ack = ingress.ingest(bindingOf(collectors), {
       batchKey: 'empty-1',
       events: [],
       checkpointAfter: { value: 'c9', revision: 0 },
@@ -279,7 +279,7 @@ test('store: attention revision CAS rejects stale writes and records history', (
 test('ingress: the domain Trigger sink commits with the batch and rolls back with it', () => {
   const fixture = openFixture()
   try {
-    const sense = addSense(fixture)
+    const collectors = addCollector(fixture)
     const repo = new SqliteRepository(fixture.store)
     const engine = new Engine({
       repo,
@@ -331,7 +331,7 @@ test('ingress: the domain Trigger sink commits with the batch and rolls back wit
       },
     }
     const ingress = new QunoIngress(fixture.store, 'quno', {}, sink)
-    const ack = ingress.ingest(bindingOf(sense), batch([
+    const ack = ingress.ingest(bindingOf(collectors), batch([
       envelope({ eventKey: 'ok-1', type: 'test/changed' }),
     ], { batchKey: 'b-sink-1' }), fixture.now)
     assert.equal(ack.acceptedCount, 1)
@@ -343,7 +343,7 @@ test('ingress: the domain Trigger sink commits with the batch and rolls back wit
     fail = true
     let refused: unknown
     try {
-      ingress.ingest(bindingOf(sense), batch([
+      ingress.ingest(bindingOf(collectors), batch([
         envelope({ eventKey: 'bad-1', type: 'test/changed' }),
       ], { batchKey: 'b-sink-2' }), fixture.now)
     } catch (error) {
@@ -351,8 +351,8 @@ test('ingress: the domain Trigger sink commits with the batch and rolls back wit
     }
     assert.ok(refused instanceof QunoIngressError)
     assert.equal(refused.shape.code, 'thread-unresolved')
-    assert.equal(fixture.store.dbFindEventId(sense.source.id, 'bad-1'), undefined, 'the event row rolled back')
-    assert.equal(fixture.store.findBatch(sense.source.id, 'b-sink-2'), undefined, 'no receipt for a failed T1')
+    assert.equal(fixture.store.dbFindEventId(collectors.source.id, 'bad-1'), undefined, 'the event row rolled back')
+    assert.equal(fixture.store.findBatch(collectors.source.id, 'b-sink-2'), undefined, 'no receipt for a failed T1')
     fail = false
   } finally {
     fixture.store.close()

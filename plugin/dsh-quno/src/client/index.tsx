@@ -49,7 +49,7 @@ import { QunoHeroWelcome } from './hero-welcome.tsx'
 import { QunoTaskCard } from './task-card.tsx'
 import { QunoReportActions } from './report-actions.tsx'
 import { QunoEntryPanel, QunoEntryGlyph } from './entry-panel.tsx'
-import { QunoOnboardingHost, onboarding } from './sense-onboarding.tsx'
+import { QunoOnboardingHost, onboarding } from './collector-onboarding.tsx'
 import { qunoNoticeDefinition } from './report-turn.ts'
 import { qunoWorkspaceSessionVisible, surfaceEnabled } from './view-model.ts'
 import { QUNO_PANEL_ID, QUNO_PANEL_KIND } from './right-tab.ts'
@@ -209,9 +209,9 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   // The Conversation assembly service is optional in a composed runtime; the
   // turn-bound report card simply renders nothing without it.
   const uiConversation = ctx.get('uiConversation') as unknown as QunoConversationFace | undefined
-  const openSensePanel = (instanceId: string): void => {
+  const openCollectorPanel = (instanceId: string): void => {
     if (!panelReady || sidebarRight === undefined) return
-    sidebarRight.openTab(QUNO_PANEL_KIND, { params: { senseId: instanceId, view: 'sense' } })
+    sidebarRight.openTab(QUNO_PANEL_KIND, { params: { collectorId: instanceId, view: 'collectors' } })
   }
   const locale = (): 'zh' | 'en' => ctx.locale.getLocale().active.toLowerCase().startsWith('zh') ? 'zh' : 'en'
   // Registrations held while the master switch is on (see the gated surface
@@ -295,7 +295,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       name: 'shell.overlay',
       id: 'quno-onboarding',
       order: 40,
-      inject: () => ({ store, t, onOpenDetail: openSensePanel }),
+      inject: () => ({ store, t, onOpenDetail: openCollectorPanel }),
     }, QunoOnboardingHost))
 
     // Claimed stylesheet (see the 2026-09-08 cross-plugin style incident): a
@@ -357,8 +357,8 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
             store,
             t,
             openSession,
-            onEditSense: (instanceId: string, type: string) => { onboarding.open({ kind: 'edit', instanceId, type }) },
-            onAddSense: () => { onboarding.open({ kind: 'create' }) },
+            onEditCollector: (instanceId: string, type: string) => { onboarding.open({ kind: 'edit', instanceId, type }) },
+            onAddCollector: () => { onboarding.open({ kind: 'create' }) },
           }),
         }, QunoPanelTab)))
         held.push(ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({

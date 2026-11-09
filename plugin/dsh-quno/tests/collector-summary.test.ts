@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { SenseFieldWire } from '../src/api-types.ts'
-import { isConfigured, sourceSummary, sourceSummaryText } from '../src/client/sense-summary.ts'
+import type { CollectorFieldWire } from '../src/api-types.ts'
+import { isConfigured, sourceSummary, sourceSummaryText } from '../src/client/collector-summary.ts'
 import type { QunoTranslate } from '../src/client/locales.ts'
 
-const fields: readonly SenseFieldWire[] = [
+const fields: readonly CollectorFieldWire[] = [
   { key: 'directory', label: '目录', type: 'path' },
   { key: 'file', label: '文件', type: 'path' },
   { key: 'url', label: '订阅地址', type: 'url' },
@@ -51,7 +51,7 @@ test('an unknown shape falls back to the type name', () => {
 })
 
 test('a secret path field never enters the summary', () => {
-  const secretPath: readonly SenseFieldWire[] = [
+  const secretPath: readonly CollectorFieldWire[] = [
     { key: 'vault', label: '保险库路径', type: 'path', secret: true },
     { key: 'groupIds', label: '群组', type: 'multiselect', multiple: true },
   ]
@@ -61,7 +61,7 @@ test('a secret path field never enters the summary', () => {
 })
 
 test('a secret list field is skipped as well', () => {
-  const secretList: readonly SenseFieldWire[] = [
+  const secretList: readonly CollectorFieldWire[] = [
     { key: 'ids', label: '分组', type: 'multiselect', multiple: true, secret: true },
   ]
   assert.deepEqual(sourceSummary({ ids: ['a', 'b'] }, secretList), { kind: 'none' })

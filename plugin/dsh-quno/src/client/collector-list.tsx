@@ -1,25 +1,25 @@
 /**
  * 动态: the source list plus the recent-event summary.
  *
- * The page state is decided by `sensePageState` before anything renders, so an
+ * The page state is decided by `collectorPageState` before anything renders, so an
  * install guide, a first connect, a first sync, an empty feed and a failed load
  * are five visibly different pages instead of five shades of "no data".
  *
- * @module dsh-quno/client/sense-list
+ * @module dsh-quno/client/collector-list
  */
 
 import React from 'react'
-import type { EventWire, QunoWireState, SenseWire } from '../api-types.ts'
+import type { EventWire, QunoWireState, CollectorWire } from '../api-types.ts'
 import type { QunoTranslate } from './locales.ts'
 import type { QunoClientStore, QunoSnapshot } from './store.ts'
 import { format } from './locales.ts'
 import { clip, formatClock } from './format.ts'
 import { eventLine } from './view-model.ts'
 import {
-  sensePageState,
-  senseRowKey,
-  senseRowState,
-  senseRowTone,
+  collectorPageState,
+  collectorRowKey,
+  collectorRowState,
+  collectorRowTone,
   sourceDisplayName,
   sourceReadsOriginal,
 } from './panel-state.ts'
@@ -34,16 +34,16 @@ import {
 import { EventDetailPage } from './event-detail.tsx'
 
 /** Props of the 动态 page. */
-export interface SenseListPageProps {
+export interface CollectorListPageProps {
   readonly snapshot: QunoSnapshot
   readonly store: QunoClientStore
   readonly t: QunoTranslate
-  readonly onOpen: (senseId: string) => void
+  readonly onOpen: (collectorId: string) => void
   readonly onAdd?: () => void
 }
 
 /** Render the 动态 tab. */
-export function SenseListPage(props: SenseListPageProps): React.ReactElement {
+export function CollectorListPage(props: CollectorListPageProps): React.ReactElement {
   const { t, snapshot } = props
   const [eventId, setEventId] = React.useState<string | null>(null)
   if (eventId !== null) {
@@ -55,7 +55,7 @@ export function SenseListPage(props: SenseListPageProps): React.ReactElement {
     if (snapshot.phase === 'error') {
       return (
         <PanelEmpty
-          icon="sense"
+          icon="collectors"
           title={t('loadFailedTitle')}
           description={format(t('error'), { error: snapshot.error ?? '' })}
           action={{ label: t('retry'), onClick: () => { void props.store.refresh() } }}
@@ -65,13 +65,13 @@ export function SenseListPage(props: SenseListPageProps): React.ReactElement {
     return <LoadingRows rows={4} />
   }
 
-  const enabled = state.senses.filter(sense => sense.desiredState === 'enabled')
-  const awaitingFirstSync = enabled.filter(sense => sense.lastSuccessAt === null).length
-  const page = sensePageState({
+  const enabled = state.collectors.filter(collectors => collectors.desiredState === 'enabled')
+  const awaitingFirstSync = enabled.filter(collectors => collectors.lastSuccessAt === null).length
+  const page = collectorPageState({
     phase: snapshot.phase,
     hasState: true,
-    instanceCount: state.senses.length,
-    typeCount: state.senseTypes.length,
+    instanceCount: state.collectors.length,
+    typeCount: state.collectorTypes.length,
     enabledCount: enabled.length,
     awaitingFirstSync,
     eventCount: snapshot.events.length,
@@ -81,7 +81,7 @@ export function SenseListPage(props: SenseListPageProps): React.ReactElement {
   if (page === 'install-guide' || page === 'first-connect') {
     return (
       <PanelEmpty
-        icon="sense"
+        icon="collectors"
         title={page === 'install-guide' ? t('emptyNoTypesTitle') : t('emptyNoInstancesTitle')}
         description={page === 'install-guide' ? t('emptyNoTypesDesc') : t('emptyNoInstancesDesc')}
         {...(page === 'first-connect' && props.onAdd !== undefined
@@ -94,12 +94,12 @@ export function SenseListPage(props: SenseListPageProps): React.ReactElement {
   return (
     <div style={styles.stack}>
       <div style={styles.list}>
-        {state.senses.map(sense => (
-          <SenseRow key={sense.id} sense={sense} state={state} t={t} onOpen={props.onOpen} />
+        {state.collectors.map(collectors => (
+          <CollectorRow key={collectors.id} collectors={collectors} state={state} t={t} onOpen={props.onOpen} />
         ))}
       </div>
 
-      {page === 'all-paused' && <InlineEmpty>{t('allSensesPaused')}</InlineEmpty>}
+      {page === 'all-paused' && <InlineEmpty>{t('allCollectorsPaused')}</InlineEmpty>}
       {page === 'syncing' && <InlineEmpty>{t('firstSyncInFlight')}</InlineEmpty>}
       {page === 'empty' && <InlineEmpty>{t('eventsEmpty')}</InlineEmpty>}
 
@@ -116,7 +116,7 @@ export function SenseListPage(props: SenseListPageProps): React.ReactElement {
         </PanelSection>
       )}
 
-      {state.senses.length > 0 && (
+      {state.collectors.length > 0 && (
         <PanelSection title={t('panelRecentEvents')}>
           {snapshot.eventsStatus === 'loading' && <LoadingRows rows={2} />}
           {snapshot.eventsStatus === 'error' && (
@@ -145,26 +145,26 @@ export function SenseListPage(props: SenseListPageProps): React.ReactElement {
 }
 
 /** One source row: a single state, a drill-down, no repeated health copy. */
-function SenseRow(props: {
-  readonly sense: SenseWire
+function CollectorRow(props: {
+  readonly collectors: CollectorWire
   readonly state: QunoWireState
   readonly t: QunoTranslate
-  readonly onOpen: (senseId: string) => void
+  readonly onOpen: (collectorId: string) => void
 }): React.ReactElement {
-  const { sense, t } = props
-  const rowState = senseRowState(sense)
-  const typeName = props.state.senseTypes.find(candidate => candidate.type === sense.type)?.displayName ?? sense.type
-  const label = sense.label === '' ? typeName : sense.label
+  const { collectors, t } = props
+  const rowState = collectorRowState(collectors)
+  const typeName = props.state.collectorTypes.find(candidate => candidate.type === collectors.type)?.displayName ?? collectors.type
+  const label = collectors.label === '' ? typeName : collectors.label
   const meta = rowState === 'ok'
-    ? <span>{sense.lastSuccessAt === null ? t('never') : formatClock(sense.lastSuccessAt)}</span>
-    : <span style={styles.stateLabel(senseRowTone(rowState))}>{t(senseRowKey(rowState))}</span>
+    ? <span>{collectors.lastSuccessAt === null ? t('never') : formatClock(collectors.lastSuccessAt)}</span>
+    : <span style={styles.stateLabel(collectorRowTone(rowState))}>{t(collectorRowKey(rowState))}</span>
   return (
     <PanelListRow
-      tone={senseRowTone(rowState)}
+      tone={collectorRowTone(rowState)}
       title={label}
       subtitle={typeName}
       meta={meta}
-      onClick={() => { props.onOpen(sense.id) }}
+      onClick={() => { props.onOpen(collectors.id) }}
       titleAttr={label}
     />
   )

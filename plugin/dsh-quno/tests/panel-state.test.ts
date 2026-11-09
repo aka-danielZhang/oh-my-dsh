@@ -12,16 +12,16 @@ import {
   runStatusKind,
   runTone,
   runTriggerKey,
-  sensePageState,
-  senseRowKey,
-  senseRowState,
-  senseRowTone,
+  collectorPageState,
+  collectorRowKey,
+  collectorRowState,
+  collectorRowTone,
   taskSections,
   taskStatusKey,
-  type SensePageInput,
+  type CollectorPageInput,
 } from '../src/client/panel-state.ts'
 
-const emptyPage: SensePageInput = {
+const emptyPage: CollectorPageInput = {
   phase: 'ready',
   hasState: true,
   instanceCount: 0,
@@ -58,40 +58,40 @@ test('a cancelled task is settled, never "needs action"', () => {
   assert.equal(groups.settled.length, 1)
 })
 
-test('the dynamic page separates "no Sense" from "no events"', () => {
+test('the dynamic page separates "no Collector" from "no events"', () => {
   // Nothing registered at all: the install guide, not an empty feed.
-  assert.equal(sensePageState(emptyPage), 'install-guide')
+  assert.equal(collectorPageState(emptyPage), 'install-guide')
   // Types exist but no instance yet: first connect.
-  assert.equal(sensePageState({ ...emptyPage, typeCount: 2 }), 'first-connect')
+  assert.equal(collectorPageState({ ...emptyPage, typeCount: 2 }), 'first-connect')
   // Instances exist but no events: an empty feed, still not the install guide.
-  assert.equal(sensePageState({ ...emptyPage, instanceCount: 1, enabledCount: 1 }), 'empty')
+  assert.equal(collectorPageState({ ...emptyPage, instanceCount: 1, enabledCount: 1 }), 'empty')
   // Events exist: list.
-  assert.equal(sensePageState({ ...emptyPage, instanceCount: 1, enabledCount: 1, eventCount: 3 }), 'list')
+  assert.equal(collectorPageState({ ...emptyPage, instanceCount: 1, enabledCount: 1, eventCount: 3 }), 'list')
 })
 
 test('first sync never reads as "nothing new"', () => {
   assert.equal(
-    sensePageState({ ...emptyPage, instanceCount: 1, enabledCount: 1, awaitingFirstSync: 1 }),
+    collectorPageState({ ...emptyPage, instanceCount: 1, enabledCount: 1, awaitingFirstSync: 1 }),
     'syncing',
   )
 })
 
 test('all sources paused is its own page state', () => {
   assert.equal(
-    sensePageState({ ...emptyPage, instanceCount: 1, enabledCount: 0, eventCount: 0 }),
+    collectorPageState({ ...emptyPage, instanceCount: 1, enabledCount: 0, eventCount: 0 }),
     'all-paused',
   )
 })
 
 test('an unloaded state is loading; a failed first load is not an empty install', () => {
-  assert.equal(sensePageState({ ...emptyPage, phase: 'idle', hasState: false }), 'loading')
-  assert.equal(sensePageState({ ...emptyPage, phase: 'loading', hasState: false }), 'loading')
-  assert.equal(sensePageState({ ...emptyPage, phase: 'error', hasState: false }), 'load-failed')
+  assert.equal(collectorPageState({ ...emptyPage, phase: 'idle', hasState: false }), 'loading')
+  assert.equal(collectorPageState({ ...emptyPage, phase: 'loading', hasState: false }), 'loading')
+  assert.equal(collectorPageState({ ...emptyPage, phase: 'error', hasState: false }), 'load-failed')
 })
 
 test('a loaded state stays on the list when a refresh fails', () => {
   assert.equal(
-    sensePageState({ ...emptyPage, phase: 'error', instanceCount: 1, enabledCount: 1, eventCount: 2 }),
+    collectorPageState({ ...emptyPage, phase: 'error', instanceCount: 1, enabledCount: 1, eventCount: 2 }),
     'list',
   )
 })
@@ -124,21 +124,21 @@ test('run triggers localise when known and fall back otherwise', () => {
   assert.equal(runTriggerKey('cron-ish'), undefined)
 })
 
-test('the sense row shows one state in the documented priority', () => {
+test('the collectors row shows one state in the documented priority', () => {
   const base = { desiredState: 'enabled', lifecycle: 'running', health: 'healthy', stale: false, lastSuccessAt: 1 }
-  assert.equal(senseRowState(base), 'ok')
-  assert.equal(senseRowState({ ...base, stale: true }), 'stale')
-  assert.equal(senseRowState({ ...base, lastSuccessAt: null }), 'syncing')
-  assert.equal(senseRowState({ ...base, lifecycle: 'starting' }), 'starting')
-  assert.equal(senseRowState({ ...base, desiredState: 'paused' }), 'paused')
-  assert.equal(senseRowState({ ...base, desiredState: 'disabled' }), 'disabled')
+  assert.equal(collectorRowState(base), 'ok')
+  assert.equal(collectorRowState({ ...base, stale: true }), 'stale')
+  assert.equal(collectorRowState({ ...base, lastSuccessAt: null }), 'syncing')
+  assert.equal(collectorRowState({ ...base, lifecycle: 'starting' }), 'starting')
+  assert.equal(collectorRowState({ ...base, desiredState: 'paused' }), 'paused')
+  assert.equal(collectorRowState({ ...base, desiredState: 'disabled' }), 'disabled')
   // An auth failure outranks a paused/disabled intent and staleness.
-  assert.equal(senseRowState({ ...base, desiredState: 'paused', health: 'auth-required', stale: true }), 'auth-required')
-  assert.equal(senseRowState({ ...base, health: 'rate-limited', stale: true }), 'rate-limited')
-  assert.equal(senseRowKey('syncing'), 'panelSenseSyncing')
-  assert.equal(senseRowTone('auth-required'), 'error')
-  assert.equal(senseRowTone('stale'), 'warn')
-  assert.equal(senseRowTone('ok'), 'ok')
+  assert.equal(collectorRowState({ ...base, desiredState: 'paused', health: 'auth-required', stale: true }), 'auth-required')
+  assert.equal(collectorRowState({ ...base, health: 'rate-limited', stale: true }), 'rate-limited')
+  assert.equal(collectorRowKey('syncing'), 'panelCollectorSyncing')
+  assert.equal(collectorRowTone('auth-required'), 'error')
+  assert.equal(collectorRowTone('stale'), 'warn')
+  assert.equal(collectorRowTone('ok'), 'ok')
 })
 
 test('task sections follow the status table and hide empty sections', () => {
@@ -203,15 +203,15 @@ test('status keys are localised and never leak the raw enum', () => {
 
 test('an unread events list is never reported as "nothing new"', () => {
   assert.equal(
-    sensePageState({ ...emptyPage, instanceCount: 1, enabledCount: 1, eventsStatus: 'loading' }),
+    collectorPageState({ ...emptyPage, instanceCount: 1, enabledCount: 1, eventsStatus: 'loading' }),
     'list',
   )
   assert.equal(
-    sensePageState({ ...emptyPage, instanceCount: 1, enabledCount: 1, eventsStatus: 'error' }),
+    collectorPageState({ ...emptyPage, instanceCount: 1, enabledCount: 1, eventsStatus: 'error' }),
     'list',
   )
   assert.equal(
-    sensePageState({ ...emptyPage, instanceCount: 1, enabledCount: 1, eventsStatus: 'ready' }),
+    collectorPageState({ ...emptyPage, instanceCount: 1, enabledCount: 1, eventsStatus: 'ready' }),
     'empty',
   )
 })
@@ -219,7 +219,7 @@ test('an unread events list is never reported as "nothing new"', () => {
 test('readable originals require a declared capability on the owning type', () => {
   const state = {
     sources: [{ id: 'src-1', type: 'feed' }, { id: 'src-2', type: 'screen' }],
-    senseTypes: [
+    collectorTypes: [
       { type: 'feed', reliability: { readOriginal: true } },
       { type: 'screen', reliability: null },
     ],

@@ -9,7 +9,7 @@
  * - a whole batch is accepted or rejected as a unit (no partial checkpoint);
  * - an ACK is returned only after the commit; a lost ACK replayed with the same
  *   `batchKey` returns the stored receipt;
- * - the checkpoint uses a revision CAS, and a stale Sense generation may not
+ * - the checkpoint uses a revision CAS, and a stale Collector generation may not
  *   write at all.
  *
  * @module dsh-quno/ingress
@@ -28,12 +28,12 @@ import type {
   IngestAckItem,
   IngestBatch,
   QunoErrorShape,
-  SenseInstanceRecord,
+  CollectorInstanceRecord,
   SourceId,
   SourceRecord,
 } from './types.ts'
 
-/** A classified refusal that a Sense may log and retry. */
+/** A classified refusal that a Collector may log and retry. */
 export class QunoIngressError extends Error {
   constructor(readonly shape: QunoErrorShape) {
     super(shape.message)
@@ -41,9 +41,9 @@ export class QunoIngressError extends Error {
   }
 }
 
-/** The restricted write capability one Sense generation holds. */
+/** The restricted write capability one Collector generation holds. */
 export interface IngressBinding {
-  readonly instance: SenseInstanceRecord
+  readonly instance: CollectorInstanceRecord
   readonly source: SourceRecord
   readonly generation: number
   readonly configRevision: number
@@ -75,7 +75,7 @@ export interface IngressHooks {
   onGap?(sourceId: SourceId, reason: string): void
 }
 
-/** Restricted ingress implementation shared by every Sense runtime. */
+/** Restricted ingress implementation shared by every Collector runtime. */
 export class QunoIngress {
   constructor(
     private readonly store: QunoStore,
@@ -86,7 +86,7 @@ export class QunoIngress {
 
   /**
    * Validate and durably accept one batch.
-   * @param binding - generation-scoped capability handed to the Sense.
+   * @param binding - generation-scoped capability handed to the Collector.
    * @param input - untrusted batch payload.
    * @param now - injectable clock (tests).
    * @returns the durable ACK.
@@ -99,7 +99,7 @@ export class QunoIngress {
     }
     const batch = parsed.value
     const batchHash = sha256(stableStringify({ batch }))
-    let fresh: SenseInstanceRecord
+    let fresh: CollectorInstanceRecord
     let existing: ReturnType<QunoStore['findBatch']>
     try {
       fresh = this.assertWritable(binding)
@@ -199,7 +199,7 @@ export class QunoIngress {
 
         if (batch.checkpointAfter != null) {
           checkpointRevision = batch.checkpointAfter.revision + 1
-          this.store.updateSenseInstance(binding.instance.id, {
+          this.store.updateCollectorInstance(binding.instance.id, {
             checkpoint: { value: batch.checkpointAfter.value, revision: checkpointRevision },
             now,
           })
@@ -221,7 +221,7 @@ export class QunoIngress {
           }
         }
         if (acceptedCount > 0) {
-          this.store.updateSenseInstance(binding.instance.id, { lastEventAt: now, now })
+          this.store.updateCollectorInstance(binding.instance.id, { lastEventAt: now, now })
         }
         if (batch.gap != null) {
           this.store.setMeta(`gap:${binding.source.id}`, stableStringify({
@@ -272,26 +272,26 @@ export class QunoIngress {
     return ack
   }
 
-  private assertWritable(binding: IngressBinding): SenseInstanceRecord {
-    const current = this.store.getSenseInstance(binding.instance.id)
+  private assertWritable(binding: IngressBinding): CollectorInstanceRecord {
+    const current = this.store.getCollectorInstance(binding.instance.id)
     if (current.generation !== binding.generation) {
       throw new QunoIngressError({
         code: 'stale-generation',
-        message: `Sense generation ${String(binding.generation)} was superseded by ${String(current.generation)}`,
+        message: `Collector generation ${String(binding.generation)} was superseded by ${String(current.generation)}`,
         retryable: false,
       })
     }
     if (current.desiredState === 'disabled' || current.desiredState === 'paused') {
       throw new QunoIngressError({
         code: 'stale-generation',
-        message: `Sense instance is ${current.desiredState}`,
+        message: `Collector instance is ${current.desiredState}`,
         retryable: false,
       })
     }
     if (current.configRevision !== binding.configRevision) {
       throw new QunoIngressError({
         code: 'stale-generation',
-        message: 'Sense configuration changed while a check was running',
+        message: 'Collector configuration changed while a check was running',
         retryable: true,
       })
     }
@@ -328,7 +328,7 @@ export class QunoIngress {
       supersedesEventIds: envelope.supersedesEventIds ?? [],
       parentEventIds: envelope.parentEventIds ?? [],
       contentHash: hash,
-      senseConfigRevision: binding.configRevision,
+      collectorConfigRevision: binding.configRevision,
       expiresAt: toMillis(envelope.expiresAt),
     })
   }

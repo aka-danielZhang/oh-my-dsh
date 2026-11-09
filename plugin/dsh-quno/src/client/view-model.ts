@@ -10,7 +10,7 @@
 export interface StateSlice {
   readonly quno: { readonly mainSessionId: string | null; readonly mutedUntil: number | null }
   readonly main: { readonly sessionId: string | null; readonly state: string }
-  readonly senses: readonly { readonly desiredState: string; readonly health: string; readonly stale: boolean }[]
+  readonly collectors: readonly { readonly desiredState: string; readonly health: string; readonly stale: boolean }[]
   readonly attention: readonly { readonly status: string }[]
   readonly tasks: readonly { readonly status: string }[]
 }
@@ -37,15 +37,15 @@ export function mainPresence(slice: StateSlice, enabled: boolean, now: number): 
 export interface PanelCounts {
   readonly runningTasks: number
   readonly attentionOpen: number
-  readonly senseAlarms: number
+  readonly collectorAlarms: number
 }
 
-/** Enabled senses that are not cleanly healthy, plus the actionable counts. */
+/** Enabled collectors that are not cleanly healthy, plus the actionable counts. */
 export function panelCounts(slice: StateSlice): PanelCounts {
   return {
     runningTasks: slice.tasks.filter(task => task.status === 'running').length,
     attentionOpen: slice.attention.filter(item => item.status === 'open' || item.status === 'waiting' || item.status === 'snoozed').length,
-    senseAlarms: slice.senses.filter(sense => sense.desiredState === 'enabled' && (sense.health !== 'healthy' || sense.stale)).length,
+    collectorAlarms: slice.collectors.filter(collectors => collectors.desiredState === 'enabled' && (collectors.health !== 'healthy' || collectors.stale)).length,
   }
 }
 
@@ -67,7 +67,7 @@ export function capsuleItems(counts: PanelCounts): readonly CapsuleItem[] {
   const items: CapsuleItem[] = []
   if (counts.runningTasks > 0) items.push({ kind: 'tasks', count: counts.runningTasks })
   if (counts.attentionOpen > 0) items.push({ kind: 'attention', count: counts.attentionOpen })
-  if (counts.senseAlarms > 0) items.push({ kind: 'activity', count: counts.senseAlarms })
+  if (counts.collectorAlarms > 0) items.push({ kind: 'activity', count: counts.collectorAlarms })
   return items
 }
 
@@ -129,14 +129,14 @@ export function isCapsuleVisible(state: CapsuleVisibility): boolean {
 export interface CapsuleSlice {
   readonly tasks: readonly { readonly status: string; readonly title: string }[]
   readonly attention: readonly { readonly status: string; readonly title: string }[]
-  readonly senses: readonly {
+  readonly collectors: readonly {
     readonly desiredState: string
     readonly health: string
     readonly stale: boolean
     readonly label: string
     readonly type: string
   }[]
-  readonly senseTypes: readonly { readonly type: string; readonly displayName: string }[]
+  readonly collectorTypes: readonly { readonly type: string; readonly displayName: string }[]
 }
 
 /** One flyout row: a non-zero category plus one representative record. */
@@ -156,13 +156,13 @@ export interface CapsuleSummary {
 export function capsuleSummaries(slice: CapsuleSlice): readonly CapsuleSummary[] {
   const running = slice.tasks.filter(task => task.status === 'running')
   const attention = slice.attention.filter(item => item.status === 'open' || item.status === 'waiting' || item.status === 'snoozed')
-  const alarms = slice.senses.filter(sense => sense.desiredState === 'enabled' && (sense.health !== 'healthy' || sense.stale))
+  const alarms = slice.collectors.filter(collectors => collectors.desiredState === 'enabled' && (collectors.health !== 'healthy' || collectors.stale))
   const rows: CapsuleSummary[] = []
   if (running.length > 0) rows.push({ kind: 'tasks', count: running.length, subject: running[0]?.title })
   if (attention.length > 0) rows.push({ kind: 'attention', count: attention.length, subject: attention[0]?.title })
   if (alarms.length > 0) {
     const first = alarms[0]
-    const type = first === undefined ? undefined : slice.senseTypes.find(candidate => candidate.type === first.type)
+    const type = first === undefined ? undefined : slice.collectorTypes.find(candidate => candidate.type === first.type)
     const subject = first === undefined
       ? undefined
       : first.label !== '' ? first.label : type?.displayName ?? first.type
@@ -173,7 +173,7 @@ export function capsuleSummaries(slice: CapsuleSlice): readonly CapsuleSummary[]
 
 /** Total items the compact pill reports when the column is narrow. */
 export function capsuleTotal(counts: PanelCounts): number {
-  return counts.runningTasks + counts.attentionOpen + counts.senseAlarms
+  return counts.runningTasks + counts.attentionOpen + counts.collectorAlarms
 }
 
 /** Minimal event slice for the summary line. */

@@ -1,6 +1,6 @@
 /**
- * The Fixture Organ (design §2 L3): a synthetic Sense registered through the
- * REAL `qunoSenses` registry, producing Triggers through the REAL ingress
+ * The Fixture Organ (design §2 L3): a synthetic Collector registered through the
+ * REAL `qunoCollectors` registry, producing Triggers through the REAL ingress
  * (dedupe, checkpoint, same-transaction Trigger/Thread commit) and answering
  * Exchanges through the REAL organ capability surface.
  *
@@ -10,8 +10,8 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { EventEnvelope, IngestBatch, IngestAck, SenseDefinition } from '../../src/types.ts'
-import type { SenseFactory, SenseRuntime } from '../../src/senses.ts'
+import type { EventEnvelope, IngestBatch, IngestAck, CollectorDefinition } from '../../src/types.ts'
+import type { CollectorFactory, CollectorRunContext } from '../../src/collectors.ts'
 
 /** The synthetic source type mounted for cases. */
 export const EVAL_ORGAN_TYPE = 'eval/synthetic'
@@ -22,7 +22,7 @@ const WHITELIST_OPS = ['im.group.recent', 'im.group.search', 'im.message.list'] 
 /**
  * The plan §5 whitelist as a contract double: the same refusal reasons the
  * real yzj organ enforces, so cases can exercise the refusal→Input plumbing.
- * The matrix itself is pinned by dsh-quno-sense-yzj node tests; this double
+ * The matrix itself is pinned by dsh-quno-collector-yzj node tests; this double
  * must never make a whitelist case pass that the real organ would refuse.
  * `null` means the payload is inside the whitelist.
  */
@@ -54,19 +54,19 @@ interface ProgrammedResponse {
 
 /** State + entry points for the synthetic organ. */
 export class EvalOrgan {
-  private readonly runtimes = new Map<string, SenseRuntime>()
+  private readonly runtimes = new Map<string, CollectorRunContext>()
   private readonly checkpointRevisions = new Map<string, number>()
   private programmed: ProgrammedResponse | undefined
   private whitelist = false
   private counter = 0
 
-  /** Register the type on the real senses service (idempotent per context). */
+  /** Register the type on the real collectors service (idempotent per context). */
   mountOn(ctx: Context): void {
-    const senses = ctx.get('qunoSenses') as {
+    const collectors = ctx.get('qunoCollectors') as {
       register(definition: unknown, factory: unknown): () => Promise<void>
     } | undefined
-    if (senses === undefined) throw new Error('eval organ: the qunoSenses service is not mounted')
-    void senses.register(this.definition(), this.factory())
+    if (collectors === undefined) throw new Error('eval collector: the qunoCollectors service is not mounted')
+    void collectors.register(this.definition(), this.factory())
   }
 
   /** Program the next Exchange response payload (exchangeResponse step). */
@@ -84,21 +84,27 @@ export class EvalOrgan {
   }
 
   /** Create one enabled instance through the real service; returns its id. */
-  async createInstance(senses: { createInstance(input: { type: string; config: Record<string, unknown> }): { readonly ok: boolean; readonly instance?: { readonly id: string }; readonly error?: unknown } }, config: Record<string, unknown> = {}): Promise<string> {
-    const result = senses.createInstance({ type: EVAL_ORGAN_TYPE, config: { label: '评测合成来源', ...config } })
+  async createInstance(collectors: { createInstance(input: { type: string; config: Record<string, unknown> }): { readonly ok: boolean; readonly instance?: { readonly id: string }; readonly error?: unknown } }, config: Record<string, unknown> = {}, pump?: () => void): Promise<string> {
+    const result = collectors.createInstance({ type: EVAL_ORGAN_TYPE, config: { label: '评测合成来源', ...config } })
     if (!result.ok || result.instance === undefined) {
       throw new Error(`eval organ instance failed: ${JSON.stringify(result.error)}`)
     }
     const instanceId = result.instance.id
-    await waitFor(5_000, () => this.runtimes.has(instanceId), 'eval organ instance did not start')
+    // The Host arms the first run on the virtual timer; pump it so the run
+    // context (and its commit face) exists before the case drives ingests.
+    await waitFor(5_000, () => {
+      pump?.()
+      return this.runtimes.has(instanceId)
+    }, 'eval organ instance did not start')
     return instanceId
   }
 
   /**
    * Ingest one batch through the REAL generation-checked ingress: same
-   * transaction as the Host's Trigger/Thread/ACK commit. The checkpoint CAS
-   * requires the Sense to base its patch on the current revision, so the organ
-   * mirrors the store's revision locally.
+   * transaction as the Host's Trigger/Thread/ACK commit. The run context's
+   * commit face is generation-bound; the fixture always holds the LATEST one
+   * and mirrors the store's checkpoint revision locally, so the CAS is based
+   * on the current revision.
    */
   async ingest(instanceId: string, envelopes: readonly EventEnvelope[]): Promise<IngestAck> {
     const runtime = this.runtimes.get(instanceId)
@@ -109,7 +115,7 @@ export class EvalOrgan {
       events: envelopes,
       checkpointAfter: { value: `eval-cursor-${String(this.counter)}`, revision },
     }
-    const ack = await runtime.ingress.ingestBatch(batch)
+    const ack = await runtime.commit(batch)
     this.checkpointRevisions.set(instanceId, revision + 1)
     return ack
   }
@@ -122,23 +128,21 @@ export class EvalOrgan {
   }
 
   /** The honest declaration: five reliability fields, synthetic scope. */
-  private definition(): SenseDefinition {
+  private definition(): CollectorDefinition {
     return {
       type: EVAL_ORGAN_TYPE,
-      contractVersion: 'quno.sense/v1',
+      contractVersion: 'quno.collector/v2',
       implementationVersion: '0.1.0',
       displayName: '评测合成来源',
       description: '只服务于链路评测的合成来源：按批提交合成事件，按预置负载响应异步读取。',
       eventTypes: [{ type: 'eval.event', summary: '合成事件' }],
       configFields: [{ key: 'label', label: '显示名', type: 'string' }],
       permissions: { reads: ['nothing real — synthetic fixture'], requiresModel: false },
-      runtime: {
-        modes: ['poll'],
+      schedule: {
         defaultIntervalSec: 60,
         minIntervalSec: 60,
-        concurrency: 1,
-        timeoutMs: 5_000,
-        quotas: { maxEventsPerCheck: 100 },
+        maxRunMs: 5_000,
+        quotas: { maxEventsPerRun: 100 },
       },
       reliability: {
         checkpoint: 'cursor',
@@ -148,11 +152,7 @@ export class EvalOrgan {
         readOriginal: false,
       },
       firstSync: 'baseline-only',
-      organ: {
-        resolveThreads: (envelope) => {
-          const key = envelope.subject?.key ?? `object:${envelope.eventKey}`
-          return { status: 'resolved' as const, threads: [{ source: 'eval', id: key }] }
-        },
+      query: {
         handleRequest: async (request) => {
           if (this.whitelist) {
             const refusal = whitelistRefusal(request.payload)
@@ -168,19 +168,19 @@ export class EvalOrgan {
           this.programmed = undefined
           await request.completeExchange(payload)
         },
-        handleCommand: async (request) => {
-          await request.failExchange('command exchanges are refused by the eval organ', false)
-        },
       },
     }
   }
 
-  /** The factory: hold the runtime so tests can drive its ingress. */
-  private factory(): SenseFactory {
+  /**
+   * The factory: each Host-scheduled run stores the CURRENT run context so
+   * tests can drive its commit face; the run itself commits nothing.
+   */
+  private factory(): CollectorFactory {
     return {
-      start: (runtime: SenseRuntime) => {
-        this.runtimes.set(runtime.instanceId, runtime)
-        return { stop: () => { this.runtimes.delete(runtime.instanceId) } }
+      run: async (ctx: CollectorRunContext) => {
+        this.runtimes.set(ctx.instanceId, ctx)
+        return { ok: true }
       },
     }
   }

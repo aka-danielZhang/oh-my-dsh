@@ -22,9 +22,9 @@ import type {
   NoticeWire,
   QunoWireState,
   RunWire,
-  SenseFieldWire,
-  SenseTypeWire,
-  SenseWire,
+  CollectorFieldWire,
+  CollectorTypeWire,
+  CollectorWire,
   SourceWire,
   TaskWire,
   ThreadDetailWire,
@@ -32,7 +32,7 @@ import type {
   TicketDetailWire,
   TriggerDetailWire,
 } from './api-types.ts'
-import type { SenseDefinition } from './types.ts'
+import type { CollectorDefinition } from './types.ts'
 import type { EvalRecord, TicketRecord, TriggerRecord } from './core/model.ts'
 import type { DomainRepository } from './core/repository.ts'
 
@@ -44,7 +44,7 @@ export async function buildQunoState(host: QunoHost): Promise<QunoWireState> {
   if (quno === undefined) throw new Error('quno row is not provisioned')
   const now = Date.now()
   const live = host.mainAgent() !== undefined
-  const health = host.senses.healthSnapshot()
+  const health = host.collectors.healthSnapshot()
   const clock = localClock(now, quno.config.timeZone)
   const midnight = zonedToEpoch(clock.dayKey, 0, quno.config.timeZone)
   const attention = store.listAttention(host.qunoId, undefined, 100)
@@ -53,13 +53,13 @@ export async function buildQunoState(host: QunoHost): Promise<QunoWireState> {
     id: source.id,
     instanceId: source.instanceId,
     type: source.type,
-    lastEventAt: store.listSenseInstances(host.qunoId).find(instance => instance.id === source.instanceId)?.lastEventAt ?? null,
+    lastEventAt: store.listCollectorInstances(host.qunoId).find(instance => instance.id === source.instanceId)?.lastEventAt ?? null,
   }))
-  const senses: SenseWire[] = health.types.flatMap(view => view.instances.map(instance => ({
+  const collectors: CollectorWire[] = health.types.flatMap(view => view.instances.map(instance => ({
     id: instance.id,
     type: instance.type,
     label: instance.label,
-    ...maskSenseConfig(instance.config, view.definition.configFields ?? []),
+    ...maskCollectorConfig(instance.config, view.definition.configFields ?? []),
     configRevision: instance.configRevision,
     desiredState: instance.desiredState,
     lifecycle: instance.lifecycle,
@@ -84,7 +84,7 @@ export async function buildQunoState(host: QunoHost): Promise<QunoWireState> {
     configFields: (view.definition.configFields ?? []).map(toFieldWire),
   })))
 
-  const senseTypes: SenseTypeWire[] = health.types.map(view => toSenseTypeWire(view, host))
+  const collectorTypes: CollectorTypeWire[] = health.types.map(view => toCollectorTypeWire(view, host))
 
   const tickets = repo.listTickets(host.qunoId, { limit: 50 })
   const effects = repo.listDueEffects(now, 200)
@@ -114,8 +114,8 @@ export async function buildQunoState(host: QunoHost): Promise<QunoWireState> {
     },
     config: quno.config,
     main: { sessionId: quno.mainSessionId, state: quno.mainSessionState, live },
-    senses,
-    senseTypes,
+    collectors,
+    collectorTypes,
     sources,
     gaps: health.gaps,
     attention: attention.map(toAttentionWire),
@@ -205,7 +205,7 @@ export async function buildEventDetail(host: QunoHost, eventId: string): Promise
   const source = host.store.listSources(host.qunoId).find(candidate => candidate.id === event.sourceId)
   const instance = source === undefined
     ? undefined
-    : host.store.listSenseInstances(host.qunoId).find(candidate => candidate.id === source.instanceId)
+    : host.store.listCollectorInstances(host.qunoId).find(candidate => candidate.id === source.instanceId)
   const serialized = event.prunedAt === null ? safeJson(event.data) : null
   return {
     id: event.id,
@@ -473,7 +473,7 @@ function readAttachments(data: unknown): readonly { readonly name: string; reado
 }
 
 /** Secret values never leave the Host; the UI only learns which keys are set. */
-export function maskSenseConfig(config: Record<string, unknown>, fields: readonly { readonly key: string; readonly secret?: boolean }[]): {
+export function maskCollectorConfig(config: Record<string, unknown>, fields: readonly { readonly key: string; readonly secret?: boolean }[]): {
   readonly config: Record<string, unknown>
   readonly secretSet: readonly string[]
 } {
@@ -496,7 +496,7 @@ export function maskSenseConfig(config: Record<string, unknown>, fields: readonl
   return { config: masked, secretSet }
 }
 
-function toFieldWire(field: NonNullable<SenseDefinition['configFields']>[number]): SenseFieldWire {
+function toFieldWire(field: NonNullable<CollectorDefinition['configFields']>[number]): CollectorFieldWire {
   return {
     key: field.key,
     label: field.label,
@@ -516,10 +516,10 @@ function toFieldWire(field: NonNullable<SenseDefinition['configFields']>[number]
   }
 }
 
-function toSenseTypeWire(
-  view: { readonly definition: SenseDefinition },
+function toCollectorTypeWire(
+  view: { readonly definition: CollectorDefinition },
   host: QunoHost,
-): SenseTypeWire {
+): CollectorTypeWire {
   const definition = view.definition
   return {
     type: definition.type,
@@ -527,19 +527,17 @@ function toSenseTypeWire(
     description: definition.description,
     implementationVersion: definition.implementationVersion,
     contractVersion: definition.contractVersion,
-    registered: host.senses === undefined ? true : true,
+    registered: host.collectors === undefined ? true : true,
     configFields: (definition.configFields ?? []).map(toFieldWire),
-    runtime: {
-      modes: definition.runtime.modes,
-      defaultIntervalSec: definition.runtime.defaultIntervalSec,
-      minIntervalSec: definition.runtime.minIntervalSec,
-      concurrency: definition.runtime.concurrency,
-      timeoutMs: definition.runtime.timeoutMs,
-      quotas: definition.runtime.quotas === undefined
+    schedule: {
+      defaultIntervalSec: definition.schedule.defaultIntervalSec,
+      minIntervalSec: definition.schedule.minIntervalSec,
+      maxRunMs: definition.schedule.maxRunMs,
+      quotas: definition.schedule.quotas === undefined
         ? null
         : {
-          maxEventsPerCheck: definition.runtime.quotas.maxEventsPerCheck ?? null,
-          maxBytesPerCheck: definition.runtime.quotas.maxBytesPerCheck ?? null,
+          maxEventsPerRun: definition.schedule.quotas.maxEventsPerRun ?? null,
+          maxBytesPerRun: definition.schedule.quotas.maxBytesPerRun ?? null,
         },
     },
     permissions: {

@@ -25,7 +25,7 @@ export type AssignmentId = string
 export type RunId = string
 /** One asynchronous paired exchange. */
 export type ExchangeId = string
-/** A durable logical endpoint (`quno:<id>/router`, `ticket:<id>`, `organ:<id>`). */
+/** A durable logical endpoint (`quno:<id>/router`, `ticket:<id>`, `collector:<id>`). */
 export type EndpointId = string
 /** Stable identity of one eval batch. */
 export type EvalId = string
@@ -142,7 +142,7 @@ export type ThreadResolution =
   | { readonly status: 'unresolved'; readonly reason: string }
 
 /** The optional context/read capabilities of one Organ implementation. */
-export interface OrganCapabilities {
+export interface QueryCapabilities {
   resolveThreads?(event: ParsedEventEnvelope): ThreadResolution
   readOriginal?(request: {
     readonly triggerId: TriggerId
@@ -605,8 +605,8 @@ export function ticketEndpoint(ticketId: TicketId): EndpointId {
 }
 
 /** Canonical endpoint name for one Organ instance. */
-export function organEndpoint(instanceId: string): EndpointId {
-  return `organ:${instanceId}`
+export function collectorEndpoint(instanceId: string): EndpointId {
+  return `collector:${instanceId}`
 }
 
 /** Stable Ticket id derived from an accepted Eval (repeated accepts return the same Ticket). */

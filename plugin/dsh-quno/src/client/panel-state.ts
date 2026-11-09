@@ -183,10 +183,10 @@ export function runTriggerKey(trigger: string): QunoLocaleKey | undefined {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────── senses
+// ─────────────────────────────────────────────────────────────────── collectors
 
 /** One source row's single, highest-priority state. */
-export type SenseRowState =
+export type CollectorRowState =
   | 'auth-required'
   | 'unavailable'
   | 'rate-limited'
@@ -198,8 +198,8 @@ export type SenseRowState =
   | 'syncing'
   | 'ok'
 
-/** Minimal Sense slice the row state needs. */
-export interface SenseRowInput {
+/** Minimal Collector slice the row state needs. */
+export interface CollectorRowInput {
   readonly desiredState: string
   readonly lifecycle: string
   readonly health: string
@@ -212,38 +212,38 @@ export interface SenseRowInput {
  * shows, in the documented priority order: auth/unavailable, then
  * rate-limited/degraded, then paused/disabled, then starting, then stale, then
  * "never synced", then healthy.
- * @param sense - the wire instance slice.
+ * @param collectors - the wire instance slice.
  * @returns the single row state.
  */
-export function senseRowState(sense: SenseRowInput): SenseRowState {
-  if (sense.health === 'auth-required' || sense.health === 'unavailable') return sense.health
-  if (sense.health === 'rate-limited' || sense.health === 'degraded') return sense.health
-  if (sense.desiredState === 'paused') return 'paused'
-  if (sense.desiredState === 'disabled') return 'disabled'
-  if (sense.lifecycle === 'starting') return 'starting'
-  if (sense.stale) return 'stale'
-  if (sense.lastSuccessAt === null) return 'syncing'
+export function collectorRowState(collectors: CollectorRowInput): CollectorRowState {
+  if (collectors.health === 'auth-required' || collectors.health === 'unavailable') return collectors.health
+  if (collectors.health === 'rate-limited' || collectors.health === 'degraded') return collectors.health
+  if (collectors.desiredState === 'paused') return 'paused'
+  if (collectors.desiredState === 'disabled') return 'disabled'
+  if (collectors.lifecycle === 'starting') return 'starting'
+  if (collectors.stale) return 'stale'
+  if (collectors.lastSuccessAt === null) return 'syncing'
   return 'ok'
 }
 
 /** Locale key of one row state. */
-export function senseRowKey(state: SenseRowState): QunoLocaleKey {
+export function collectorRowKey(state: CollectorRowState): QunoLocaleKey {
   switch (state) {
-    case 'auth-required': return 'panelSenseAuthRequired'
-    case 'unavailable': return 'panelSenseUnavailable'
-    case 'rate-limited': return 'panelSenseRateLimited'
-    case 'degraded': return 'panelSenseDegraded'
-    case 'paused': return 'panelSensePaused'
-    case 'disabled': return 'panelSenseDisabled'
-    case 'starting': return 'panelSenseStarting'
-    case 'stale': return 'panelSenseStale'
-    case 'syncing': return 'panelSenseSyncing'
-    case 'ok': return 'panelSenseHealthy'
+    case 'auth-required': return 'panelCollectorAuthRequired'
+    case 'unavailable': return 'panelCollectorUnavailable'
+    case 'rate-limited': return 'panelCollectorRateLimited'
+    case 'degraded': return 'panelCollectorDegraded'
+    case 'paused': return 'panelCollectorPaused'
+    case 'disabled': return 'panelCollectorDisabled'
+    case 'starting': return 'panelCollectorStarting'
+    case 'stale': return 'panelCollectorStale'
+    case 'syncing': return 'panelCollectorSyncing'
+    case 'ok': return 'panelCollectorHealthy'
   }
 }
 
 /** Row tone of one row state. */
-export function senseRowTone(state: SenseRowState): Tone {
+export function collectorRowTone(state: CollectorRowState): Tone {
   switch (state) {
     case 'auth-required':
     case 'unavailable': return 'error'
@@ -259,7 +259,7 @@ export function senseRowTone(state: SenseRowState): Tone {
 }
 
 /** Page-level state of the 动态 tab. */
-export type SensePageState =
+export type CollectorPageState =
   | 'loading'
   | 'load-failed'
   | 'install-guide'
@@ -270,7 +270,7 @@ export type SensePageState =
   | 'list'
 
 /** Inputs of the 动态 page-state decision. */
-export interface SensePageInput {
+export interface CollectorPageInput {
   readonly phase: 'idle' | 'loading' | 'ready' | 'error'
   readonly hasState: boolean
   readonly instanceCount: number
@@ -291,7 +291,7 @@ export interface SensePageInput {
  * @param input - the state slices.
  * @returns the page discriminator.
  */
-export function sensePageState(input: SensePageInput): SensePageState {
+export function collectorPageState(input: CollectorPageInput): CollectorPageState {
   if (!input.hasState) return input.phase === 'error' ? 'load-failed' : 'loading'
   if (input.instanceCount === 0) return input.typeCount === 0 ? 'install-guide' : 'first-connect'
   if (input.enabledCount === 0) return 'all-paused'
@@ -300,26 +300,26 @@ export function sensePageState(input: SensePageInput): SensePageState {
   return 'list'
 }
 
-/** Whether a source's Sense declared that the original payload stays readable. */
+/** Whether a source's Collector declared that the original payload stays readable. */
 export function sourceReadsOriginal(
   state: {
     readonly sources: readonly { readonly id: string; readonly type: string }[]
-    readonly senseTypes: readonly { readonly type: string; readonly reliability: { readonly readOriginal: boolean } | null }[]
+    readonly collectorTypes: readonly { readonly type: string; readonly reliability: { readonly readOriginal: boolean } | null }[]
   },
   sourceId: string | undefined,
 ): boolean {
   if (sourceId === undefined) return false
   const source = state.sources.find(candidate => candidate.id === sourceId)
   if (source === undefined) return false
-  const type = state.senseTypes.find(candidate => candidate.type === source.type)
+  const type = state.collectorTypes.find(candidate => candidate.type === source.type)
   return type?.reliability?.readOriginal === true
 }
 
 /** Minimal slices needed to turn wire ids into human names. */
 export interface NameLookupState {
   readonly sources: readonly { readonly id: string; readonly instanceId: string; readonly type: string }[]
-  readonly senses: readonly { readonly id: string; readonly label: string; readonly type: string }[]
-  readonly senseTypes: readonly { readonly type: string; readonly displayName: string }[]
+  readonly collectors: readonly { readonly id: string; readonly label: string; readonly type: string }[]
+  readonly collectorTypes: readonly { readonly type: string; readonly displayName: string }[]
 }
 
 /**
@@ -334,19 +334,19 @@ export function sourceDisplayName(state: NameLookupState, sourceId: string | und
   if (sourceId === undefined) return undefined
   const source = state.sources.find(candidate => candidate.id === sourceId)
   if (source === undefined) return undefined
-  const instance = state.senses.find(candidate => candidate.id === source.instanceId)
+  const instance = state.collectors.find(candidate => candidate.id === source.instanceId)
   if (instance !== undefined && instance.label !== '') return instance.label
-  const type = state.senseTypes.find(candidate => candidate.type === source.type)
+  const type = state.collectorTypes.find(candidate => candidate.type === source.type)
   return type?.displayName ?? source.type
 }
 
-/** The readable name of one Sense instance, falling back to its type. */
+/** The readable name of one Collector instance, falling back to its type. */
 export function instanceDisplayName(state: NameLookupState, instanceId: string | undefined): string | undefined {
   if (instanceId === undefined) return undefined
-  const instance = state.senses.find(candidate => candidate.id === instanceId)
+  const instance = state.collectors.find(candidate => candidate.id === instanceId)
   if (instance === undefined) return undefined
   if (instance.label !== '') return instance.label
-  return state.senseTypes.find(candidate => candidate.type === instance.type)?.displayName ?? instance.type
+  return state.collectorTypes.find(candidate => candidate.type === instance.type)?.displayName ?? instance.type
 }
 
 /** Delivery counts that deserve a callout on the 运行 page. */

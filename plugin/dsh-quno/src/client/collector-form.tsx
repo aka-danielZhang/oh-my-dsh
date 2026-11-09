@@ -1,5 +1,5 @@
 /**
- * Declaration-driven Sense configuration: turns `SenseConfigField[]` into a
+ * Declaration-driven Collector configuration: turns `CollectorConfigField[]` into a
  * real form (numbers with bounds, booleans, static choices, string lists, and
  * remotely discovered options) instead of asking the user to write JSON.
  *
@@ -7,26 +7,26 @@
  * and surfaces the Host's rejection verbatim; it never "fixes" a cross-field
  * rule locally (the calendar's file/directory choice is the canonical case).
  *
- * @module dsh-quno/client/sense-form
+ * @module dsh-quno/client/collector-form
  */
 
 import React from 'react'
 import { Button, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { QunoLocaleKey } from './locales.ts'
 import type { QunoClientStore } from './store.ts'
-import type { SenseFieldWire, SenseOptionWire } from '../api-types.ts'
+import type { CollectorFieldWire, CollectorOptionWire } from '../api-types.ts'
 import { format } from './locales.ts'
 import { parseJsonObject } from './format.ts'
 import { ErrorBanner, Field, Select, TextArea, TextInput } from './ui.tsx'
 
 /** Injected face of the form. */
-export interface SenseFormInjected {
+export interface CollectorFormInjected {
   readonly store: QunoClientStore
   readonly t: (key: QunoLocaleKey, params?: Record<string, string | number>) => string
 }
 
 /** Build the initial draft from declared defaults (unknown values stay absent). */
-export function initialSenseConfig(fields: readonly SenseFieldWire[]): Record<string, unknown> {
+export function initialCollectorConfig(fields: readonly CollectorFieldWire[]): Record<string, unknown> {
   const config: Record<string, unknown> = {}
   for (const field of fields) {
     if (field.defaultValue !== undefined) {
@@ -40,10 +40,10 @@ export function initialSenseConfig(fields: readonly SenseFieldWire[]): Record<st
   return config
 }
 
-/** Props of one Sense form body (create and edit share it). */
-export interface SenseFormProps extends SenseFormInjected {
+/** Props of one Collector form body (create and edit share it). */
+export interface CollectorFormProps extends CollectorFormInjected {
   readonly type: string
-  readonly fields: readonly SenseFieldWire[]
+  readonly fields: readonly CollectorFieldWire[]
   readonly config: Record<string, unknown>
   readonly onChange: (next: Record<string, unknown>) => void
   readonly label?: string
@@ -52,13 +52,13 @@ export interface SenseFormProps extends SenseFormInjected {
 }
 
 /** Render the whole configured form (basic fields, advanced group, raw JSON). */
-export function SenseForm(props: SenseFormProps): React.ReactElement {
+export function CollectorForm(props: CollectorFormProps): React.ReactElement {
   const { fields, config, onChange, t, disabled } = props
   const [rawMode, setRawMode] = React.useState(fields.length === 0)
   const [rawText, setRawText] = React.useState(() => JSON.stringify(config, null, 2))
   const [rawError, setRawError] = React.useState<string | null>(null)
 
-  // Switching the Sense type re-seeds the raw editor; typing inside one type
+  // Switching the Collector type re-seeds the raw editor; typing inside one type
   // never fights the incoming props.
   React.useEffect(() => {
     setRawText(JSON.stringify(props.config, null, 2))
@@ -85,7 +85,7 @@ export function SenseForm(props: SenseFormProps): React.ReactElement {
   return (
     <div style={styles.stack}>
       {props.onLabelChange !== undefined && (
-        <Field label={t('senseLabel')}>
+        <Field label={t('collectorLabel')}>
           <TextInput
             value={props.label ?? ''}
             disabled={disabled}
@@ -120,7 +120,7 @@ export function SenseForm(props: SenseFormProps): React.ReactElement {
           <>
             <div style={styles.grid}>
               {basic.map(field => (
-                <SenseFieldControl
+                <CollectorFieldControl
                   key={field.key}
                   {...props}
                   field={field}
@@ -136,7 +136,7 @@ export function SenseForm(props: SenseFormProps): React.ReactElement {
                 <summary style={styles.summary}>{t('onboardingOptionalAdvanced')}</summary>
                 <div style={styles.grid}>
                   {advanced.map(field => (
-                    <SenseFieldControl
+                    <CollectorFieldControl
                       key={field.key}
                       {...props}
                       field={field}
@@ -162,8 +162,8 @@ export function SenseForm(props: SenseFormProps): React.ReactElement {
   )
 }
 
-function SenseFieldControl(props: SenseFormProps & {
-  readonly field: SenseFieldWire
+function CollectorFieldControl(props: CollectorFormProps & {
+  readonly field: CollectorFieldWire
   readonly value: unknown
   readonly disabled: boolean
   readonly onValue: (value: unknown) => void
@@ -293,7 +293,7 @@ function SenseFieldControl(props: SenseFormProps & {
  * unset, stored-and-unchanged, about-to-be-replaced, about-to-be-cleared.
  */
 function SecretField(props: {
-  readonly field: SenseFieldWire
+  readonly field: CollectorFieldWire
   /** `null` means a value is stored but never sent to the browser. */
   readonly value: string | null
   readonly hint: string | undefined
@@ -372,7 +372,7 @@ function secretPhaseKey(phase: 'unset' | 'keep' | 'replace' | 'clear'): QunoLoca
 }
 
 /**
- * Multi/single choice backed by the Sense's own option discovery. Each request
+ * Multi/single choice backed by the Collector's own option discovery. Each request
  * is keyed by type + field + draft config + page; an answer whose key is no
  * longer current is dropped instead of overwriting newer options.
  */
@@ -380,7 +380,7 @@ function OptionPicker(props: {
   readonly store: QunoClientStore
   readonly t: (key: QunoLocaleKey, params?: Record<string, string | number>) => string
   readonly type: string
-  readonly field: SenseFieldWire
+  readonly field: CollectorFieldWire
   readonly config: Record<string, unknown>
   readonly value: unknown
   readonly disabled: boolean
@@ -393,7 +393,7 @@ function OptionPicker(props: {
     return []
   }, [props.value])
   const [open, setOpen] = React.useState(false)
-  const [options, setOptions] = React.useState<readonly SenseOptionWire[]>([])
+  const [options, setOptions] = React.useState<readonly CollectorOptionWire[]>([])
   const [page, setPage] = React.useState(1)
   const [more, setMore] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
@@ -419,7 +419,7 @@ function OptionPicker(props: {
     setBusy(true)
     setError(null)
     try {
-      const result = await props.store.listSenseOptions({
+      const result = await props.store.listCollectorOptions({
         type: props.type,
         field: props.field.key,
         config: props.config,
@@ -550,7 +550,7 @@ function OptionPicker(props: {
   )
 }
 
-function mergeOptions(previous: readonly SenseOptionWire[], next: readonly SenseOptionWire[]): readonly SenseOptionWire[] {
+function mergeOptions(previous: readonly CollectorOptionWire[], next: readonly CollectorOptionWire[]): readonly CollectorOptionWire[] {
   const seen = new Set(previous.map(option => option.value))
   return [...previous, ...next.filter(option => !seen.has(option.value))]
 }

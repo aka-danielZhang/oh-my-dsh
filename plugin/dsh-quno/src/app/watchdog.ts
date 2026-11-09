@@ -74,7 +74,7 @@ export class Watchdog {
       findings.push({
         code: 'effect-failing',
         severity: 'error',
-        detail: '有连续失败三次以上的 Effect；检查主对话/Executor 可达性与器官能力声明',
+        detail: '有连续失败三次以上的 Effect；检查主对话/Executor 可达性与采集器能力声明',
         count: failing.length,
       })
     }

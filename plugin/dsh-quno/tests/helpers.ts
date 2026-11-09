@@ -61,14 +61,14 @@ export function openFixture(config: Partial<QunoConfig> = {}): Fixture {
   return { root, store, now }
 }
 
-/** Register a Sense instance and its stable source. */
-export function addSense(fixture: Fixture, type = 'test/calendar', patch: Partial<{
+/** Register a Collector instance and its stable source. */
+export function addCollector(fixture: Fixture, type = 'test/calendar', patch: Partial<{
   config: Record<string, unknown>
   desiredState: 'enabled' | 'paused' | 'disabled'
   id: string
 }> = {}) {
   const id = patch.id ?? `sense_${Math.random().toString(36).slice(2)}`
-  const instance = fixture.store.insertSenseInstance({
+  const instance = fixture.store.insertCollectorInstance({
     id,
     qunoId: 'quno',
     type,

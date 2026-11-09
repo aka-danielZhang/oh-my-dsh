@@ -39,14 +39,14 @@ import type {
   RunOutput,
   RunRecord,
   RunStatus,
-  SenseCheckpoint,
-  SenseDesiredState,
-  SenseHealthDetail,
-  SenseHealthState,
-  SenseInstanceId,
-  SenseInstanceRecord,
-  SenseLifecycle,
-  SenseTypeRecord,
+  CollectorCheckpoint,
+  CollectorDesiredState,
+  CollectorHealthDetail,
+  CollectorHealthState,
+  CollectorInstanceId,
+  CollectorInstanceRecord,
+  CollectorLifecycle,
+  CollectorTypeRecord,
   SourceId,
   SourceRecord,
   SubscriptionFilter,
@@ -60,7 +60,7 @@ import type {
 import { newId, safeJsonParse } from './util.ts'
 
 /** Current schema version; bump with a migration entry when the shape changes. */
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 /** One process's write ownership over a Quno data directory. */
 const LOCK_FILE = 'quno.lock'
@@ -167,7 +167,7 @@ export interface StoredBatch {
 const EVENT_COLUMNS = `id, source_id, event_key, subject_key, subject_revision, type, schema, operation,
   occurred_at, observed_at, received_at, ingest_seq, summary, data_json, priority, deadline,
   provenance_json, correlation_keys_json, supersedes_json, parents_json, content_hash,
-  sense_config_revision, expires_at, pruned_at`
+  collector_config_revision, expires_at, pruned_at`
 
 const ATTENTION_COLUMNS = `id, quno_id, topic_key, title, summary, status, revision, material_revision,
   subject_refs_json, evidence_json, next_review_at, snoozed_until, created_at, updated_at`
@@ -294,7 +294,7 @@ export class QunoStore {
   /** Schema v2: per-entry checkpoint storage for `checkpoint-entries/v1`. */
   private createV2(_now: number): void {
     this.requireDb().exec(`
-      CREATE TABLE sense_checkpoint_entries (
+      CREATE TABLE collector_checkpoint_entries (
         instance_id TEXT NOT NULL,
         entry_key TEXT NOT NULL,
         value_json TEXT NOT NULL,
@@ -701,7 +701,7 @@ export class QunoStore {
   /** Count one instance's keyed checkpoint entries. */
   countCheckpointEntries(instanceId: string): number {
     const row = this.requireDb()
-      .prepare('SELECT COUNT(*) AS n FROM sense_checkpoint_entries WHERE instance_id = ?')
+      .prepare('SELECT COUNT(*) AS n FROM collector_checkpoint_entries WHERE instance_id = ?')
       .get(instanceId) as { n?: number } | undefined
     return row?.n ?? 0
   }
@@ -714,10 +714,10 @@ export class QunoStore {
     const limit = Math.min(500, Math.max(1, Math.trunc(request.limit ?? 200)))
     const rows = request.afterKey !== undefined
       ? this.requireDb()
-        .prepare('SELECT entry_key AS key, value_json AS value FROM sense_checkpoint_entries WHERE instance_id = ? AND entry_key > ? ORDER BY entry_key LIMIT ?')
+        .prepare('SELECT entry_key AS key, value_json AS value FROM collector_checkpoint_entries WHERE instance_id = ? AND entry_key > ? ORDER BY entry_key LIMIT ?')
         .all(instanceId, request.afterKey, limit) as { key: string; value: string }[]
       : this.requireDb()
-        .prepare('SELECT entry_key AS key, value_json AS value FROM sense_checkpoint_entries WHERE instance_id = ? ORDER BY entry_key LIMIT ?')
+        .prepare('SELECT entry_key AS key, value_json AS value FROM collector_checkpoint_entries WHERE instance_id = ? ORDER BY entry_key LIMIT ?')
         .all(instanceId, limit) as { key: string; value: string }[]
     return rows
   }
@@ -725,7 +725,7 @@ export class QunoStore {
   /** Read one entry, or undefined. */
   getCheckpointEntry(instanceId: string, key: string): { key: string; value: string } | undefined {
     const row = this.requireDb()
-      .prepare('SELECT entry_key AS key, value_json AS value FROM sense_checkpoint_entries WHERE instance_id = ? AND entry_key = ?')
+      .prepare('SELECT entry_key AS key, value_json AS value FROM collector_checkpoint_entries WHERE instance_id = ? AND entry_key = ?')
       .get(instanceId, key) as { key: string; value: string } | undefined
     return row
   }
@@ -741,8 +741,8 @@ export class QunoStore {
     readonly deletes?: readonly string[]
   }, now: number, capacity: number): { applied: number; deleted: number } {
     const db = this.requireDb()
-    const put = db.prepare('INSERT OR REPLACE INTO sense_checkpoint_entries (instance_id, entry_key, value_json, updated_at) VALUES (?, ?, ?, ?)')
-    const del = db.prepare('DELETE FROM sense_checkpoint_entries WHERE instance_id = ? AND entry_key = ?')
+    const put = db.prepare('INSERT OR REPLACE INTO collector_checkpoint_entries (instance_id, entry_key, value_json, updated_at) VALUES (?, ?, ?, ?)')
+    const del = db.prepare('DELETE FROM collector_checkpoint_entries WHERE instance_id = ? AND entry_key = ?')
     let applied = 0
     let deleted = 0
     if (patch.deletes !== undefined) {
@@ -774,6 +774,7 @@ export class QunoStore {
       if (version < 1) this.createV1(now)
       if (version < 2) this.createV2(now)
       if (version < 3) this.createV3(now)
+      if (version < 4) this.createV4()
       db.exec(`PRAGMA user_version = ${String(SCHEMA_VERSION)}`)
       db.exec('COMMIT')
     } catch (error) {
@@ -783,6 +784,33 @@ export class QunoStore {
         // ignore
       }
       throw error
+    }
+  }
+
+  /**
+   * Schema v4: the Collector rename. The four Sense-era tables take their
+   * domain names (`collector_*`) and `events.sense_config_revision` becomes
+   * `events.collector_config_revision`. Pure identity-preserving RENAMEs:
+   * instance ids (`sense-<ts>-<rand>`), batch receipts, checkpoints and every
+   * stored row keep their values, so existing data is never rewritten.
+   */
+  private createV4(): void {
+    const db = this.requireDb()
+    const tables = new Set(
+      (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map(row => row.name),
+    )
+    const renames: readonly (readonly [string, string])[] = [
+      ['sense_types', 'collector_types'],
+      ['sense_instances', 'collector_instances'],
+      ['sense_batches', 'collector_batches'],
+      ['sense_checkpoint_entries', 'collector_checkpoint_entries'],
+    ]
+    for (const [from, to] of renames) {
+      if (tables.has(from) && !tables.has(to)) db.exec(`ALTER TABLE ${from} RENAME TO ${to}`)
+    }
+    const columns = (db.prepare('PRAGMA table_info(events)').all() as { name: string }[]).map(row => row.name)
+    if (columns.includes('sense_config_revision')) {
+      db.exec('ALTER TABLE events RENAME COLUMN sense_config_revision TO collector_config_revision')
     }
   }
 
@@ -807,7 +835,7 @@ export class QunoStore {
         updated_at INTEGER NOT NULL
       );
 
-      CREATE TABLE sense_types (
+      CREATE TABLE collector_types (
         type TEXT PRIMARY KEY,
         contract_version INTEGER NOT NULL,
         implementation_version TEXT NOT NULL,
@@ -815,7 +843,7 @@ export class QunoStore {
         registered_at INTEGER NOT NULL
       );
 
-      CREATE TABLE sense_instances (
+      CREATE TABLE collector_instances (
         id TEXT PRIMARY KEY,
         quno_id TEXT NOT NULL,
         type TEXT NOT NULL,
@@ -839,7 +867,7 @@ export class QunoStore {
         updated_at INTEGER NOT NULL,
         FOREIGN KEY (quno_id) REFERENCES qunos(id)
       );
-      CREATE INDEX sense_instances_quno ON sense_instances(quno_id, type);
+      CREATE INDEX collector_instances_quno ON collector_instances(quno_id, type);
 
       CREATE TABLE sources (
         id TEXT PRIMARY KEY,
@@ -851,7 +879,7 @@ export class QunoStore {
         UNIQUE (instance_id)
       );
 
-      CREATE TABLE sense_batches (
+      CREATE TABLE collector_batches (
         id TEXT PRIMARY KEY,
         source_id TEXT NOT NULL,
         generation INTEGER NOT NULL,
@@ -888,7 +916,7 @@ export class QunoStore {
         supersedes_json TEXT,
         parents_json TEXT,
         content_hash TEXT NOT NULL,
-        sense_config_revision INTEGER NOT NULL,
+        collector_config_revision INTEGER NOT NULL,
         expires_at INTEGER,
         pruned_at INTEGER,
         UNIQUE (source_id, event_key)
@@ -1165,11 +1193,11 @@ export class QunoStore {
     this.requireDb().prepare('UPDATE qunos SET muted_until = ?, updated_at = ? WHERE id = ?').run(until, now, id)
   }
 
-  // ---------------------------------------------------------------- senses
+  // ---------------------------------------------------------------- collectors
 
-  /** Register (or refresh) a Sense type declaration. */
-  upsertSenseType(record: SenseTypeRecord): void {
-    this.requireDb().prepare(`INSERT INTO sense_types (type, contract_version, implementation_version,
+  /** Register (or refresh) a Collector type declaration. */
+  upsertCollectorType(record: CollectorTypeRecord): void {
+    this.requireDb().prepare(`INSERT INTO collector_types (type, contract_version, implementation_version,
       definition_json, registered_at) VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(type) DO UPDATE SET contract_version = excluded.contract_version,
         implementation_version = excluded.implementation_version,
@@ -1178,14 +1206,14 @@ export class QunoStore {
     )
   }
 
-  /** Remove a Sense type when its plugin unregisters. Instances stay for history. */
-  deleteSenseType(type: string): void {
-    this.requireDb().prepare('DELETE FROM sense_types WHERE type = ?').run(type)
+  /** Remove a Collector type when its plugin unregisters. Instances stay for history. */
+  deleteCollectorType(type: string): void {
+    this.requireDb().prepare('DELETE FROM collector_types WHERE type = ?').run(type)
   }
 
-  /** All registered Sense types. */
-  listSenseTypes(): SenseTypeRecord[] {
-    const rows = this.requireDb().prepare('SELECT * FROM sense_types ORDER BY type').all() as Record<string, unknown>[]
+  /** All registered Collector types. */
+  listCollectorTypes(): CollectorTypeRecord[] {
+    const rows = this.requireDb().prepare('SELECT * FROM collector_types ORDER BY type').all() as Record<string, unknown>[]
     return rows.map(row => ({
       type: String(row['type']),
       contractVersion: asNumber(row['contract_version']),
@@ -1195,46 +1223,46 @@ export class QunoStore {
     }))
   }
 
-  /** Insert one Sense instance configuration. */
-  insertSenseInstance(input: {
-    readonly id: SenseInstanceId
+  /** Insert one Collector instance configuration. */
+  insertCollectorInstance(input: {
+    readonly id: CollectorInstanceId
     readonly qunoId: QunoId
     readonly type: string
     readonly label: string
     readonly config: Record<string, unknown>
-    readonly desiredState: SenseDesiredState
+    readonly desiredState: CollectorDesiredState
     readonly now: number
-  }): SenseInstanceRecord {
-    this.requireDb().prepare(`INSERT INTO sense_instances (id, quno_id, type, label, config_json,
+  }): CollectorInstanceRecord {
+    this.requireDb().prepare(`INSERT INTO collector_instances (id, quno_id, type, label, config_json,
       desired_state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
       input.id, input.qunoId, input.type, input.label, json(input.config), input.desiredState, input.now, input.now,
     )
-    return this.getSenseInstance(input.id)
+    return this.getCollectorInstance(input.id)
   }
 
-  /** Read one Sense instance. */
-  getSenseInstance(id: SenseInstanceId): SenseInstanceRecord {
-    const row = this.requireDb().prepare('SELECT * FROM sense_instances WHERE id = ?').get(id) as Record<string, unknown> | undefined
-    if (row === undefined) throw new Error(`sense instance "${id}" does not exist`)
-    return mapSenseInstance(row)
+  /** Read one Collector instance. */
+  getCollectorInstance(id: CollectorInstanceId): CollectorInstanceRecord {
+    const row = this.requireDb().prepare('SELECT * FROM collector_instances WHERE id = ?').get(id) as Record<string, unknown> | undefined
+    if (row === undefined) throw new Error(`collectors instance "${id}" does not exist`)
+    return mapCollectorInstance(row)
   }
 
-  /** All Sense instances for one Quno. */
-  listSenseInstances(qunoId: QunoId): SenseInstanceRecord[] {
-    const rows = this.requireDb().prepare('SELECT * FROM sense_instances WHERE quno_id = ? ORDER BY created_at').all(qunoId) as Record<string, unknown>[]
-    return rows.map(mapSenseInstance)
+  /** All Collector instances for one Quno. */
+  listCollectorInstances(qunoId: QunoId): CollectorInstanceRecord[] {
+    const rows = this.requireDb().prepare('SELECT * FROM collector_instances WHERE quno_id = ? ORDER BY created_at').all(qunoId) as Record<string, unknown>[]
+    return rows.map(mapCollectorInstance)
   }
 
   /** Patch an instance row. Generation changes are explicit ({@link bumpGeneration}). */
-  updateSenseInstance(id: SenseInstanceId, patch: {
+  updateCollectorInstance(id: CollectorInstanceId, patch: {
     readonly label?: string
     readonly config?: Record<string, unknown>
     readonly configRevision?: number
-    readonly desiredState?: SenseDesiredState
-    readonly lifecycle?: SenseLifecycle
-    readonly health?: SenseHealthState
-    readonly healthDetail?: SenseHealthDetail | null
-    readonly checkpoint?: SenseCheckpoint
+    readonly desiredState?: CollectorDesiredState
+    readonly lifecycle?: CollectorLifecycle
+    readonly health?: CollectorHealthState
+    readonly healthDetail?: CollectorHealthDetail | null
+    readonly checkpoint?: CollectorCheckpoint
     readonly lastAttemptAt?: number | null
     readonly lastSuccessAt?: number | null
     readonly lastEventAt?: number | null
@@ -1242,8 +1270,8 @@ export class QunoStore {
     readonly consecutiveFailures?: number
     readonly errorCode?: string | null
     readonly now: number
-  }): SenseInstanceRecord {
-    const current = this.getSenseInstance(id)
+  }): CollectorInstanceRecord {
+    const current = this.getCollectorInstance(id)
     const next = {
       label: patch.label ?? current.label,
       config: patch.config ?? current.config,
@@ -1260,7 +1288,7 @@ export class QunoStore {
       consecutiveFailures: patch.consecutiveFailures ?? current.consecutiveFailures,
       errorCode: patch.errorCode === undefined ? current.errorCode : patch.errorCode,
     }
-    this.requireDb().prepare(`UPDATE sense_instances SET label = ?, config_json = ?, config_revision = ?,
+    this.requireDb().prepare(`UPDATE collector_instances SET label = ?, config_json = ?, config_revision = ?,
       desired_state = ?, lifecycle = ?, health = ?, health_json = ?, checkpoint_json = ?,
       checkpoint_revision = ?, last_attempt_at = ?, last_success_at = ?, last_event_at = ?,
       next_retry_at = ?, consecutive_failures = ?, error_code = ?, updated_at = ? WHERE id = ?`).run(
@@ -1269,24 +1297,24 @@ export class QunoStore {
       next.checkpoint.revision, next.lastAttemptAt, next.lastSuccessAt, next.lastEventAt, next.nextRetryAt,
       next.consecutiveFailures, next.errorCode, patch.now, id,
     )
-    return this.getSenseInstance(id)
+    return this.getCollectorInstance(id)
   }
 
   /** Start a new writable generation for one instance and return it. */
-  bumpGeneration(id: SenseInstanceId, now: number): number {
+  bumpGeneration(id: CollectorInstanceId, now: number): number {
     const db = this.requireDb()
-    db.prepare('UPDATE sense_instances SET generation = generation + 1, updated_at = ? WHERE id = ?').run(now, id)
-    const row = db.prepare('SELECT generation FROM sense_instances WHERE id = ?').get(id) as { generation?: number } | undefined
+    db.prepare('UPDATE collector_instances SET generation = generation + 1, updated_at = ? WHERE id = ?').run(now, id)
+    const row = db.prepare('SELECT generation FROM collector_instances WHERE id = ?').get(id) as { generation?: number } | undefined
     return asNumber(row?.generation ?? 1)
   }
 
   /** Delete an instance (history of other Qunos is untouched). */
-  deleteSenseInstance(id: SenseInstanceId): void {
-    this.requireDb().prepare('DELETE FROM sense_instances WHERE id = ?').run(id)
+  deleteCollectorInstance(id: CollectorInstanceId): void {
+    this.requireDb().prepare('DELETE FROM collector_instances WHERE id = ?').run(id)
   }
 
   /** Stable source identity for one instance (created once, never rotated). */
-  ensureSource(instance: SenseInstanceRecord, scope: string | null, now: number): SourceRecord {
+  ensureSource(instance: CollectorInstanceRecord, scope: string | null, now: number): SourceRecord {
     return this.transaction(() => {
       const db = this.requireDb()
       const existing = db.prepare('SELECT * FROM sources WHERE instance_id = ?').get(instance.id) as Record<string, unknown> | undefined
@@ -1317,7 +1345,7 @@ export class QunoStore {
     statuses: readonly { readonly eventId: string; readonly eventKey: string; readonly status: 'accepted' | 'duplicate' }[]
   } | undefined {
     const row = this.requireDb().prepare(
-      'SELECT * FROM sense_batches WHERE source_id = ? AND batch_key = ?',
+      'SELECT * FROM collector_batches WHERE source_id = ? AND batch_key = ?',
     ).get(sourceId, batchKey) as Record<string, unknown> | undefined
     if (row === undefined) return undefined
     return {
@@ -1361,20 +1389,20 @@ export class QunoStore {
     readonly supersedesEventIds: readonly string[]
     readonly parentEventIds: readonly string[]
     readonly contentHash: string
-    readonly senseConfigRevision: number
+    readonly collectorConfigRevision: number
     readonly expiresAt: number | null
   }): void {
     this.requireDb().prepare(`INSERT INTO events (id, source_id, event_key, subject_key, subject_revision,
       type, schema, operation, occurred_at, observed_at, received_at, ingest_seq, summary, data_json,
       priority, deadline, provenance_json, correlation_keys_json, supersedes_json, parents_json,
-      content_hash, sense_config_revision, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      content_hash, collector_config_revision, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       input.id, input.sourceId, input.eventKey, input.subjectKey, input.subjectRevision,
       input.type, input.schema, input.operation, input.occurredAt, input.observedAt, input.receivedAt,
       input.ingestSeq, input.summary, input.data === undefined ? null : json(input.data),
       input.priority, input.deadline, json(input.provenance), json(input.correlationKeys),
       json(input.supersedesEventIds), json(input.parentEventIds), input.contentHash,
-      input.senseConfigRevision, input.expiresAt,
+      input.collectorConfigRevision, input.expiresAt,
     )
   }
 
@@ -1392,7 +1420,7 @@ export class QunoStore {
     readonly statuses: readonly { readonly eventId: string; readonly eventKey: string; readonly status: string }[]
     readonly now: number
   }): void {
-    this.requireDb().prepare(`INSERT INTO sense_batches (id, source_id, generation, batch_key, content_hash,
+    this.requireDb().prepare(`INSERT INTO collector_batches (id, source_id, generation, batch_key, content_hash,
       event_count, accepted_count, duplicate_count, checkpoint_revision, statuses_json, created_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       input.id, input.sourceId, input.generation, input.batchKey, input.contentHash, input.eventCount,
@@ -2250,7 +2278,7 @@ function mapQuno(row: Record<string, unknown>): QunoRecord {
   }
 }
 
-function mapSenseInstance(row: Record<string, unknown>): SenseInstanceRecord {
+function mapCollectorInstance(row: Record<string, unknown>): CollectorInstanceRecord {
   return {
     id: String(row['id']),
     qunoId: String(row['quno_id']),
@@ -2258,9 +2286,9 @@ function mapSenseInstance(row: Record<string, unknown>): SenseInstanceRecord {
     label: String(row['label']),
     config: parseJson(row['config_json'], {}),
     configRevision: asNumber(row['config_revision']),
-    desiredState: String(row['desired_state']) as SenseDesiredState,
-    lifecycle: String(row['lifecycle']) as SenseLifecycle,
-    health: String(row['health']) as SenseHealthState,
+    desiredState: String(row['desired_state']) as CollectorDesiredState,
+    lifecycle: String(row['lifecycle']) as CollectorLifecycle,
+    health: String(row['health']) as CollectorHealthState,
     healthDetail: row['health_json'] === null ? null : parseJson(row['health_json'], null),
     generation: asNumber(row['generation']),
     checkpoint: row['checkpoint_json'] === null
@@ -2311,7 +2339,7 @@ function mapEvent(row: Record<string, unknown>): EventRecord {
     supersedesEventIds: parseJson(row['supersedes_json'], [] as string[]),
     parentEventIds: parseJson(row['parents_json'], [] as string[]),
     contentHash: String(row['content_hash']),
-    senseConfigRevision: asNumber(row['sense_config_revision']),
+    collectorConfigRevision: asNumber(row['collector_config_revision']),
     expiresAt: asNumberOrNull(row['expires_at']),
     prunedAt: asNumberOrNull(row['pruned_at']),
   }
@@ -2427,5 +2455,5 @@ export const __test = {
   mapRun,
   mapTask,
   mapNotice,
-  mapSenseInstance,
+  mapCollectorInstance,
 }

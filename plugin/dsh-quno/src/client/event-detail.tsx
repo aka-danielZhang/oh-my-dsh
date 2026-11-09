@@ -1,5 +1,5 @@
 /**
- * One Sense event's bounded payload. The page distinguishes the three async
+ * One Collector event's bounded payload. The page distinguishes the three async
  * facts it can observe: still loading, failed to load (retryable), and the
  * Host explicitly answering `null` (the record is gone).
  *

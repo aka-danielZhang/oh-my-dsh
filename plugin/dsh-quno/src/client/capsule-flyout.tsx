@@ -40,7 +40,7 @@ export function capsuleIcon(kind: CapsuleKind): PanelIconKind {
   switch (kind) {
     case 'tasks': return 'task'
     case 'attention': return 'attention'
-    case 'activity': return 'sense'
+    case 'activity': return 'collectors'
   }
 }
 

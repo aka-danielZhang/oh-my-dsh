@@ -20,15 +20,15 @@ import type {
   ExchangeDetailWire,
   NoticeDetailWire,
   QunoWireState,
-  SenseOptionsPageWire,
-  SenseProbeWire,
+  CollectorOptionsPageWire,
+  CollectorProbeWire,
   ThreadDetailWire,
   TicketDetailWire,
   TriggerDetailWire,
 } from './api-types.ts'
 import {
   actAttentionInput,
-  createSenseInput,
+  createCollectorInput,
   ensureMainInput,
   evalDetailInput,
   eventDetailInput,
@@ -37,9 +37,9 @@ import {
   muteInput,
   noticeDetailInput,
   passthroughSchema,
-  probeSenseInput,
-  senseCommandInput,
-  senseOptionsInput,
+  probeCollectorInput,
+  collectorCommandInput,
+  collectorOptionsInput,
   taskCommandInput,
   threadDetailInput,
   ticketDetailInput,
@@ -69,13 +69,13 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       note?: string
     }) => Promise<RemoteResult<QunoWireState>>
     checkNow: () => Promise<RemoteResult<CheckNowResult>>
-    createSense: (request: {
+    createCollector: (request: {
       type: string
       label?: string
       config?: Record<string, unknown>
       desiredState?: 'enabled' | 'paused' | 'disabled'
     }) => Promise<RemoteResult<QunoWireState>>
-    senseCommand: (request: {
+    collectorCommand: (request: {
       instanceId: string
       action: 'pause' | 'resume' | 'disable' | 'remove' | 'reconfigure'
       label?: string
@@ -87,14 +87,14 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     }) => Promise<RemoteResult<QunoWireState>>
     mute: (request: { minutes?: number; until?: string; cancel?: boolean }) => Promise<RemoteResult<QunoWireState>>
     eventsRecent: (request: { limit?: number }) => Promise<RemoteResult<{ events: EventWire[] }>>
-    probeSense: (request: { instanceId: string }) => Promise<RemoteResult<SenseProbeWire>>
-    senseOptions: (request: {
+    probeCollector: (request: { instanceId: string }) => Promise<RemoteResult<CollectorProbeWire>>
+    collectorOptions: (request: {
       type: string
       field: string
       config?: Record<string, unknown>
       page?: number
       limit?: number
-    }) => Promise<RemoteResult<SenseOptionsPageWire>>
+    }) => Promise<RemoteResult<CollectorOptionsPageWire>>
     noticeDetail: (request: { notificationId: string }) => Promise<RemoteResult<NoticeDetailWire | null>>
     eventDetail: (request: { eventId: string }) => Promise<RemoteResult<EventDetailWire | null>>
     triggerDetail: (request: { triggerId: string }) => Promise<RemoteResult<TriggerDetailWire | null>>
@@ -124,13 +124,13 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
       note?: string
     }) => Promise<RemoteResult<QunoWireState>>
     'quno/checkNow': () => Promise<RemoteResult<CheckNowResult>>
-    'quno/createSense': (request: {
+    'quno/createCollector': (request: {
       type: string
       label?: string
       config?: Record<string, unknown>
       desiredState?: 'enabled' | 'paused' | 'disabled'
     }) => Promise<RemoteResult<QunoWireState>>
-    'quno/senseCommand': (request: {
+    'quno/collectorCommand': (request: {
       instanceId: string
       action: 'pause' | 'resume' | 'disable' | 'remove' | 'reconfigure'
       label?: string
@@ -142,14 +142,14 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     }) => Promise<RemoteResult<QunoWireState>>
     'quno/mute': (request: { minutes?: number; until?: string; cancel?: boolean }) => Promise<RemoteResult<QunoWireState>>
     'quno/eventsRecent': (request: { limit?: number }) => Promise<RemoteResult<{ events: EventWire[] }>>
-    'quno/probeSense': (request: { instanceId: string }) => Promise<RemoteResult<SenseProbeWire>>
-    'quno/senseOptions': (request: {
+    'quno/probeCollector': (request: { instanceId: string }) => Promise<RemoteResult<CollectorProbeWire>>
+    'quno/collectorOptions': (request: {
       type: string
       field: string
       config?: Record<string, unknown>
       page?: number
       limit?: number
-    }) => Promise<RemoteResult<SenseOptionsPageWire>>
+    }) => Promise<RemoteResult<CollectorOptionsPageWire>>
     'quno/noticeDetail': (request: { notificationId: string }) => Promise<RemoteResult<NoticeDetailWire | null>>
     'quno/eventDetail': (request: { eventId: string }) => Promise<RemoteResult<EventDetailWire | null>>
     'quno/triggerDetail': (request: { triggerId: string }) => Promise<RemoteResult<TriggerDetailWire | null>>
@@ -227,16 +227,16 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
       sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
     },
     {
-      id: 'dsh-quno#quno/createSense', service: 'quno', namespace: 'quno', method: 'createSense',
+      id: 'dsh-quno#quno/createCollector', service: 'quno', namespace: 'quno', method: 'createCollector',
       invocation: direct,
-      parameters: parameter('request', createSenseInput, 'dsh-quno/api-types#CreateSenseInput'),
+      parameters: parameter('request', createCollectorInput, 'dsh-quno/api-types#CreateCollectorInput'),
       result: STATE,
       sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
     },
     {
-      id: 'dsh-quno#quno/senseCommand', service: 'quno', namespace: 'quno', method: 'senseCommand',
+      id: 'dsh-quno#quno/collectorCommand', service: 'quno', namespace: 'quno', method: 'collectorCommand',
       invocation: direct,
-      parameters: parameter('request', senseCommandInput, 'dsh-quno/api-types#SenseCommandInput'),
+      parameters: parameter('request', collectorCommandInput, 'dsh-quno/api-types#CollectorCommandInput'),
       result: STATE,
       sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
     },
@@ -249,17 +249,17 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
       sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
     },
     {
-      id: 'dsh-quno#quno/probeSense', service: 'quno', namespace: 'quno', method: 'probeSense',
+      id: 'dsh-quno#quno/probeCollector', service: 'quno', namespace: 'quno', method: 'probeCollector',
       invocation: direct,
-      parameters: parameter('request', probeSenseInput, 'dsh-quno/api-types#ProbeSenseInput'),
-      result: resultCodec('dsh-quno/api-types#SenseProbeWire'),
+      parameters: parameter('request', probeCollectorInput, 'dsh-quno/api-types#ProbeCollectorInput'),
+      result: resultCodec('dsh-quno/api-types#CollectorProbeWire'),
       sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
     },
     {
-      id: 'dsh-quno#quno/senseOptions', service: 'quno', namespace: 'quno', method: 'senseOptions',
+      id: 'dsh-quno#quno/collectorOptions', service: 'quno', namespace: 'quno', method: 'collectorOptions',
       invocation: direct,
-      parameters: parameter('request', senseOptionsInput, 'dsh-quno/api-types#SenseOptionsInput'),
-      result: resultCodec('dsh-quno/api-types#SenseOptionsPageWire'),
+      parameters: parameter('request', collectorOptionsInput, 'dsh-quno/api-types#CollectorOptionsInput'),
+      result: resultCodec('dsh-quno/api-types#CollectorOptionsPageWire'),
       sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
     },
     {

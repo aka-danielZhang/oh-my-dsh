@@ -1,14 +1,14 @@
 /**
- * Declaration-driven summaries of a Sense instance's configuration.
+ * Declaration-driven summaries of a Collector instance's configuration.
  *
  * The rules never invent a field: they read the type's own `configFields`, so
  * a calendar shows its directory, a feed shows its URL and a group-chat source
  * shows how many groups are selected. Secrets never enter a summary.
  *
- * @module dsh-quno/client/sense-summary
+ * @module dsh-quno/client/collector-summary
  */
 
-import type { SenseFieldWire } from '../api-types.ts'
+import type { CollectorFieldWire } from '../api-types.ts'
 import type { QunoTranslate } from './locales.ts'
 import { format } from './locales.ts'
 import { clip } from './format.ts'
@@ -38,7 +38,7 @@ export type SourceSummary =
  */
 export function sourceSummary(
   config: Record<string, unknown>,
-  fields: readonly SenseFieldWire[],
+  fields: readonly CollectorFieldWire[],
 ): SourceSummary {
   for (const field of fields) {
     if (field.type !== 'path' && field.type !== 'url') continue

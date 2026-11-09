@@ -520,7 +520,7 @@ test('exchange responses return to the recorded requester, not a claimed replyTo
   const exchange = f.engine.requestExchange({
     kind: 'request',
     requester: `ticket:${ticket.id}`,
-    responder: 'organ:calendar',
+    responder: 'collector:calendar',
     payload: { query: 'tomorrow' },
     deadlineMs: 60_000,
     now: now(),
@@ -528,7 +528,7 @@ test('exchange responses return to the recorded requester, not a claimed replyTo
   assert.throws(
     () => f.engine.completeExchange({
       exchangeId: exchange.id,
-      responder: 'organ:other',
+      responder: 'collector:other',
       result: { ok: true },
       now: now(),
     }),
@@ -536,7 +536,7 @@ test('exchange responses return to the recorded requester, not a claimed replyTo
   )
   const outcome = f.engine.completeExchange({
     exchangeId: exchange.id,
-    responder: 'organ:calendar',
+    responder: 'collector:calendar',
     result: { events: [] },
     now: now(),
   })
@@ -554,7 +554,7 @@ test('an expired exchange keeps a late response as evidence without reopening wo
   const exchange = f.engine.requestExchange({
     kind: 'request',
     requester: `ticket:${ticket.id}`,
-    responder: 'organ:calendar',
+    responder: 'collector:calendar',
     payload: {},
     deadlineMs: 1000,
     now: now(),
@@ -562,7 +562,7 @@ test('an expired exchange keeps a late response as evidence without reopening wo
   assert.equal(f.engine.expireExchanges(now() + 5000), 1)
   const late = f.engine.completeExchange({
     exchangeId: exchange.id,
-    responder: 'organ:calendar',
+    responder: 'collector:calendar',
     result: { late: true },
     now: now() + 6000,
   })

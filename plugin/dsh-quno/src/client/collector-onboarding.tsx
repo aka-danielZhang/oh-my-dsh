@@ -1,5 +1,5 @@
 /**
- * The Sense onboarding wizard (design §13.10): one large in-app modal with
+ * The Collector onboarding wizard (design §13.10): one large in-app modal with
  * three columns — type, configuration, and "what will happen". Registered in
  * `shell.overlay`, so it is not squeezed into the 800px settings dialog, and
  * opened from both the settings Sources tab and the right panel.
@@ -9,16 +9,16 @@
  * Creating never claims success: the wizard switches to an honest "created,
  * first sync running" panel fed by the real snapshot.
  *
- * @module dsh-quno/client/sense-onboarding
+ * @module dsh-quno/client/collector-onboarding
  */
 
 import React from 'react'
 import { Button, Modal } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { QunoLocaleKey } from './locales.ts'
-import type { SenseTypeWire, SenseWire } from '../api-types.ts'
-import { SenseForm, initialSenseConfig, type SenseFormInjected } from './sense-form.tsx'
-import { firstSyncText } from './sense-detail.tsx'
+import type { CollectorTypeWire, CollectorWire } from '../api-types.ts'
+import { CollectorForm, initialCollectorConfig, type CollectorFormInjected } from './collector-form.tsx'
+import { firstSyncText } from './collector-detail.tsx'
 import { creationPhase, type CreationPhase } from './panel-state.ts'
 import { PanelIcon, StatusLabel } from './panel-primitives.tsx'
 import { ErrorBanner } from './ui.tsx'
@@ -62,7 +62,7 @@ export class OnboardingController {
 export const onboarding = new OnboardingController()
 
 /** Injected face of the overlay host. */
-export interface OnboardingInjected extends SenseFormInjected {
+export interface OnboardingInjected extends CollectorFormInjected {
   readonly onOpenDetail?: (instanceId: string) => void
 }
 
@@ -113,15 +113,15 @@ export function QunoOnboardingHost(props: OnboardingProps): React.ReactElement |
     if (request.kind === 'create') {
       const type = request.type === undefined
         ? undefined
-        : state.senseTypes.find(candidate => candidate.type === request.type && candidate.registered)
+        : state.collectorTypes.find(candidate => candidate.type === request.type && candidate.registered)
       setDraftType(type?.type ?? null)
       setLabel('')
-      const next = type === undefined ? {} : initialSenseConfig(type.configFields)
+      const next = type === undefined ? {} : initialCollectorConfig(type.configFields)
       setConfig(next)
       initial.current = JSON.stringify({ label: '', config: next })
       return
     }
-    const instance = state.senses.find(candidate => candidate.id === request.instanceId)
+    const instance = state.collectors.find(candidate => candidate.id === request.instanceId)
     if (instance === undefined) {
       setDraftType(request.type)
       setConfig({})
@@ -137,13 +137,13 @@ export function QunoOnboardingHost(props: OnboardingProps): React.ReactElement |
   if (request === null || state === null) return null
 
   const instance = request.kind === 'edit'
-    ? state.senses.find(candidate => candidate.id === request.instanceId)
+    ? state.collectors.find(candidate => candidate.id === request.instanceId)
     : undefined
-  const type: SenseTypeWire | undefined = draftType === null
+  const type: CollectorTypeWire | undefined = draftType === null
     ? undefined
-    : state.senseTypes.find(candidate => candidate.type === draftType)
+    : state.collectorTypes.find(candidate => candidate.type === draftType)
   const dirty = JSON.stringify({ label, config }) !== initial.current
-  const createdInstance = createdId === null ? undefined : state.senses.find(candidate => candidate.id === createdId)
+  const createdInstance = createdId === null ? undefined : state.collectors.find(candidate => candidate.id === createdId)
   const editMissing = request.kind === 'edit' && instance === undefined
 
   const attemptClose = (): void => {
@@ -155,10 +155,10 @@ export function QunoOnboardingHost(props: OnboardingProps): React.ReactElement |
     onboarding.close()
   }
 
-  const pickType = (next: SenseTypeWire): void => {
+  const pickType = (next: CollectorTypeWire): void => {
     setDraftType(next.type)
-    setConfig(initialSenseConfig(next.configFields))
-    initial.current = JSON.stringify({ label, config: initialSenseConfig(next.configFields) })
+    setConfig(initialCollectorConfig(next.configFields))
+    initial.current = JSON.stringify({ label, config: initialCollectorConfig(next.configFields) })
     setError(null)
   }
 
@@ -168,7 +168,7 @@ export function QunoOnboardingHost(props: OnboardingProps): React.ReactElement |
     setError(null)
     try {
       if (request.kind === 'edit' && instance !== undefined) {
-        await props.store.senseCommand({
+        await props.store.collectorCommand({
           instanceId: instance.id,
           action: 'reconfigure',
           ...(label.trim() === '' ? { label: instance.label } : { label: label.trim() }),
@@ -177,14 +177,14 @@ export function QunoOnboardingHost(props: OnboardingProps): React.ReactElement |
         onboarding.close()
         return
       }
-      const before = new Set((props.store.getSnapshot().state?.senses ?? []).map(candidate => candidate.id))
-      await props.store.createSense({
+      const before = new Set((props.store.getSnapshot().state?.collectors ?? []).map(candidate => candidate.id))
+      await props.store.createCollector({
         type: draftType,
         ...(label.trim() === '' ? {} : { label: label.trim() }),
         config,
         desiredState: 'enabled',
       })
-      const fresh = props.store.getSnapshot().state?.senses.find(candidate => candidate.type === draftType && !before.has(candidate.id))
+      const fresh = props.store.getSnapshot().state?.collectors.find(candidate => candidate.type === draftType && !before.has(candidate.id))
       setCreatedId(fresh?.id ?? '')
       initial.current = JSON.stringify({ label, config })
     } catch (reason) {
@@ -215,7 +215,7 @@ export function QunoOnboardingHost(props: OnboardingProps): React.ReactElement |
             <h2 style={styles.h2}>{request.kind === 'edit' ? props.t('onboardingEditTitle') : props.t('onboardingTitle')}</h2>
             <p style={styles.subtitle}>
               {type?.displayName ?? props.t('onboardingPickType')}
-              {type?.registered === false ? ` · ${props.t('senseNotDeclared')}` : ''}
+              {type?.registered === false ? ` · ${props.t('collectorNotDeclared')}` : ''}
             </p>
           </div>
           <Button size="sm" variant="ghost" onClick={attemptClose}>{props.t('onboardingClose')}</Button>
@@ -224,7 +224,7 @@ export function QunoOnboardingHost(props: OnboardingProps): React.ReactElement |
         {editMissing
           ? (
             <div style={styles.success}>
-              <p style={styles.bodyText}>{props.t('senseMissing')}</p>
+              <p style={styles.bodyText}>{props.t('collectorMissing')}</p>
               <div style={styles.footerButtons}>
                 <Button size="sm" variant="primary" onClick={() => { onboarding.close() }}>{props.t('onboardingDone')}</Button>
               </div>
@@ -260,10 +260,10 @@ export function QunoOnboardingHost(props: OnboardingProps): React.ReactElement |
                 {width >= 720 && (
                   <section style={styles.column}>
                     <div style={styles.columnTitle}>{props.t('onboardingType')}</div>
-                    {state.senseTypes.filter(candidate => candidate.registered).length === 0 && (
+                    {state.collectorTypes.filter(candidate => candidate.registered).length === 0 && (
                       <p style={styles.bodyText}>{props.t('onboardingNoTypes')}</p>
                     )}
-                    {state.senseTypes.filter(candidate => candidate.registered).map(candidate => (
+                    {state.collectorTypes.filter(candidate => candidate.registered).map(candidate => (
                       <button
                         key={candidate.type}
                         type="button"
@@ -272,7 +272,7 @@ export function QunoOnboardingHost(props: OnboardingProps): React.ReactElement |
                         onClick={() => { pickType(candidate) }}
                       >
                         <span style={styles.typeHead}>
-                          <PanelIcon kind="sense" size={15} />
+                          <PanelIcon kind="collectors" size={15} />
                           <span style={styles.typeName}>{candidate.displayName}</span>
                         </span>
                         <span style={styles.typeDesc}>{candidate.description}</span>
@@ -288,12 +288,12 @@ export function QunoOnboardingHost(props: OnboardingProps): React.ReactElement |
                       value={draftType ?? ''}
                       disabled={request.kind === 'edit'}
                       onChange={(event) => {
-                        const next = state.senseTypes.find(candidate => candidate.type === event.target.value)
+                        const next = state.collectorTypes.find(candidate => candidate.type === event.target.value)
                         if (next !== undefined) pickType(next)
                       }}
                     >
                       <option value="">{props.t('onboardingType')}</option>
-                      {state.senseTypes.filter(candidate => candidate.registered).map(candidate => (
+                      {state.collectorTypes.filter(candidate => candidate.registered).map(candidate => (
                         <option key={candidate.type} value={candidate.type}>{candidate.displayName}</option>
                       ))}
                     </select>
@@ -301,7 +301,7 @@ export function QunoOnboardingHost(props: OnboardingProps): React.ReactElement |
                   {draftType === null || type === undefined
                     ? <p style={styles.bodyText}>{props.t('onboardingPickType')}</p>
                     : (
-                      <SenseForm
+                      <CollectorForm
                         store={props.store}
                         t={props.t}
                         type={draftType}
@@ -368,7 +368,7 @@ export function QunoOnboardingHost(props: OnboardingProps): React.ReactElement |
  * "synced": the wizard shows the real lifecycle, the real first-sync state and
  * the real failure reason.
  */
-function CreationState(props: { readonly instance: SenseWire; readonly t: (key: QunoLocaleKey) => string }): React.ReactElement {
+function CreationState(props: { readonly instance: CollectorWire; readonly t: (key: QunoLocaleKey) => string }): React.ReactElement {
   const { instance, t } = props
   const phase = creationPhase(instance)
   const tone = phase === 'ready' ? 'ok' : phase === 'failed' || phase === 'auth-required' ? 'error' : 'warn'
@@ -379,8 +379,8 @@ function CreationState(props: { readonly instance: SenseWire; readonly t: (key: 
     <div style={styles.stack}>
       <div style={styles.instanceAxes}>
         <StatusLabel tone={tone}>{t(creationTitleKey(phase))}</StatusLabel>
-        <span style={styles.axisChip}>{t('senseAxisLifecycle')}：{instance.lifecycle}</span>
-        <span style={styles.axisChip}>{t('senseAxisHealth')}：{instance.health}</span>
+        <span style={styles.axisChip}>{t('collectorAxisLifecycle')}：{instance.lifecycle}</span>
+        <span style={styles.axisChip}>{t('collectorAxisHealth')}：{instance.health}</span>
       </div>
       <p style={styles.bodyText}>{detail}</p>
     </div>
@@ -408,17 +408,16 @@ function creationBodyKey(phase: CreationPhase): QunoLocaleKey {
 }
 
 /** The right column: what connecting this type actually does. */
-function Outcome(props: { readonly type: SenseTypeWire; readonly t: (key: QunoLocaleKey) => string }): React.ReactElement {
+function Outcome(props: { readonly type: CollectorTypeWire; readonly t: (key: QunoLocaleKey) => string }): React.ReactElement {
   const { type, t } = props
   return (
     <div style={styles.stack}>
       <div style={styles.columnTitle}>{t('onboardingOutcome')}</div>
       <p style={styles.bodyText}>{firstSyncText(type.firstSync, t)}</p>
-      {type.runtime !== null && (
+      {type.schedule !== null && (
         <div style={styles.stack}>
-          <span style={styles.metaLine}>{t('capabilityModes')}: {type.runtime.modes.join(' / ')}</span>
-          <span style={styles.metaLine}>{t('capabilityInterval')}: {type.runtime.defaultIntervalSec}s</span>
-          <span style={styles.metaLine}>{t('capabilityTimeout')}: {type.runtime.timeoutMs}ms</span>
+          <span style={styles.metaLine}>{t('capabilityInterval')}: {type.schedule.defaultIntervalSec}s</span>
+          <span style={styles.metaLine}>{t('capabilityTimeout')}: {type.schedule.maxRunMs}ms</span>
         </div>
       )}
       {type.permissions === null

@@ -17,13 +17,13 @@ import { Button, Switch } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import type { QunoBudget, QunoConfig } from '../types.ts'
-import type { QunoWireState, SenseTypeWire, SenseWire } from '../api-types.ts'
+import type { QunoWireState, CollectorTypeWire, CollectorWire } from '../api-types.ts'
 import type { QunoLocaleKey } from './locales.ts'
 import type { QunoClientStore } from './store.ts'
 import { format } from './locales.ts'
 import { Empty, ErrorBanner, Field, Select, TextArea, TextInput } from './ui.tsx'
-import { onboarding } from './sense-onboarding.tsx'
-import { sourceSummary, sourceSummaryText } from './sense-summary.ts'
+import { onboarding } from './collector-onboarding.tsx'
+import { sourceSummary, sourceSummaryText } from './collector-summary.ts'
 
 /** One selectable provider/model route, as listed by the model settings. */
 export interface ModelChoice {
@@ -341,21 +341,21 @@ function QunoSettingsForm(props: QunoSettingsInjected & {
         title={t('settingsSources')}
         action={<Button size="sm" variant="outline" onClick={() => { onboarding.open({ kind: 'create' }) }}>{t('connectSource')}</Button>}
       >
-        {state.senses.length === 0
+        {state.collectors.length === 0
           ? <p style={styles.hint}>{t('settingsSourcesHint')}</p>
-          : state.senses.map((sense) => {
-            const type = state.senseTypes.find(candidate => candidate.type === sense.type)
-            const fields = type?.configFields ?? sense.configFields
-            const derived = sourceSummary(sense.config, fields)
-            const summary = derived.kind === 'none' ? '' : sourceSummaryText(derived, type?.displayName ?? sense.type, t)
+          : state.collectors.map((collectors) => {
+            const type = state.collectorTypes.find(candidate => candidate.type === collectors.type)
+            const fields = type?.configFields ?? collectors.configFields
+            const derived = sourceSummary(collectors.config, fields)
+            const summary = derived.kind === 'none' ? '' : sourceSummaryText(derived, type?.displayName ?? collectors.type, t)
             return (
-              <div key={sense.id} style={styles.sourceRow}>
+              <div key={collectors.id} style={styles.sourceRow}>
                 <div style={styles.sourceText}>
-                  <div style={styles.rowLabel}>{sense.label === '' ? (type?.displayName ?? sense.type) : sense.label}</div>
-                  <div style={styles.hint}>{typeLabel(state.senseTypes, sense)}{summary === '' ? '' : ` · ${summary}`}</div>
+                  <div style={styles.rowLabel}>{collectors.label === '' ? (type?.displayName ?? collectors.type) : collectors.label}</div>
+                  <div style={styles.hint}>{typeLabel(state.collectorTypes, collectors)}{summary === '' ? '' : ` · ${summary}`}</div>
                 </div>
-                <Button size="sm" variant="ghost" onClick={() => { onboarding.open({ kind: 'edit', instanceId: sense.id, type: sense.type }) }}>
-                  {t('senseEdit')}
+                <Button size="sm" variant="ghost" onClick={() => { onboarding.open({ kind: 'edit', instanceId: collectors.id, type: collectors.type }) }}>
+                  {t('collectorEdit')}
                 </Button>
               </div>
             )
@@ -561,8 +561,8 @@ function mergeDraft(current: QunoConfig, patch: Partial<QunoConfig>): QunoConfig
 }
 
 /** Declared display name for one instance's type, falling back to the raw type. */
-function typeLabel(types: readonly SenseTypeWire[], sense: SenseWire): string {
-  return types.find(candidate => candidate.type === sense.type)?.displayName ?? sense.type
+function typeLabel(types: readonly CollectorTypeWire[], collectors: CollectorWire): string {
+  return types.find(candidate => candidate.type === collectors.type)?.displayName ?? collectors.type
 }
 
 const styles = {

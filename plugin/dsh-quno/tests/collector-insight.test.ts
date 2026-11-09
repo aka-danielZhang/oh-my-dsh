@@ -3,26 +3,26 @@
  * on the wire, and the cancellation/late-settlement discipline. These cover
  * the behaviors the UI is allowed to claim, not the pixels.
  *
- * @module dsh-quno/tests/sense-insight
+ * @module dsh-quno/tests/collectors-insight
  */
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { QunoSensesService, SenseOptionsError, type SenseFactory, type SenseHandle } from '../src/senses.ts'
-import { maskSenseConfig } from '../src/api.ts'
+import { QunoCollectorsService, CollectorOptionsError, type CollectorFactory } from '../src/collectors.ts'
+import { maskCollectorConfig } from '../src/api.ts'
 import { openFixture } from './helpers.ts'
-import type { SenseDefinition } from '../src/types.ts'
+import type { CollectorDefinition } from '../src/types.ts'
 import type { QunoStore } from '../src/store.ts'
 
 const logger = { info: () => {}, warn: () => {} }
 
-function definition(type: string, patch: Partial<SenseDefinition> = {}): SenseDefinition {
+function definition(type: string, patch: Partial<CollectorDefinition> = {}): CollectorDefinition {
   return {
     type,
-    contractVersion: 'quno.sense/v1',
+    contractVersion: 'quno.collector/v2',
     implementationVersion: '0.1.0',
     displayName: type,
-    description: 'test sense',
+    description: 'test collectors',
     eventTypes: [{ type: 'test/changed' }],
     configFields: [
       { key: 'title', label: 'Title', type: 'string' },
@@ -35,7 +35,7 @@ function definition(type: string, patch: Partial<SenseDefinition> = {}): SenseDe
       },
     ],
     permissions: { reads: ['test'] },
-    runtime: { modes: ['poll'], defaultIntervalSec: 60, minIntervalSec: 30, concurrency: 1, timeoutMs: 1000 },
+    schedule: { defaultIntervalSec: 60, minIntervalSec: 30, maxRunMs: 1000 },
     reliability: {
       checkpoint: 'cursor',
       replay: { kind: 'none' },
@@ -49,7 +49,7 @@ function definition(type: string, patch: Partial<SenseDefinition> = {}): SenseDe
 
 function serviceFor(store: QunoStore, now = Date.parse('2026-10-23T09:00:00.000Z')) {
   const clock = { now }
-  const service = new QunoSensesService({
+  const service = new QunoCollectorsService({
     store,
     qunoId: 'quno',
     logger,
@@ -59,7 +59,7 @@ function serviceFor(store: QunoStore, now = Date.parse('2026-10-23T09:00:00.000Z
   return { service, clock }
 }
 
-function quietFactory(patch: Partial<SenseFactory> = {}): SenseFactory {
+function quietFactory(patch: Partial<CollectorFactory> = {}): CollectorFactory {
   return {
     validateConfig(raw) {
       const record = (raw ?? {}) as Record<string, unknown>
@@ -68,9 +68,7 @@ function quietFactory(patch: Partial<SenseFactory> = {}): SenseFactory {
       }
       return { ok: true, value: record }
     },
-    start(): SenseHandle {
-      return { stop() {} }
-    },
+    run: async () => ({ ok: true }),
     ...patch,
   }
 }
@@ -88,7 +86,7 @@ test('a probe reports reachability without touching lifecycle, config revision, 
     }))
     const created = service.createInstance({ type: 'test/probe', config: { title: 'x' }, desiredState: 'paused' })
     assert.ok(created.ok)
-    const before = fixture.store.getSenseInstance(created.instance.id)
+    const before = fixture.store.getCollectorInstance(created.instance.id)
 
     const result = await service.probeInstance(created.instance.id)
     assert.equal(result.ok, true)
@@ -96,7 +94,7 @@ test('a probe reports reachability without touching lifecycle, config revision, 
     assert.equal(result.message, 'reachable')
     assert.equal(probes, 1)
 
-    const after = fixture.store.getSenseInstance(created.instance.id)
+    const after = fixture.store.getCollectorInstance(created.instance.id)
     assert.equal(after.configRevision, before.configRevision)
     assert.equal(after.checkpoint.revision, before.checkpoint.revision)
     assert.equal(after.checkpoint.value, before.checkpoint.value)
@@ -122,7 +120,7 @@ test('a probe failure is classified and never written as a sync or health fact',
     assert.equal(result.ok, false)
     assert.equal(result.code, 'probe-failed')
     assert.match(result.message, /not logged in/)
-    const after = fixture.store.getSenseInstance(created.instance.id)
+    const after = fixture.store.getCollectorInstance(created.instance.id)
     assert.equal(after.lastSuccessAt, null)
   } finally {
     await service.stopAll()
@@ -219,7 +217,7 @@ test('discovered options are sanitized, deduped, capped and keep classified fail
   try {
     failing.register(definition('test/options-auth'), quietFactory({
       listOptions: async () => {
-        throw new SenseOptionsError('auth-required', 'run yzj-cli auth login')
+        throw new CollectorOptionsError('auth-required', 'run yzj-cli auth login')
       },
     }))
     const page = await failing.listFieldOptions({ type: 'test/options-auth', field: 'groups' })
@@ -246,11 +244,11 @@ test('a masked secret survives reconfigure while an explicit empty string clears
 
     const keep = await service.reconfigureInstance(created.instance.id, { config: { token: null } })
     assert.equal(keep.ok, true)
-    assert.equal(fixture.store.getSenseInstance(created.instance.id).config['token'], 'hunter2')
+    assert.equal(fixture.store.getCollectorInstance(created.instance.id).config['token'], 'hunter2')
 
     const cleared = await service.reconfigureInstance(created.instance.id, { config: { token: '' } })
-    assert.equal(cleared.ok, false, 'an empty required secret is rejected by the Sense validator')
-    assert.equal(fixture.store.getSenseInstance(created.instance.id).config['token'], 'hunter2')
+    assert.equal(cleared.ok, false, 'an empty required secret is rejected by the Collector validator')
+    assert.equal(fixture.store.getCollectorInstance(created.instance.id).config['token'], 'hunter2')
   } finally {
     await service.stopAll()
     fixture.store.close()
@@ -258,7 +256,7 @@ test('a masked secret survives reconfigure while an explicit empty string clears
 })
 
 test('the wire masks declared secrets and reports which ones hold a value', () => {
-  const masked = maskSenseConfig(
+  const masked = maskCollectorConfig(
     { token: 'hunter2', region: 'cn', empty: '' },
     [
       { key: 'token', secret: true },
@@ -270,7 +268,7 @@ test('the wire masks declared secrets and reports which ones hold a value', () =
   assert.equal(masked.config['region'], 'cn')
   assert.equal(masked.config['empty'], '')
   assert.deepEqual(masked.secretSet, ['token'])
-  const untouched = maskSenseConfig({ region: 'cn' }, [])
+  const untouched = maskCollectorConfig({ region: 'cn' }, [])
   assert.equal(untouched.config, untouched.config)
   assert.deepEqual(untouched.secretSet, [])
 })

@@ -89,7 +89,7 @@ export function QunoCapsule(props: PropsRuntime<'conversation.session.header.uti
   const items = counts === null ? [] : capsuleItems(counts)
   const summaries = state === null
     ? []
-    : capsuleSummaries({ tasks: state.tasks, attention: state.attention, senses: state.senses, senseTypes: state.senseTypes })
+    : capsuleSummaries({ tasks: state.tasks, attention: state.attention, collectors: state.collectors, collectorTypes: state.collectorTypes })
 
   const visibility = capsuleVisibility({
     preset,
@@ -237,7 +237,7 @@ export function QunoCapsule(props: PropsRuntime<'conversation.session.header.uti
     : format(props.t('capsuleAria'), {
       tasks: counts.runningTasks,
       attention: counts.attentionOpen,
-      alarms: counts.senseAlarms,
+      alarms: counts.collectorAlarms,
     })
 
   const rows: readonly CapsuleRow[] = summaries.map(summary => ({
@@ -337,11 +337,11 @@ function summaryLabelKey(kind: CapsuleKind): 'capsuleTasks' | 'capsuleAttention'
 }
 
 /** Locale fallback when a non-zero category has no representative title. */
-function subjectFallbackKey(kind: CapsuleKind): 'capsuleNoTasks' | 'capsuleNoAttention' | 'capsuleAllSensesOk' {
+function subjectFallbackKey(kind: CapsuleKind): 'capsuleNoTasks' | 'capsuleNoAttention' | 'capsuleAllCollectorsOk' {
   switch (kind) {
     case 'tasks': return 'capsuleNoTasks'
     case 'attention': return 'capsuleNoAttention'
-    case 'activity': return 'capsuleAllSensesOk'
+    case 'activity': return 'capsuleAllCollectorsOk'
   }
 }
 
@@ -350,7 +350,7 @@ function viewForKind(kind: CapsuleKind): QunoPanelView {
   switch (kind) {
     case 'tasks': return 'task'
     case 'attention': return 'attention'
-    case 'activity': return 'sense'
+    case 'activity': return 'collectors'
   }
 }
 

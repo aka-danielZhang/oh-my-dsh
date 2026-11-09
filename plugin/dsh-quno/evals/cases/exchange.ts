@@ -298,7 +298,7 @@ export const exchangeCases: readonly EvalCase[] = [
       worker: [],
     },
     steps: [
-      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `organ:${drv.organInstanceId}`, payload: { query: 'today' } }, 'er-worker-exchange-1') },
+      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `collector:${drv.organInstanceId}`, payload: { query: 'today' } }, 'er-worker-exchange-1') },
       { kind: 'script', role: 'worker', build: () => textTurn('已发起异步读取。') },
       { kind: 'script', role: 'worker', build: () => toolTurn('quno_worker_report', { state: 'ready', summary: '日历数据：今天有 2 个事件。' }, 'er-worker-ready-1') },
       { kind: 'script', role: 'worker', build: () => textTurn('已提交。') },
@@ -327,7 +327,7 @@ export const exchangeCases: readonly EvalCase[] = [
   },
   {
     id: 'organ-discovery',
-    title: 'Worker 经 quno_read.organs 发现端点并成功交换',
+    title: 'Worker 经 quno_read.collectors 发现端点并成功交换',
     priority: 'p1',
     requirement: 'Worker 先 quno_read 发现真实挂载的 organ 端点（发现链路为真），quno_exchange 命中该端点，结果回流进报告；不再靠猜端点名',
     tags: ['exchange', 'worker', 'discovery'],
@@ -349,8 +349,8 @@ export const exchangeCases: readonly EvalCase[] = [
       { kind: 'script', role: 'worker', build: (rtv) => {
         // The endpoint comes from the SAME discovery face the tool exposes —
         // the scripted worker does not hardcode it.
-        const organ = rtv.host.organEndpoints().at(-1)
-        return toolTurn('quno_exchange', { responder: organ?.endpoint ?? 'organ:none', payload: { op: 'im.group.recent' } }, 'od-exchange-1')
+        const organ = rtv.host.collectorEndpoints().at(-1)
+        return toolTurn('quno_exchange', { responder: organ?.endpoint ?? 'collector:none', payload: { op: 'im.group.recent' } }, 'od-exchange-1')
       } },
       { kind: 'script', role: 'worker', build: () => textTurn('已发起异步读取。') },
       { kind: 'script', role: 'worker', build: () => toolTurn('quno_worker_report', { state: 'ready', summary: 'organ 返回数据 1 条。' }, 'od-ready-1') },
@@ -364,13 +364,13 @@ export const exchangeCases: readonly EvalCase[] = [
       const calls = toolCalls(rt, sessionId)
       const results = toolResults(rt, sessionId)
       const exchanges = repo.listExchanges(rt.host.qunoId, { limit: 10 })
-      const organViews = rt.host.organEndpoints()
+      const organViews = rt.host.collectorEndpoints()
       const readIndex = calls.findIndex(call => call.name === 'quno_read')
       const exchangeIndex = calls.findIndex(call => call.name === 'quno_exchange')
       return {
         chain: [
           check('worker.execution', 'discovered-before-exchange', readIndex >= 0 && exchangeIndex > readIndex, 'quno_read precedes quno_exchange', calls.map(call => call.name)),
-          check('worker.execution', 'organs-carry-mounted-endpoint', results.some(text => text.includes('"organs"') && organViews.length > 0 && organViews.every(organ => text.includes(organ.endpoint))), 'organs list the mounted endpoint', { views: organViews.map(organ => organ.endpoint) }),
+          check('worker.execution', 'collectors-carry-mounted-endpoint', results.some(text => text.includes('"collectors"') && organViews.length > 0 && organViews.every(organ => text.includes(organ.endpoint))), 'collectors list the mounted endpoint', { views: organViews.map(organ => organ.endpoint) }),
           check('worker.execution', 'endpoint-from-discovery', exchanges.length === 1 && organViews.some(organ => exchanges[0]?.responder === organ.endpoint), 'responder is a listed endpoint', exchanges.map(exchange => exchange.responder)),
           check('worker.execution', 'organ-answered', exchanges[0]?.status === 'responded' || exchanges[0]?.status === 'consumed', 'responded/consumed', exchanges[0]?.status ?? 'none'),
           check('worker.report', 'report-completed', ticket?.ended?.outcome === 'completed', 'completed', ticket?.ended?.outcome ?? 'open'),
@@ -384,7 +384,7 @@ export const exchangeCases: readonly EvalCase[] = [
     id: 'organ-whitelist-reject',
     title: '白名单外 payload 被 organ 拒绝且原因回流',
     priority: 'p1',
-    requirement: '未知 op、越界 limit、写意图 payload 均被 failExchange（unsupported-op/invalid-args），原因作为 response Input 回流且无成功交换；白名单矩阵本体由 dsh-quno-sense-yzj 包内测试钉死，此处验证拒绝链路',
+    requirement: '未知 op、越界 limit、写意图 payload 均被 failExchange（unsupported-op/invalid-args），原因作为 response Input 回流且无成功交换；白名单矩阵本体由 dsh-quno-collector-yzj 包内测试钉死，此处验证拒绝链路',
     tags: ['exchange', 'worker', 'third-party', 'whitelist'],
     model: { router: 'scripted', worker: 'scripted' },
     setup: async (rt) => {
@@ -403,9 +403,9 @@ export const exchangeCases: readonly EvalCase[] = [
       worker: [],
     },
     steps: [
-      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `organ:${drv.organInstanceId}`, payload: { op: 'im.message.send', params: { groupId: 'g1', text: 'hi' } } }, 'ow-exchange-send') },
-      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `organ:${drv.organInstanceId}`, payload: { op: 'im.group.recent', params: { limit: 99 } } }, 'ow-exchange-overbound') },
-      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `organ:${drv.organInstanceId}`, payload: { op: 'im.status.post' } }, 'ow-exchange-unknown') },
+      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `collector:${drv.organInstanceId}`, payload: { op: 'im.message.send', params: { groupId: 'g1', text: 'hi' } } }, 'ow-exchange-send') },
+      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `collector:${drv.organInstanceId}`, payload: { op: 'im.group.recent', params: { limit: 99 } } }, 'ow-exchange-overbound') },
+      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `collector:${drv.organInstanceId}`, payload: { op: 'im.status.post' } }, 'ow-exchange-unknown') },
       { kind: 'script', role: 'worker', build: () => toolTurn('quno_worker_report', { state: 'blocked', summary: '三条查询均被 organ 白名单拒绝（unsupported-op/invalid-args）。', question: { question: '是否调整查询范围后重试？' } }, 'ow-blocked-1') },
       { kind: 'script', role: 'worker', build: () => textTurn('已如实报告。') },
       // A Human turn is what carries quno_task delegation (the routing guard
@@ -454,10 +454,10 @@ export const exchangeCases: readonly EvalCase[] = [
         textTurn('当前没有已接入的云之家按需查询通道，无法查询最近会话；需要先接入该能力或由你提供命令输出。'),
       ],
       worker: [
-        toolTurn('quno_exchange', { responder: 'organ:shell', payload: { command: 'yzj-cli im group recent --limit 20 --page 1' } }, 'tu-worker-exchange-1'),
+        toolTurn('quno_exchange', { responder: 'collector:shell', payload: { command: 'yzj-cli im group recent --limit 20 --page 1' } }, 'tu-worker-exchange-1'),
         toolTurn('quno_worker_report', {
           state: 'blocked',
-          summary: 'Worker 没有 shell，organ:shell 也未挂载，无法查询云之家最近会话。',
+          summary: 'Worker 没有 shell，collector:shell 也未挂载，无法查询云之家最近会话。',
           question: { question: '是否先接入云之家只读查询能力，或提供命令输出？' },
         }, 'tu-worker-blocked-1'),
         textTurn('已如实报告能力缺失。'),

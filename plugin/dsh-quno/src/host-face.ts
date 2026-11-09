@@ -20,7 +20,7 @@ export interface QunoStatusSummary {
   readonly attention: { readonly open: number; readonly waiting: number; readonly snoozed: number }
   readonly deliveries: { readonly pending: number; readonly deferred: number; readonly deadLetter: number }
   readonly tasks: { readonly running: number; readonly interrupted: number }
-  readonly senses: readonly { readonly label: string; readonly type: string; readonly health: string; readonly stale: boolean }[]
+  readonly collectors: readonly { readonly label: string; readonly type: string; readonly health: string; readonly stale: boolean }[]
   readonly notices: { readonly pending: number; readonly inboxDurable: number; readonly blocked: number }
   /** Read-only Watchdog summary (never includes private bodies). */
   readonly watchdog: {

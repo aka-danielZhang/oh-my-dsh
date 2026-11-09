@@ -6,19 +6,19 @@ import {
   parseIngestBatch,
   parseQunoConfig,
   parseRunOutput,
-  parseSenseDefinition,
+  parseCollectorDefinition,
 } from '../src/contracts.ts'
 import { envelope } from './helpers.ts'
 
-const validSense = {
+const validCollector = {
   type: 'quno/calendar',
-  contractVersion: 'quno.sense/v1',
+  contractVersion: 'quno.collector/v2',
   implementationVersion: '0.1.0',
   displayName: '日历',
   description: '读取本地日历文件',
   eventTypes: [{ type: 'calendar/event-updated' }],
   permissions: { reads: ['calendar files'] },
-  runtime: { modes: ['poll'], defaultIntervalSec: 60, minIntervalSec: 30, concurrency: 1, timeoutMs: 10_000 },
+  schedule: { defaultIntervalSec: 60, minIntervalSec: 30, maxRunMs: 10_000 },
   reliability: {
     checkpoint: 'cursor',
     replay: { kind: 'bounded', windowSec: 3600 },
@@ -73,29 +73,29 @@ test('batch validation: an oversized event reports its index', () => {
   if (!result.ok) assert.equal(result.error.index, 1)
 })
 
-test('sense declaration: unknown contract major version is refused', () => {
-  const result = parseSenseDefinition({ ...validSense, contractVersion: 'quno.sense/v2' })
+test('collectors declaration: unknown contract major version is refused', () => {
+  const result = parseCollectorDefinition({ ...validCollector, contractVersion: 'quno.collectors/v2' })
   assert.equal(result.ok, false)
 })
 
-test('sense declaration: minIntervalSec above defaultIntervalSec is refused', () => {
-  const result = parseSenseDefinition({
-    ...validSense,
-    runtime: { ...validSense.runtime, minIntervalSec: 120, defaultIntervalSec: 60 },
+test('collectors declaration: minIntervalSec above defaultIntervalSec is refused', () => {
+  const result = parseCollectorDefinition({
+    ...validCollector,
+    schedule: { ...validCollector.schedule, minIntervalSec: 120, defaultIntervalSec: 60 },
   })
   assert.equal(result.ok, false)
 })
 
-test('sense declaration: checkpoint none cannot promise replay', () => {
-  const result = parseSenseDefinition({
-    ...validSense,
-    reliability: { ...validSense.reliability, checkpoint: 'none' },
+test('collectors declaration: checkpoint none cannot promise replay', () => {
+  const result = parseCollectorDefinition({
+    ...validCollector,
+    reliability: { ...validCollector.reliability, checkpoint: 'none' },
   })
   assert.equal(result.ok, false)
 })
 
-test('sense declaration: a well-formed declaration parses', () => {
-  const result = parseSenseDefinition(validSense)
+test('collectors declaration: a well-formed declaration parses', () => {
+  const result = parseCollectorDefinition(validCollector)
   assert.equal(result.ok, true)
 })
 
@@ -150,14 +150,14 @@ test('run output: invalid shapes are refused, valid ones parse', () => {
   assert.equal(valid.ok, true)
 })
 
-test('sense declarations: first-sync semantics and field metadata are validated', () => {
-  const withFirstSync = parseSenseDefinition({ ...validSense, firstSync: 'snapshot-events' })
+test('collectors declarations: first-sync semantics and field metadata are validated', () => {
+  const withFirstSync = parseCollectorDefinition({ ...validCollector, firstSync: 'snapshot-events' })
   assert.equal(withFirstSync.ok, true)
-  const badFirstSync = parseSenseDefinition({ ...validSense, firstSync: 'guess' })
+  const badFirstSync = parseCollectorDefinition({ ...validCollector, firstSync: 'guess' })
   assert.equal(badFirstSync.ok, false)
 
-  const bounded = parseSenseDefinition({
-    ...validSense,
+  const bounded = parseCollectorDefinition({
+    ...validCollector,
     configFields: [
       { key: 'intervalSec', label: 'Interval', type: 'number', min: 30, max: 600, step: 30 },
       { key: 'groups', label: 'Groups', type: 'string', multiple: true, discover: true, advanced: true },
@@ -166,22 +166,22 @@ test('sense declarations: first-sync semantics and field metadata are validated'
   })
   assert.equal(bounded.ok, true)
 
-  const invertedBounds = parseSenseDefinition({
-    ...validSense,
+  const invertedBounds = parseCollectorDefinition({
+    ...validCollector,
     configFields: [{ key: 'n', label: 'N', type: 'number', min: 10, max: 1 }],
   })
   assert.equal(invertedBounds.ok, false)
 
-  const ambiguous = parseSenseDefinition({
-    ...validSense,
+  const ambiguous = parseCollectorDefinition({
+    ...validCollector,
     configFields: [
       { key: 'g', label: 'G', type: 'string', discover: true, options: [{ value: 'a', label: 'A' }] },
     ],
   })
   assert.equal(ambiguous.ok, false)
 
-  const numericDiscovery = parseSenseDefinition({
-    ...validSense,
+  const numericDiscovery = parseCollectorDefinition({
+    ...validCollector,
     configFields: [{ key: 'n', label: 'N', type: 'number', discover: true }],
   })
   assert.equal(numericDiscovery.ok, false)

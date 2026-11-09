@@ -10,7 +10,7 @@
  *
  * Role-specific interfaces keep the callable surface honest:
  *
- * - organs  produce Triggers and complete Exchanges;
+ * - collectors  produce Triggers and complete Exchanges;
  * - the Router decides Evals, accepts direct work and attaches threads;
  * - people stop/retry/re-evaluate a Ticket;
  * - an executor reports progress and reads its own inputs;
@@ -247,7 +247,7 @@ export class Engine {
 
   /**
    * The only domain receive command. Called inside the caller's transaction
-   * (one Sense batch = one transaction) so "received but never routed" cannot
+   * (one Collector batch = one transaction) so "received but never routed" cannot
    * survive a crash.
    */
   receive(draft: TriggerDraft, now: number): ReceiveOutcome {
@@ -1864,7 +1864,7 @@ export interface CandidateView {
   }[]
 }
 
-/** Role-scoped Engine surface used by Organ/Sense adapters. */
+/** Role-scoped Engine surface used by Organ/Collector adapters. */
 export type EngineForOrgans = Pick<Engine, 'receive' | 'threadClosed' | 'completeExchange' | 'exchangeDelivered' | 'activeEvalForThread'>
 /** Role-scoped Engine surface used by the permanent-conversation Router. */
 export type EngineForRouter = Pick<

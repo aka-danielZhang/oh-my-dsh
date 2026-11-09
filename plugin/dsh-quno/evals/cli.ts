@@ -400,7 +400,7 @@ async function runAttemptShared(input: {
   try {
     await runtime.start()
     gateway.setContextResolver((sessionId, role) => resolveNodeContext(active, sessionId, role))
-    const instanceId = await organ.createInstance(rtSenses(runtime))
+    const instanceId = await organ.createInstance(rtCollectors(runtime), {}, () => runtime.options.clock.fireDue(10))
     composeOptions.organInstanceId = instanceId
     composeOptions.organSourceId = organ.sourceIdOf(instanceId)
     const driver = new ScenarioDriver(
@@ -539,9 +539,9 @@ async function runAttempt(entry: EvalCase, options: RunCaseOptions & { readonly 
   })
 }
 
-/** Get the senses service face the organ needs (typed narrowly). */
-function rtSenses(rt: EvalRuntime): { createInstance(input: { type: string; config: Record<string, unknown> }): { readonly ok: boolean; readonly instance?: { readonly id: string }; readonly error?: unknown } } {
-  return rt.host.senses
+/** Get the collectors service face the organ needs (typed narrowly). */
+function rtCollectors(rt: EvalRuntime): { createInstance(input: { type: string; config: Record<string, unknown> }): { readonly ok: boolean; readonly instance?: { readonly id: string }; readonly error?: unknown } } {
+  return rt.host.collectors
 }
 
 /** Record each check as its stage's terminal trace event. */

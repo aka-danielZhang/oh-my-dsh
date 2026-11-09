@@ -65,8 +65,8 @@ evals/
                   路由 + provider usage）；SseAssembler 与 toOpenAiMessages 纯函数可本地回归
     scripted.ts   text/tool turn 的 chunk 构造（与现有单测同一词汇）
   fixtures/
-    organ.ts      合成 Sense：走真实 qunoSenses 注册 + 真实 ingress 事务提交 Trigger；
-                  organ 能力面响应真实 Exchange
+    organ.ts      合成采集器：走真实 qunoCollectors 注册 + run ctx commit 事务提交 Trigger；
+                  query 能力面响应真实 Exchange
     fs.ts         fixture 目录 + 只读 read/glob/grep + 真实但惰性的全局 bash
     hidden.ts     Live 隐藏事实生成器（seeded RNG：负责人/截止日期/文件名/错误码 + 干扰值）
   cases/          Scripted：P0（9）+ P1（10）+ blocked 清单（含真实第三方来源）
@@ -83,7 +83,7 @@ evals/
 
 **Live E2E P0（能力验收层，发布门）**：`live-chat-simple`、`live-direct-read`、`live-status-result`、`live-clarify`、`live-tool-guard`、`live-eval-observe`、`live-auto-investigate`、`live-owned-followup`、`live-exchange`、`live-worker-blocked`、`live-worker-restart`、`live-notification-quiet`——与验收设计 §5 一一对应；每个 case 由「用户目标 + 隐藏事实 + 授权边界 + 行为 oracle」组成，失败按 §7.3 分类（classification.json 落盘）。
 
-**Live E2E P1**：`live-third-party-tool-unavailable` 用真实模型验证第三方 CLI 未接入时的诚实失败，禁止虚构 organ、桌面更新根因或查询结果。它只覆盖负向行为，不代表真实第三方读取已通过；其余 P1 扩展随验收设计 §6 待补。
+**Live E2E P1**：`live-third-party-tool-unavailable` 用真实模型验证第三方 CLI 未接入时的诚实失败，禁止虚构 collector 端点、桌面更新根因或查询结果。它只覆盖负向行为，不代表真实第三方读取已通过；其余 P1 扩展随验收设计 §6 待补。
 
 实现边界（与设计文档的偏差）：
 

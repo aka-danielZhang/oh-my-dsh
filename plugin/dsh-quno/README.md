@@ -1,11 +1,11 @@
 # dsh-quno
 
-Quno 是 DSH 里的**常驻个人助理**：它把外部变化（日历、订阅源，以及后续任何 Sense）变成一条可回放的 Trigger 流，在永久主对话里按 Thread 合批判定，只在确有实质变化时打扰用户；用户随口说的事、被动感知到的事、委派出去的只读工作都落在同一个地方。
+Quno 是 DSH 里的**常驻个人助理**：它把外部变化（日历、订阅源，以及后续任何采集器）变成一条可回放的 Trigger 流，在永久主对话里按 Thread 合批判定，只在确有实质变化时打扰用户；用户随口说的事、被动感知到的事、委派出去的只读工作都落在同一个地方。
 
 一个 `dsh-quno` 包同时提供 Host 与浏览器两半：
 
-- **Host**：专用 SQLite（`~/.dsh/quno/quno.sqlite`）、Sense/Organ 注册与代际化 ingress/ACK（接收与 Intake 同事务）、2 秒有界 pass + 持久 Effect outbox、主对话 Eval Router、Ticket/Assignment/WorkerRun、关注事项、统一通知 outbox（安静时段/频控/去重/重启对账）、`quno` 与 `quno-task` 两个程序化 agent preset，以及 Typert `quno` Remote。
-- **浏览器**：设置页 Quno 面板（配置/来源/关注/运行/任务五个页签）、侧栏原生 Quno 入口行、右栏 Quno 面板（动态/关注/任务三视图；Sense 详情钻取、关注完结分组、事件详情、任务详情与取消）、正文右上悬浮胶囊（Portal 到对话内容容器；点击出任务/关注/动态概要，按行打开右栏）、三栏接入向导（`shell.overlay`，创建与编辑同一表单）、按 Turn 绑定的主动汇报卡、`quno_task` 任务卡。
+- **Host**：专用 SQLite（`~/.dsh/quno/quno.sqlite`）、Collector 注册与 Host 调度（run ctx commit 与 Intake 同事务、per-run generation 棚栏、健康推导）、2 秒有界 pass + 持久 Effect outbox、主对话 Eval Router、Ticket/Assignment/WorkerRun、关注事项、统一通知 outbox（安静时段/频控/去重/重启对账）、`quno` 与 `quno-task` 两个程序化 agent preset，以及 Typert `quno` Remote。
+- **浏览器**：设置页 Quno 面板（配置/来源/关注/运行/任务五个页签）、侧栏原生 Quno 入口行、右栏 Quno 面板（动态/关注/任务三视图；采集器详情钻取、关注完结分组、事件详情、任务详情与取消）、正文右上悬浮胶囊（Portal 到对话内容容器；点击出任务/关注/动态概要，按行打开右栏）、三栏接入向导（`shell.overlay`，创建与编辑同一表单）、按 Turn 绑定的主动汇报卡、`quno_task` 任务卡。
 
 完整设计见 [docs/quno-bot-design.md](../../docs/quno-bot-design.md)。
 
@@ -27,8 +27,8 @@ Host 行常驻；`quno` 的 agent preset 由 Host 在启动时**程序化注册*
 - **安静时段与频控**：默认 22:00–08:00 静默、同主题最小间隔 10 分钟、每小时最多 3 条；`quno_mute` 可临时让出。
 - **反馈**：通知/任务卡提供「已处理 / 稍后 / 关闭」；自然语言反馈由主对话模型调用 `quno_attention` 吸收。汇报卡按携带 `notificationId` 的那条消息绑定到所属 Turn，重载后仍可操作；历史通知按需读取（`noticeDetail`）。
 - **只读委派**：每个 Ticket 复用稳定的 `quno-exec-<ticketId>` 只读子会话（`quno-task` preset，无 shell、无写工具）；Worker 用 `quno_worker_report` 结构化返回结论、产物与待答问题，Report 经 Router relay 进入通知 outbox。停止/重试先落库再处理激活，晚到写入不会改回状态。
-- **感知器接入**：字段驱动表单（数值边界、静态选项、多值、远程选项、密钥留空保持）；云之家「最近群聊」经 `senseOptions` 发现，仅多人群聊可选。接入向导只承诺「已创建，正在首次同步」，健康以真实结果更新。
-- **真实探测**：`probeSense` 只检查可达性，不重启实例、不改配置版本、不推进检查点、不写健康，也不代表同步成功。
+- **采集器接入**：字段驱动表单（数值边界、静态选项、多值、远程选项、密钥留空保持）；云之家「最近群聊」经 `collectorOptions` 发现，仅多人群聊可选。接入向导只承诺「已创建，正在首次同步」，健康以真实结果更新。
+- **真实探测**：`probeCollector` 只检查可达性，不重启实例、不改配置版本、不推进检查点、不写健康，也不代表同步成功。
 - **数据归 Quno**：会话消息仍在 DSH 会话日志里；Quno 只持久化事件、关注、通知、任务与调度状态，可整体删除 `~/.dsh/quno/` 重置。
 
 ## Config
@@ -51,7 +51,7 @@ Host 行常驻；`quno` 的 agent preset 由 Host 在启动时**程序化注册*
 cd plugin/dsh-quno
 pnpm install
 pnpm run typecheck
-pnpm run test        # 契约、存储/ingress、管线、真实 AgentLoop、Sense 门禁、调优模拟
+pnpm run test        # 契约、存储/ingress、调度、真实 AgentLoop、采集器门禁与调度单测
 pnpm run build       # lib/index.js + lib/preset.js + lib/task-guard.js + lib/client.js
 ```
 

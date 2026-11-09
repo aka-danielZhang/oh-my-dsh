@@ -103,7 +103,7 @@ export class EvalRuntime {
     // The production loop: agents.create/resume below go through its factory.
     await mountAgentLoopTestHarness(ctx)
 
-    // Virtual timer service (scheduler + sense retries use it).
+    // Virtual timer service (scheduler + collectors retries use it).
     ctx.provide('timer', {
       timeout: (callback: () => void, delayMs: number): (() => void) => {
         const dispose = clock.timer.setTimeout(callback, delayMs)
@@ -207,10 +207,7 @@ export class EvalRuntime {
     // The quno service must be provided before the main agent mounts its
     // preset (the preset setup resolves it).
     ctx.provide('quno', host)
-    ctx.provide('qunoSenses', host.senses)
-    ctx.provide('qunoIngress', {
-      ingest: (instanceId: string, generation: number, batch: unknown) => host.senses.ingest(instanceId, generation, batch),
-    })
+    ctx.provide('qunoCollectors', host.collectors)
 
     // The permanent conversation must be resident BEFORE host.start(): the
     // startup recovery (reconcile + effects kick) resolves the Router as the
@@ -241,7 +238,7 @@ export class EvalRuntime {
 
     await host.start()
 
-    // The synthetic organ registers on the real senses service (provided above).
+    // The synthetic organ registers on the real collectors service (provided above).
     this.options.organ.mountOn(ctx)
 
     host.store.setMainSession(host.qunoId, 'quno-main', 'ok', this.now())

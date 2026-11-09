@@ -173,7 +173,7 @@ export class ScenarioDriver {
           this.runtime.host.engine.requestExchange({
             kind: 'request',
             requester: `ticket:${ticket.id}`,
-            responder: `organ:${this.organInstanceId}`,
+            responder: `collector:${this.organInstanceId}`,
             payload: step.payload,
             deadlineMs: 60_000,
             ticketId: ticket.id,
@@ -181,7 +181,7 @@ export class ScenarioDriver {
           })
         } else {
           await this.runtime.host.requestExchange({
-            responder: `organ:${this.organInstanceId}`,
+            responder: `collector:${this.organInstanceId}`,
             payload: step.payload,
             timeoutMs: 60_000,
           })
