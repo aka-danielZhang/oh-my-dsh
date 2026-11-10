@@ -64,6 +64,18 @@
 
 验证环境注意（既有开发工具问题，不在本 PR 范围）：`pnpm desktop:dev` 的 `linkPluginRuntimeDeps` 会把随包插件的 `@deepseek-ai/*` 对等依赖改链到开发 runtime 且不复原，之后在这些包目录里跑测试就是对着 runtime 的 harness 版本。初版验证跑过桌面 e2e 后，`dsh-ohmymemo` 的 `dsh-contract.test.ts`（按 rc.2 写）在 zw.9 runtime 上失败 8 项（主仓自 10-30 一次 desktop:dev 起即处于同样状态，9 项）；dsh-quno 评测器的类型双实例冲突也是同一来源。本轮验证前已按锁文件干净重装恢复 registry 链接后再跑。
 
+## Live E2E 首跑（2026-11-10）
+
+仓库史上第一次真实模型评测（此前全部为 scripted；证据与基线自此建立）。凭据取自 DSH 凭据库 refs `OPENCODE_GO_API_KEY`，仅注入当次命令的 `QUNO_EVAL_LIVE_API_KEY`，已用原值对证据目录做存在性检查：零泄漏（证据只有 `credentialRef` 引用名）。端点/模型为 plan 默认（`opencode.ai/inference/go/openai/v1` + `deepseek-v4.1-flash`，router/worker 同模型）。
+
+- **Live P0：12/12 全 pass**（chat-simple / direct-read / status-result / clarify / tool-guard / eval-observe / auto-investigate / owned-followup / exchange / worker-blocked / worker-restart / notification-quiet）。
+- **发现两个 fixture 缺陷**（`live-third-party-tool-unavailable`，p1；均按 §7.3 归 FIXTURE，只修 fixture 不动 oracle）：
+  1. **prompt 与 oracle 自相矛盾**：人类 prompt 写了「如果当前没有这条读取能力，直接说明」，真实 router 三次稳定地用 `quno_read` 查发现面后**直答不委派**（答复质量很高：引用真实端点与类型、不编造、给出后续路径），而 oracle 要求 `delegated-exactly-once`。修法：去掉 prompt 里的捷径邀请，case 回到本意（委派 → worker 发现 → 诚实 blocked）。这里有个开放的产品问题值得记下：router 用发现面直答「能力缺失」在产品语义上是否合法（§主对话只路由说实际工作必须委派；但 `quno_read` 本就是 router 的合法工具）——本轮按「case 测委派链路」从严，未改产品。
+  2. **合成源不该在场**：prompt 修正后 router 正常委派，worker 探测了唯一的合成采集器（eval 回显对 yzj 形状 payload 回「成功」），如实识别为非 yzj 并报 blocked——行为全对，但被 `no-unrelated-organ-success`（不许任何 responded exchange）拦截。根因还是 fixture：建模「第三方未接入」的 case 里合成源不该挂载。新增 `LiveEvalCase.mountEvalCollector`（默认 true），该 case 置 false；`quno_read.collectors` 为空后 worker 的真实行为恰好是教科书式的：两次 `quno_read` 确认空、glob/grep/read 穷尽本地无 yzj-cli、`blocked` 报告附实测证据表、router 转达「后台已实测确认，非推测」。
+- 修正后该 case 真实模型 2/2 通过，并在随后一次完整套件里通过；scripted 21 case 与单测 196 项不受影响。
+- **同一完整套件里 `live-worker-blocked`（p0）失败一次**：真实模型未走「worker 带具体 question 报 blocked → 用户补充 → 答案路由回 worker → 完成」路径（无 question、router 在补充轮新建第二个 ticket，2 tickets/1 assignment）；单独重跑 2/2 通过，且此前首次完整套件里它也是过的——判定为**模型方差**（正是发布门「连续三次全绿」要捕捉的不稳定），非确定性回归、与本重构无关（该 case 的信息面不涉及采集器改动）。发布门前如复发，值得评估 case 是否要钉紧（例如强化 worker preset 的「blocked 必带具体 question」指引），但本轮不改。
+- **发布门状态**：发布门要求 `--suite live-p0` 连续三次全绿；本轮完成首次全绿通过（详见各 run 报告），门禁还差两次。跨模式对比（scripted ↔ live）的「新增失败」行会把永久 blocked 清单计为新增，属 LATEST 指针对比的显示假象，读报告时以 case 表为准。
+
 ## 关联
 
 - 改写 `docs/quno-bot-design.md` §6（三面模型 + 调度规则 + run/outcome 契约）、§6.9、§6.11、§14.1、§15.3、摘要与沿革。

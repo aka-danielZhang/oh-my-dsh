@@ -83,7 +83,7 @@ evals/
 
 **Live E2E P0（能力验收层，发布门）**：`live-chat-simple`、`live-direct-read`、`live-status-result`、`live-clarify`、`live-tool-guard`、`live-eval-observe`、`live-auto-investigate`、`live-owned-followup`、`live-exchange`、`live-worker-blocked`、`live-worker-restart`、`live-notification-quiet`——与验收设计 §5 一一对应；每个 case 由「用户目标 + 隐藏事实 + 授权边界 + 行为 oracle」组成，失败按 §7.3 分类（classification.json 落盘）。
 
-**Live E2E P1**：`live-third-party-tool-unavailable` 用真实模型验证第三方 CLI 未接入时的诚实失败，禁止虚构 collector 端点、桌面更新根因或查询结果。它只覆盖负向行为，不代表真实第三方读取已通过；其余 P1 扩展随验收设计 §6 待补。
+**Live E2E P1**：`live-third-party-tool-unavailable` 用真实模型验证第三方 CLI 未接入时的诚实失败，禁止虚构 collector 端点、桌面更新根因或查询结果。该 case 以 `mountEvalCollector: false` 建模「没有任何第三方来源」——合成采集器不挂载，`quno_read.collectors` 为空，worker 只能从发现面如实报缺口（2026-11-10 首跑发现：若合成源在场，worker 会探测它并被回显「成功」，既污染被测链路也违背 case 主题）。它只覆盖负向行为，不代表真实第三方读取已通过；其余 P1 扩展随验收设计 §6 待补。
 
 实现边界（与设计文档的偏差）：
 

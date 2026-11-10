@@ -400,9 +400,14 @@ async function runAttemptShared(input: {
   try {
     await runtime.start()
     gateway.setContextResolver((sessionId, role) => resolveNodeContext(active, sessionId, role))
-    const instanceId = await collector.createInstance(rtCollectors(runtime), {}, () => runtime.options.clock.fireDue(10))
+    // Live cases may opt out of the synthetic source (mountEvalCollector:
+    // false) to model the absence of any third-party source.
+    const wantsCollector = !(isLiveCase(entry) && entry.mountEvalCollector === false)
+    const instanceId = wantsCollector
+      ? await collector.createInstance(rtCollectors(runtime), {}, () => runtime.options.clock.fireDue(10))
+      : ''
     composeOptions.collectorInstanceId = instanceId
-    composeOptions.collectorSourceId = collector.sourceIdOf(instanceId)
+    composeOptions.collectorSourceId = instanceId === '' ? '' : collector.sourceIdOf(instanceId)
     const driver = new ScenarioDriver(
       runtime,
       async () => {
