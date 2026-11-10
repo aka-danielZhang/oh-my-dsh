@@ -1,7 +1,7 @@
 {
   "name": "dsh-quno-collector-calendar",
   "version": "0.1.0",
-  "description": "Quno Sense: local iCalendar (.ics) directory source with stable UID/revision identity and snapshot-diff changes",
+  "description": "Quno collector: local iCalendar (.ics) directory source with stable UID/revision identity and snapshot-diff changes",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

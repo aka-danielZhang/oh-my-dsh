@@ -24,11 +24,10 @@ import type { ChildProcess } from 'node:child_process'
 import type { Context } from '@deepseek-ai/cordis'
 import type { CollectorDefinition } from '../../dsh-quno/src/types.ts'
 import type { CollectorFactory, CollectorMountContext, CollectorRunContext, CollectorRunOutcome } from '../../dsh-quno/src/collectors.ts'
-import { CollectorOptionsError } from '../../dsh-quno/src/collectors.ts'
 import { CALL_TIMEOUT_MS, CLI, classifyRun, hasMore, parseEnvelope, readList, type CliExec, type CliRun } from './cli.ts'
 import { handleOrganRequest, registerOrganInstance } from './organ.ts'
 import { parseRecentConversations, toGroupOption } from './messages.ts'
-import { createWorker, MIN_SHARD_GAP_MS, type RoundDeps } from './round.ts'
+import { createWorker, type RoundDeps, type RoundOutcome, type Worker } from './round.ts'
 import { validateConfig, type YzjConfig } from './config.ts'
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -147,7 +146,7 @@ export const factory: CollectorFactory<YzjConfig> = {
   /**
    * Recent-conversation discovery for the `groupIds` whitelist. Uses the same
    * CLI runner and error classification as collection; failures are raised as
-   * `CollectorOptionsError` so the Host can hand the real reason to the wizard
+   * structural options errors so the Host can hand the real reason to the wizard
    * (`auth-required` is not "no groups"). Private chats are shown disabled —
    * focused mode collects them automatically, no selection needed.
    */
@@ -163,14 +162,14 @@ export const factory: CollectorFactory<YzjConfig> = {
       CALL_TIMEOUT_MS,
     )
     const failure = classifyRun(run)
-    if (failure !== null) throw new CollectorOptionsError(failure.code, failure.detail)
+    if (failure !== null) throw optionsError(failure.code, failure.detail)
     const envelope = parseEnvelope(run.stdout)
-    if (envelope === null) throw new CollectorOptionsError('bad-envelope', 'CLI 返回内容无法解析')
+    if (envelope === null) throw optionsError('bad-envelope', 'CLI 返回内容无法解析')
     if (envelope.success !== true) {
-      throw new CollectorOptionsError('bad-envelope', envelope.error?.message ?? 'CLI 返回失败信封')
+      throw optionsError('bad-envelope', envelope.error?.message ?? 'CLI 返回失败信封')
     }
     const list = readList(envelope)
-    if (list === null) throw new CollectorOptionsError('bad-envelope', 'CLI 响应缺少 data.list 数组')
+    if (list === null) throw optionsError('bad-envelope', 'CLI 响应缺少 data.list 数组')
     return {
       options: parseRecentConversations(list).map(toGroupOption),
       more: hasMore(envelope),
@@ -179,78 +178,204 @@ export const factory: CollectorFactory<YzjConfig> = {
   /**
    * The on-demand face binds the per-instance profile from the CURRENT
    * config; the disposer runs on pause/disable/remove/reconfigure, so a
-   * stopped or disabled instance never answers exchanges.
+   * stopped or disabled instance never answers exchanges. The same bracket
+   * owns the instance's worker slot (see `runCollector`).
    */
   mount(m: CollectorMountContext<YzjConfig>): () => void {
-    return registerOrganInstance(m.instanceId, m.config.yzjProfile)
+    const disposeQuery = registerOrganInstance(m.instanceId, m.config.yzjProfile)
+    slots.set(m.instanceId, freshSlot())
+    return () => {
+      disposeQuery()
+      slots.delete(m.instanceId)
+    }
   },
-  /**
-   * One shard: the worker keeps the checkpoint across shards through the
-   * checkpoint entries face, and its seven internal health reports are
-   * captured here — the Host derives state/schedule from the outcome and
-   * merges the extras (progress/issues/sourceLagSec) into the health row.
-   */
+  /** One Host-scheduled run = one round of the instance's long-lived worker. */
   async run(ctx): Promise<CollectorRunOutcome> {
-    const reports: RoundHealthReport[] = []
-    const worker = createWorker({
-      config: ctx.config,
-      generation: ctx.runId,
-      checkpointValue: ctx.checkpoint.value,
-      checkpointRevision: ctx.checkpoint.revision,
-      checkpointEntries: ctx.checkpointEntries,
-      capabilities: ctx.capabilities,
-      limits: {
-        maxEventsPerCheck: ctx.limits.maxEventsPerRun,
-        maxBytesPerCheck: ctx.limits.maxBytesPerRun,
-      },
-      signal: ctx.signal,
-      logger: ctx.logger,
-      exec: spawnCli,
-      ingress: {
-        // IngestBatch is a superset of the worker's structural batch since
-        // checkpoint-entries/v1; the variance here is read-only.
-        ingestBatch: ctx.commit as unknown as RoundDeps['ingress']['ingestBatch'],
-        reportHealth: async (report) => { reports.push(report) },
-      },
-    })
-    const outcome = await worker.runRound(0)
-    const report = reports[reports.length - 1]
-    const healthExtras = report === undefined ? undefined : {
-      ...(report.detail === undefined ? {} : { detail: report.detail }),
-      ...(report.sourceLagSec === undefined ? {} : { sourceLagSec: report.sourceLagSec }),
-      ...(report.progress === undefined ? {} : { progress: report.progress }),
-      ...(report.issues === undefined ? {} : { issues: [...report.issues] }),
-    }
-    if (outcome.fatal) {
-      return {
-        ok: false,
-        failure: {
-          state: failureStateOf(report),
-          code: report?.errorCode ?? 'round-fatal',
-          message: report?.detail ?? '采集已停止',
-          fatal: true,
+    return await runCollector(ctx, spawnCli)
+  },
+}
+
+/**
+ * A classified discovery failure the Host recognises STRUCTURALLY
+ * (`name: 'CollectorOptionsError'` + string `code`). This plugin never
+ * value-imports the Host's class: an installed tarball bundles its own copy,
+ * so `instanceof` against the Host's class would always be false.
+ */
+function optionsError(code: string, message: string): Error {
+  const error = new Error(message) as Error & { code: string }
+  error.name = 'CollectorOptionsError'
+  error.code = code
+  return error
+}
+
+/** The run currently driving a worker; the worker's deps read through it. */
+interface SlotRun {
+  readonly ctx: CollectorRunContext<YzjConfig>
+  readonly reports: RoundHealthReport[]
+}
+
+/**
+ * One instance's worker slot. The worker is the round engine's whole memory —
+ * checkpoint state AND pacing state (last discovery, sweep page time,
+ * watermarks) — so it must outlive a single run: rebuilding it per run made
+ * every run discovery-due and burned the shared per-profile request bucket on
+ * catalog pages. A slot lives from `mount` to its disposer, mirroring the
+ * Sense-era "one worker per generation".
+ */
+interface WorkerSlot {
+  /** Stable JSON of the config the worker was built for (belt and braces next to mount). */
+  configKey: string | null
+  worker: Worker | null
+  /** Consecutive failed rounds, fed back as `previousFailures`. */
+  failures: number
+  current: SlotRun | null
+  /** A round still unwinding after its run was aborted (Host timeout). */
+  inFlight: Promise<RoundOutcome> | null
+}
+
+const slots = new Map<string, WorkerSlot>()
+
+function freshSlot(): WorkerSlot {
+  return { configKey: null, worker: null, failures: 0, current: null, inFlight: null }
+}
+
+/** Test seam: drop every worker slot (module state outlives a single test). */
+export function resetCollectorWorkers(): void {
+  slots.clear()
+}
+
+/**
+ * Build a worker whose deps read through the slot's CURRENT run: the commit
+ * face carries the Host fence (a captured first-run face would be refused as
+ * stale-generation from run two on), and the abort signal, logger and health
+ * sink belong to whichever run is driving the round.
+ */
+function workerFor(slot: WorkerSlot, ctx: CollectorRunContext<YzjConfig>, exec: CliExec): Worker {
+  const live = (): SlotRun => {
+    const current = slot.current
+    if (current === null) throw new Error('dsh-quno-collector-yzj: worker used outside a run')
+    return current
+  }
+  const entries = ctx.checkpointEntries
+  return createWorker({
+    config: ctx.config,
+    // A worker-lifetime batch-key namespace, NOT the Host fence: an uncertain
+    // ACK is retried with the identical batchKey in a later run, which lands
+    // as the stored receipt only if the key did not change.
+    generation: ctx.runId,
+    checkpointValue: ctx.checkpoint.value,
+    checkpointRevision: ctx.checkpoint.revision,
+    ...(entries === undefined
+      ? {}
+      : {
+        checkpointEntries: {
+          list: request => (live().ctx.checkpointEntries ?? entries).list(request),
+          get: key => (live().ctx.checkpointEntries ?? entries).get(key),
         },
-        ...(healthExtras === undefined ? {} : { health: healthExtras }),
-      }
-    }
-    if (outcome.failed) {
-      return {
-        ok: false,
-        failure: {
-          state: failureStateOf(report),
-          code: report?.errorCode ?? 'round-failed',
-          message: report?.detail ?? '采集分片失败',
-          retryAfterMs: report?.nextRetryAt != null ? Math.max(0, report.nextRetryAt - Date.now()) : null,
-        },
-        ...(healthExtras === undefined ? {} : { health: healthExtras }),
-      }
-    }
+      }),
+    ...(ctx.capabilities === undefined ? {} : { capabilities: ctx.capabilities }),
+    get limits() {
+      const limits = live().ctx.limits
+      return { maxEventsPerCheck: limits.maxEventsPerRun, maxBytesPerCheck: limits.maxBytesPerRun }
+    },
+    get signal() {
+      return live().ctx.signal
+    },
+    get logger() {
+      return live().ctx.logger
+    },
+    exec,
+    ingress: {
+      ingestBatch: async batch => await live().ctx.commit(batch as never),
+      reportHealth: async (report) => {
+        live().reports.push(report)
+      },
+    },
+  })
+}
+
+/**
+ * One Host-scheduled run: drive one round of the instance's long-lived worker
+ * and map its outcome. Exported with an injectable CLI runner for tests;
+ * production passes `spawnCli`.
+ */
+export async function runCollector(ctx: CollectorRunContext<YzjConfig>, exec: CliExec): Promise<CollectorRunOutcome> {
+  let slot = slots.get(ctx.instanceId)
+  if (slot === undefined) {
+    // Defensive: the Host mounts before it arms, but a slot must never be
+    // required for correctness — only for continuity.
+    slot = freshSlot()
+    slots.set(ctx.instanceId, slot)
+  }
+  // A round from an aborted run may still be unwinding; never drive one
+  // worker twice at once.
+  if (slot.inFlight !== null) await slot.inFlight.catch(() => undefined)
+  const configKey = JSON.stringify(ctx.config)
+  if (slot.worker === null || slot.configKey !== configKey) {
+    slot.worker = workerFor(slot, ctx, exec)
+    slot.configKey = configKey
+    slot.failures = 0
+  }
+  const run: SlotRun = { ctx, reports: [] }
+  slot.current = run
+  const round = slot.worker.runRound(slot.failures)
+  slot.inFlight = round
+  let outcome: RoundOutcome
+  try {
+    outcome = await round
+  } catch (error) {
+    slot.failures += 1
+    throw error
+  } finally {
+    slot.inFlight = null
+    if (slot.current === run) slot.current = null
+  }
+  // A round driven under an aborted signal (stop, reconfigure, Host timeout)
+  // leaves no trustworthy in-memory state: the next run starts a fresh worker
+  // from the stored checkpoint.
+  if (ctx.signal.aborted) slot.worker = null
+
+  const report = run.reports[run.reports.length - 1]
+  const healthExtras = report === undefined ? undefined : {
+    ...(report.detail === undefined ? {} : { detail: report.detail }),
+    ...(report.sourceLagSec === undefined ? {} : { sourceLagSec: report.sourceLagSec }),
+    ...(report.progress === undefined ? {} : { progress: report.progress }),
+    ...(report.issues === undefined ? {} : { issues: [...report.issues] }),
+  }
+  if (outcome.fatal) {
+    // A fatal worker refuses every later round; re-enabling must start fresh.
+    slot.worker = null
+    slot.failures = 0
     return {
-      ok: true,
-      nextRunAtMs: outcome.nextWorkAtMs ?? Date.now() + ctx.config.intervalSec * 1000,
+      ok: false,
+      failure: {
+        state: failureStateOf(report),
+        code: report?.errorCode ?? 'round-fatal',
+        message: report?.detail ?? '采集已停止',
+        fatal: true,
+      },
       ...(healthExtras === undefined ? {} : { health: healthExtras }),
     }
-  },
+  }
+  if (outcome.failed) {
+    slot.failures += 1
+    return {
+      ok: false,
+      failure: {
+        state: failureStateOf(report),
+        code: report?.errorCode ?? 'round-failed',
+        message: report?.detail ?? '采集分片失败',
+        retryAfterMs: report?.nextRetryAt != null ? Math.max(0, report.nextRetryAt - Date.now()) : null,
+      },
+      ...(healthExtras === undefined ? {} : { health: healthExtras }),
+    }
+  }
+  slot.failures = 0
+  return {
+    ok: true,
+    nextRunAtMs: outcome.nextWorkAtMs ?? Date.now() + ctx.config.intervalSec * 1000,
+    ...(healthExtras === undefined ? {} : { health: healthExtras }),
+  }
 }
 
 /** The worker's captured health report shape (only the fields the adapter reads). */

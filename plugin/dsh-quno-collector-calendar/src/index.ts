@@ -15,7 +15,6 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import type { EventEnvelope, CollectorDefinition } from '../../dsh-quno/src/types.ts'
-import { QunoIngressError } from '../../dsh-quno/src/ingress.ts'
 import type { CollectorFactory, CollectorRunContext, CollectorRunOutcome } from '../../dsh-quno/src/collectors.ts'
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -148,11 +147,17 @@ export const factory: CollectorFactory<CalendarConfig> = {
     try {
       return await runOnce(ctx)
     } catch (error) {
-      // The generation/lease moved under us: retrying this run can never
-      // succeed — stop scheduling until the instance is reconfigured.
-      if (error instanceof QunoIngressError
-        && (error.shape.code === 'stale-generation' || error.shape.code === 'checkpoint-conflict')) {
-        return { ok: false, failure: { state: 'degraded', code: error.shape.code, message: error.message, fatal: true } }
+      const refusal = ingressRefusalOf(error)
+      if (refusal !== null) {
+        // The generation/lease moved under us: retrying this run can never
+        // succeed — stop scheduling until the instance is reconfigured.
+        if (FATAL_REFUSALS.has(refusal.code)) {
+          return { ok: false, failure: { state: 'degraded', code: refusal.code, message: refusal.message, fatal: true } }
+        }
+        return {
+          ok: false,
+          failure: { state: refusal.retryable ? 'unavailable' : 'degraded', code: refusal.code, message: refusal.message },
+        }
       }
       const classified = classify(error)
       return {
@@ -161,6 +166,22 @@ export const factory: CollectorFactory<CalendarConfig> = {
       }
     }
   },
+}
+
+/** Host refusals after which retrying this run is pointless: the instance moved on. */
+const FATAL_REFUSALS: ReadonlySet<string> = new Set(['stale-generation', 'checkpoint-conflict'])
+
+/**
+ * Structurally read a Host ingest refusal. This plugin never value-imports
+ * the Host's `QunoIngressError`: an installed tarball bundles its own copy, so
+ * `instanceof` against it would always be false. The commit face rejects with
+ * an Error named `QunoIngressError` carrying `shape.{code,retryable}`.
+ */
+export function ingressRefusalOf(error: unknown): { readonly code: string; readonly message: string; readonly retryable: boolean } | null {
+  if (!(error instanceof Error) || error.name !== 'QunoIngressError') return null
+  const shape = (error as { shape?: { code?: unknown; retryable?: unknown } }).shape
+  if (typeof shape?.code !== 'string') return null
+  return { code: shape.code, message: error.message, retryable: shape.retryable === true }
 }
 
 /** One snapshot-diff pass over the configured calendar files. */

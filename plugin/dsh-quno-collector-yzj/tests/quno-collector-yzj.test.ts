@@ -33,8 +33,13 @@ import {
   toEnvelope,
   toGroupOption,
   validateConfig,
+  factory,
+  resetCollectorWorkers,
+  runCollector,
 } from '../src/index.ts'
 import type { CliExec, CliRun, RoundDeps, V2Checkpoint, YzjConfig, YzjMessage } from '../src/index.ts'
+import type { CollectorRunContext } from '../../dsh-quno/src/collectors.ts'
+import type { IngestAck, IngestBatch } from '../../dsh-quno/src/types.ts'
 
 /* ------------------------------------------------------------------ helpers */
 
@@ -1257,4 +1262,154 @@ test('worker: event envelopes carry stable identity and honest time', () => {
   const data = envelope.data as Record<string, unknown>
   assert.equal(data['textTruncated'], false)
   assert.equal(data['senderName'], null, 'names are never guessed beyond the catalog label')
+})
+
+/* ------------------------------------------------ run adapter (Host-scheduled) */
+
+/** A Host double for the run adapter: per-run commit faces plus a fence. */
+interface AdapterHost {
+  value: string | null
+  revision: number
+  readonly commits: { readonly run: number; readonly batch: IngestBatch }[]
+  /** Runs whose commit face the Host has fenced (a later run bumped the generation). */
+  readonly fenced: Set<number>
+}
+
+const ADAPTER_INSTANCE = 'col-adapter'
+
+/** One run context as the Host would hand it to `run(ctx)`. */
+function adapterCtx(host: AdapterHost, runId: number, maxEvents = 200): CollectorRunContext<YzjConfig> {
+  return {
+    instanceId: ADAPTER_INSTANCE,
+    sourceId: 'src-adapter',
+    type: 'quno/yzj-im',
+    config: focusedConfig(),
+    runId,
+    checkpoint: { value: host.value, revision: host.revision },
+    limits: { maxEventsPerRun: maxEvents, maxBytesPerRun: 2 * 1024 * 1024 },
+    logger: { info: () => {}, warn: () => {} },
+    signal: new AbortController().signal,
+    commit: async (batch: IngestBatch): Promise<IngestAck> => {
+      if (host.fenced.has(runId)) {
+        // The Host's refusal, structurally (the plugin never sees its class).
+        throw Object.assign(new Error(`run ${String(runId)} is fenced`), {
+          name: 'QunoIngressError',
+          shape: { code: 'stale-generation', message: 'fenced', retryable: false },
+        })
+      }
+      host.commits.push({ run: runId, batch })
+      host.revision += 1
+      if (batch.checkpointAfter != null) host.value = batch.checkpointAfter.value
+      return {
+        batchId: `bat-${String(host.revision)}`,
+        batchKey: batch.batchKey,
+        accepted: [],
+        eventCount: batch.events.length,
+        acceptedCount: batch.events.length,
+        duplicateCount: 0,
+        checkpointRevision: host.revision,
+        gapReported: false,
+      }
+    },
+  }
+}
+
+function mountAdapter(): () => void {
+  const mount = factory.mount
+  assert.ok(mount, 'the yzj factory owns a mount face')
+  return mount({ instanceId: ADAPTER_INSTANCE, config: focusedConfig() }) ?? (() => {})
+}
+
+test('adapter: one worker spans runs — discovery stays paced and commits ride the current run', async () => {
+  resetTokens('default')
+  resetCollectorWorkers()
+  const t0 = NOW
+  const host: AdapterHost = { value: v2Pinned('m1', ['m1']), revision: 0, commits: [], fenced: new Set() }
+  let dispose = mountAdapter()
+  try {
+    const exec = queueExec([
+      whoamiRun(),
+      ok([conv('g1', '项目群', 2, 'm9')]),
+      ok([
+        msg('m2', t0 + 1_000, { at: ['u-self'] }),
+        msg('m3', t0 + 2_000, { at: ['u-self'] }),
+      ]),
+    ])
+    const first = await runCollector(adapterCtx(host, 1, 1), exec)
+    assert.equal(first.ok, true)
+    assert.ok(first.ok && typeof first.nextRunAtMs === 'number', 'a backlog continuation hints the next run')
+    assert.deepEqual(host.commits.flatMap(commit => commit.batch.events.map(event => event.eventKey)), ['yzj:g1:m2'])
+
+    // Run 2 starts → the Host bumps the generation and fences run 1's face.
+    host.fenced.add(1)
+    exec.push(whoamiRun(), ok([msg('m3', t0 + 2_000, { at: ['u-self'] })]))
+    const second = await runCollector(adapterCtx(host, 2, 1), exec)
+    assert.equal(second.ok, true, 'the continuation commits through the CURRENT run, never the fenced one')
+    assert.equal(exec.calls.filter(call => call.includes('recent')).length, 1, 'run 2 is not discovery-due: the worker kept its pacing')
+    assert.deepEqual(exec.calls[3], ['--profile', 'default', 'whoami'])
+    const runTwo = host.commits.filter(commit => commit.run === 2)
+    assert.deepEqual(runTwo.flatMap(commit => commit.batch.events.map(event => event.eventKey)), ['yzj:g1:m3'])
+
+    // A remount (pause/reconfigure) drops the slot: the next run is a fresh worker.
+    dispose()
+    dispose = mountAdapter()
+    exec.push(whoamiRun(), ok([conv('g1', '项目群', 2, 'm3')]))
+    const third = await runCollector(adapterCtx(host, 3), exec)
+    assert.equal(third.ok, true)
+    assert.equal(exec.calls.filter(call => call.includes('recent')).length, 2, 'a fresh worker is discovery-due again')
+    assert.equal(exec.calls.length, 7, 'watermark equals the stored cursor → no message read')
+  } finally {
+    dispose()
+  }
+})
+
+test('adapter: a fatal round drops the worker so a re-enable re-verifies instead of replaying', async () => {
+  resetTokens('default')
+  resetCollectorWorkers()
+  const host: AdapterHost = { value: v2Pinned('m1', ['m1']), revision: 0, commits: [], fenced: new Set() }
+  const dispose = mountAdapter()
+  try {
+    const exec = queueExec([whoamiRun('u-other')])
+    const outcome = await runCollector(adapterCtx(host, 1), exec)
+    assert.equal(outcome.ok, false)
+    assert.ok(!outcome.ok)
+    assert.equal(outcome.failure.fatal, true)
+    assert.equal(outcome.failure.code, 'account-changed')
+
+    // Same mount (the Host re-armed after a re-enable): a retained fatal worker
+    // would refuse without any CLI call; a fresh one re-verifies identity.
+    exec.push(whoamiRun('u-other'))
+    const again = await runCollector(adapterCtx(host, 2), exec)
+    assert.equal(exec.calls.length, 2)
+    assert.ok(!again.ok && again.failure.fatal === true)
+  } finally {
+    dispose()
+  }
+})
+
+test('adapter: a logged-out CLI maps to a non-fatal auth-required failure the Host backs off', async () => {
+  resetTokens('default')
+  resetCollectorWorkers()
+  const host: AdapterHost = { value: null, revision: 0, commits: [], fenced: new Set() }
+  const dispose = mountAdapter()
+  try {
+    const exec = queueExec([
+      fail(3, {
+        type: 'authentication',
+        subtype: 'credentials_missing',
+        message: 'this command requires user identity',
+        hint: '运行 yzj-cli auth login --device 重新认证',
+      }),
+    ])
+    const outcome = await runCollector(adapterCtx(host, 1), exec)
+    assert.equal(outcome.ok, false)
+    assert.ok(!outcome.ok)
+    assert.equal(outcome.failure.state, 'auth-required')
+    assert.equal(outcome.failure.fatal, undefined)
+    assert.equal(outcome.failure.retryAfterMs, null, 'auth needs a human; the Host backoff governs')
+    assert.match(outcome.failure.message, /auth login/)
+    assert.equal(host.commits.length, 0, 'a failed read never persists a cursor')
+  } finally {
+    dispose()
+  }
 })
