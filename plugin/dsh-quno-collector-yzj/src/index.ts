@@ -40,7 +40,7 @@ export const inject = ['qunoCollectors']
 export const definition: CollectorDefinition = {
   type: 'quno/yzj-im',
   contractVersion: 'quno.collector/v2',
-  implementationVersion: '0.3.0',
+  implementationVersion: '0.4.0',
   displayName: '云之家群聊',
   description: '每 5 分钟检查云之家最近会话，接收直接 @你 及他人私聊。为识别 @，本机会读取候选会话的新消息，仅把命中消息交给 Quno。不发送消息、不标已读、不下载附件。',
   eventTypes: [{ type: 'im.message.created', summary: '@我或私聊的新消息' }],

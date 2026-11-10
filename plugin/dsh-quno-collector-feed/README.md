@@ -12,7 +12,8 @@ dsh plugin --profile web add <repo>/plugin/dsh-quno-collector-feed
 
 ## Behavior
 
-- 轮询模式，最小 60 秒、默认 300 秒；条件请求命中 `304` 时只更新游标与健康时间，不产生事件。
+- 由 Quno Host 统一调度（`intervalSec` 默认 300 秒、最小 60 秒）；条件请求命中 `304` 时不产生事件、不提交。
+- 条目多时分批提交：单次运行最多 `maxEventsPerRun` 条（100），每批不超过 Host 的单批上限；`ETag`/`Last-Modified` 只随**最后一批**推进，余量在下一次运行用无条件请求续上——不会因 304 丢掉没来得及提交的条目。
 - 条目身份：`guid`/`id` 优先，缺失时用 link；修订为标题+链接+发布时间+摘要的内容哈希。同一批重试身份稳定，内容变化生成新事件。
 - 只取最近 `maxItems` 条；源条目更多时显式报 gap（`changeCoverage: sampled`），不声称覆盖全史。
 - 失败分类：401/403 → `auth-required`；429 → `rate-limited`（按 `Retry-After` 退避）；5xx → `unavailable`；其余 → `degraded`。健康快照含连续失败数、下次重试时间与条目滞后秒数。

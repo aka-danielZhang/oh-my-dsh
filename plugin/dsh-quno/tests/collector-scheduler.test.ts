@@ -458,3 +458,41 @@ test('a timer that fires for a vanished row logs instead of leaking a rejection'
     fixture.store.close()
   }
 })
+
+test('a batch gap is recorded but does not pin health; only the run\'s issues degrade it', async () => {
+  const { fixture, timer, service } = setup()
+  try {
+    const plans: ('routine-gap' | 'standing-gap')[] = ['routine-gap', 'standing-gap']
+    service.register(definition('sched/gap'), {
+      async run(ctx) {
+        const plan = plans.shift()
+        await ctx.commit({
+          batchKey: `gap-${String(plan)}`,
+          events: [],
+          checkpointAfter: { value: 'c', revision: ctx.checkpoint.revision },
+          gap: { reason: 'newest 还有更早历史（首轮只钉基线，不回放）' },
+        })
+        return plan === 'standing-gap'
+          ? { ok: true, health: { issues: [{ code: 'init-window-exceeded', detail: '1 个会话存在待处理缺口' }] } }
+          : { ok: true }
+      },
+    })
+    const created = service.createInstance({ type: 'sched/gap', config: {}, desiredState: 'enabled' })
+    assert.ok(created.ok)
+    timer.fireDue()
+    await drained()
+    const routine = fixture.store.getCollectorInstance(created.instance.id)
+    assert.equal(routine.health, 'healthy', 'a declared-routine batch gap does not leave the instance degraded')
+    assert.equal(service.healthSnapshot().gaps.length, 1, 'the gap stays visible in the gap view')
+
+    timer.advance(timer.nextDue()! - timer.now)
+    timer.fireDue()
+    await drained()
+    const standing = fixture.store.getCollectorInstance(created.instance.id)
+    assert.equal(standing.health, 'degraded', 'a coverage debt the run reports as an issue degrades')
+    assert.equal(standing.errorCode, 'init-window-exceeded')
+  } finally {
+    await service.stopAll()
+    fixture.store.close()
+  }
+})

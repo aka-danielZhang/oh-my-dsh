@@ -12,7 +12,8 @@ dsh plugin --profile web add <repo>/plugin/dsh-quno-collector-calendar
 
 ## Behavior
 
-- 轮询模式，最小 30 秒、默认 60 秒；停止/重配由 Quno 生命周期统一管理，`stop()` 幂等。
+- 由 Quno Host 统一调度（`intervalSec` 默认 60 秒、最小 30 秒）；插件不持有定时器，暂停/改配/停用由 Quno 生命周期统一管理。
+- 变更量大时分批提交：单次运行最多 `maxEventsPerRun` 条（200），每批不超过 Host 的单批上限（100 条 / 1 MiB）；检查点只推进到已提交的变更，余量约 5 秒后的下一次运行继续——不丢、不重。
 - 事件标识：`UID`；修订：`SEQUENCE:LAST-MODIFIED/DTSTAMP:内容哈希`。修订变化即新事件，旧事件保留。
 - 删除/取消：提交 `operation: 'retract'` 的撤回事件（含上一修订），不静默删除历史。
 - 时间：带 `Z` 按 UTC，带 `TZID` 按该时区，浮动时间按配置的 `timeZone` 解释；只保留「昨天起 24h」到 `lookaheadDays` 窗口内的事件。

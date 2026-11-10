@@ -29,7 +29,7 @@ interface CollectorRegistryFace {
 export const definition: CollectorDefinition = {
   type: 'quno/feed',
   contractVersion: 'quno.collector/v2',
-  implementationVersion: '0.1.0',
+  implementationVersion: '0.2.0',
   displayName: '消息源（RSS/Atom）',
   description: '轮询一个 RSS/Atom 订阅源，用 ETag / Last-Modified 条件请求只取变化，按条目标识与内容修订提交观察。',
   eventTypes: [{ type: 'feed/item', summary: '订阅源条目新增或更新' }],
@@ -314,10 +314,27 @@ export function ingressRefusalOf(error: unknown): { readonly code: string; reado
   return { code: shape.code, message: error.message, retryable: shape.retryable === true }
 }
 
-/** One conditional poll of the configured feed. */
+/** A backlog that did not fit one run resumes this soon (the Host floor is 1s). */
+const CONTINUATION_MS = 5_000
+
+/** Per-batch headroom for the envelope wrapper beyond the events and the checkpoint. */
+const BATCH_OVERHEAD_BYTES = 4 * 1024
+
+/**
+ * One conditional poll of the configured feed.
+ *
+ * New or changed entries are committed in batches that fit the Host's
+ * per-batch limits, up to the run's own budget. The conditional-request
+ * validators (ETag / Last-Modified) advance ONLY with the last batch of a
+ * fully committed change set: if they advanced earlier, the next poll would
+ * be answered 304 and the entries this run could not commit would be lost.
+ * Intermediate batches record the committed entries in `seen` and keep the
+ * previous validators, so the next poll re-downloads and resumes.
+ */
 async function runOnce(ctx: CollectorRunContext<FeedConfig>): Promise<CollectorRunOutcome> {
   const config = ctx.config
   const startedAt = Date.now()
+  const runKey = `feed-${String(startedAt)}-${Math.random().toString(36).slice(2, 8)}`
   const state = parseState(ctx.checkpoint.value)
   const result = await pollFeed(config, state, fetch, ctx.signal)
   if (result.notModified) {
@@ -328,38 +345,83 @@ async function runOnce(ctx: CollectorRunContext<FeedConfig>): Promise<CollectorR
     }
   }
   const feedTitle = result.feedTitle
-  const envelopes: EventEnvelope[] = result.entries.flatMap((entry) => {
+  const pending = result.entries.flatMap((entry) => {
     const previous = state.seen[entry.id]
     if (previous === entry.revision) return []
-    return [toEnvelope(entry, config.label ?? feedTitle, previous === undefined)]
+    const envelope = toEnvelope(entry, config.label ?? feedTitle, previous === undefined)
+    return [{ entry, envelope, bytes: Buffer.byteLength(JSON.stringify(envelope), 'utf8') }]
   })
-  if (envelopes.length > 0) {
-    await ctx.commit({
-      batchKey: `feed-${String(startedAt)}-${Math.random().toString(36).slice(2, 8)}`,
-      events: envelopes,
-      checkpointAfter: { value: JSON.stringify(result.state), revision: ctx.checkpoint.revision },
-      gap: result.gap === null ? null : { reason: result.gap },
+  const limits = ctx.limits
+  const seen: Record<string, string> = { ...state.seen }
+  // Upper bound of every checkpoint this run can write.
+  const reserve = Buffer.byteLength(JSON.stringify({ ...result.state, seen: { ...state.seen, ...result.state.seen } }), 'utf8') + BATCH_OVERHEAD_BYTES
+  let revision = ctx.checkpoint.revision
+  let emitted = 0
+  let runBytes = 0
+  let batch = 0
+  while (emitted < pending.length && emitted < limits.maxEventsPerRun) {
+    const chunk: typeof pending = []
+    let chunkBytes = 0
+    for (const candidate of pending.slice(emitted)) {
+      if (emitted + chunk.length >= limits.maxEventsPerRun || chunk.length >= limits.maxEventsPerBatch) break
+      if (reserve + chunkBytes + candidate.bytes > limits.maxBytesPerBatch) break
+      if (runBytes + chunkBytes + candidate.bytes > limits.maxBytesPerRun) break
+      chunk.push(candidate)
+      chunkBytes += candidate.bytes
+    }
+    if (chunk.length === 0) {
+      if (emitted > 0) break // the run's byte budget is spent; the rest waits
+      return {
+        ok: false,
+        failure: {
+          state: 'degraded',
+          code: 'batch-too-large',
+          message: `单个条目（${String(pending[0]?.bytes ?? 0)} 字节）放不进一个批次（上限 ${String(limits.maxBytesPerBatch)} 字节，含检查点 ${String(reserve)} 字节）`,
+        },
+      }
+    }
+    for (const item of chunk) seen[item.entry.id] = item.entry.revision
+    const complete = emitted + chunk.length === pending.length
+    const cursor: CursorState = complete ? result.state : { etag: state.etag, lastModified: state.lastModified, seen }
+    const ack = await ctx.commit({
+      batchKey: `${runKey}-${String(batch)}`,
+      events: chunk.map(item => item.envelope),
+      checkpointAfter: { value: JSON.stringify(cursor), revision },
+      gap: batch === 0 && result.gap !== null ? { reason: result.gap } : null,
     })
-  } else if (result.state.etag !== state.etag || result.state.lastModified !== state.lastModified) {
+    revision = ack.checkpointRevision
+    emitted += chunk.length
+    runBytes += chunkBytes
+    batch += 1
+  }
+  if (pending.length === 0 && (result.state.etag !== state.etag || result.state.lastModified !== state.lastModified)) {
     // Nothing new: still persist the conditional-request validators so the
     // next poll can 304 instead of re-downloading the document.
     await ctx.commit({
-      batchKey: `feed-cursor-${String(startedAt)}-${Math.random().toString(36).slice(2, 8)}`,
+      batchKey: `${runKey}-cursor`,
       events: [],
-      checkpointAfter: { value: JSON.stringify(result.state), revision: ctx.checkpoint.revision },
+      checkpointAfter: { value: JSON.stringify(result.state), revision },
     })
   }
+  const deferred = pending.length - emitted
   const newest = result.entries.reduce<number | null>((latest, entry) => {
     if (entry.published === null) return latest
     return latest === null || entry.published > latest ? entry.published : latest
   }, null)
+  const detail = [
+    ...(result.gap === null ? [] : [result.gap]),
+    ...(deferred > 0 ? [`${String(deferred)} 个条目超出单次运行上限，下一次运行继续`] : []),
+  ]
   return {
     ok: true,
-    nextRunAtMs: Date.now() + config.intervalSec * 1000,
+    nextRunAtMs: Date.now() + (deferred > 0 ? CONTINUATION_MS : config.intervalSec * 1000),
     health: {
-      coveredThrough: result.state.etag,
-      ...(result.gap === null ? {} : { detail: result.gap, issues: [{ code: 'feed-gap', detail: result.gap }] }),
+      coveredThrough: deferred > 0 ? state.etag : result.state.etag,
+      ...(detail.length === 0 ? {} : { detail: detail.join('；') }),
+      ...(result.gap === null ? {} : { issues: [{ code: 'feed-gap', detail: result.gap }] }),
       ...(newest === null ? {} : { sourceLagSec: Math.max(0, Math.round((Date.now() - newest) / 1000)) }),
+      // Queued entries are progress, not a fault.
+      ...(deferred > 0 ? { progress: { pendingEntries: deferred } } : {}),
     },
   }
 }

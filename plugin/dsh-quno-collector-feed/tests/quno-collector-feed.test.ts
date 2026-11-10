@@ -120,10 +120,16 @@ function ack(batch: IngestBatch, revision: number): IngestAck {
   }
 }
 
+type RunLimits = CollectorRunContext<FeedConfig>['limits']
+
+/** The Host's real per-batch limits (contracts LIMITS) plus the declared per-run quota. */
+const HOST_LIMITS: RunLimits = { maxEventsPerRun: 100, maxBytesPerRun: 2 * 1024 * 1024, maxEventsPerBatch: 100, maxBytesPerBatch: 1024 * 1024 }
+
 function runCtx(
   config: FeedConfig,
   commit: (batch: IngestBatch) => Promise<IngestAck>,
   checkpoint: { readonly value: string | null; readonly revision: number } = { value: null, revision: 0 },
+  limits: Partial<RunLimits> = {},
 ): CollectorRunContext<FeedConfig> {
   return {
     instanceId: 'col-feed',
@@ -132,7 +138,7 @@ function runCtx(
     config,
     runId: 1,
     checkpoint,
-    limits: { maxEventsPerRun: 100, maxBytesPerRun: 2 * 1024 * 1024 },
+    limits: { ...HOST_LIMITS, ...limits },
     logger: { info: () => {}, warn: () => {} },
     signal: new AbortController().signal,
     commit,
@@ -220,6 +226,61 @@ test('run: a fenced commit is read structurally and stops scheduling', async () 
     assert.equal(outcome.failure.fatal, true)
     assert.equal(outcome.failure.code, 'stale-generation')
     assert.equal(ingressRefusalOf(new Error('fetch failed')), null)
+  } finally {
+    feed.close()
+  }
+})
+
+/** An RSS document with one item per id. */
+function rssWith(ids: readonly string[]): string {
+  const items = ids.map((id, index) => `<item><guid>${id}</guid><title>条目 ${id}</title><link>https://example.com/${id}</link><pubDate>${new Date(Date.UTC(2026, 10, 1 + index)).toUTCString()}</pubDate></item>`).join('')
+  return `<?xml version="1.0"?><rss version="2.0"><channel><title>预算源</title>${items}</channel></rss>`
+}
+
+test('run: entries beyond the run budget keep the old validators, so the next poll resumes instead of a 304', async () => {
+  const requests: (string | undefined)[] = []
+  const feed = await serve((request, response) => {
+    const tag = request.headers['if-none-match']
+    requests.push(typeof tag === 'string' ? tag : undefined)
+    if (tag === '"v1"') {
+      response.writeHead(304)
+      response.end()
+      return
+    }
+    response.writeHead(200, { etag: '"v1"' })
+    response.end(rssWith(['m1', 'm2', 'm3', 'm4', 'm5']))
+  })
+  try {
+    const config = validateConfig({ url: feed.url, intervalSec: 60 })
+    assert.ok(config.ok)
+    const batches: IngestBatch[] = []
+    const commit = async (batch: IngestBatch): Promise<IngestAck> => {
+      batches.push(batch)
+      return ack(batch, batches.length)
+    }
+    const checkpoint = (): { value: string | null; revision: number } => ({ value: batches.at(-1)?.checkpointAfter?.value ?? null, revision: batches.length })
+    const committedIds = (): string[] => batches.flatMap(batch => batch.events.map(event => (event.data as { id: string }).id))
+    const budget = { maxEventsPerRun: 3, maxEventsPerBatch: 2 }
+
+    const first = await factory.run(runCtx(config.value, commit, checkpoint(), budget))
+    assert.ok(first.ok)
+    assert.deepEqual(batches.map(batch => batch.events.length), [2, 1])
+    const partial = JSON.parse(checkpoint().value ?? '{}') as { etag: string | null; seen: Record<string, string> }
+    assert.equal(partial.etag, null, 'an incomplete change set must not advance the ETag')
+    assert.deepEqual(Object.keys(partial.seen).sort(), committedIds().sort())
+    assert.equal((first.health?.progress as { pendingEntries?: number } | undefined)?.pendingEntries, 2)
+    assert.ok(first.nextRunAtMs !== undefined && first.nextRunAtMs - Date.now() < 10_000)
+
+    const second = await factory.run(runCtx(config.value, commit, checkpoint(), budget))
+    assert.ok(second.ok)
+    assert.equal(requests[1], undefined, 'the resumed poll is unconditional, so the server cannot answer 304')
+    assert.equal((JSON.parse(checkpoint().value ?? '{}') as { etag: string | null }).etag, '"v1"', 'the completing batch advances the ETag')
+    assert.deepEqual(committedIds().sort(), ['m1', 'm2', 'm3', 'm4', 'm5'], 'every entry is committed exactly once')
+
+    const third = await factory.run(runCtx(config.value, commit, checkpoint(), budget))
+    assert.ok(third.ok)
+    assert.equal(requests[2], '"v1"')
+    assert.equal(batches.length, 3, 'only now does the feed answer 304 and commit nothing')
   } finally {
     feed.close()
   }

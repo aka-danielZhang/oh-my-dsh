@@ -32,7 +32,7 @@ interface CollectorRegistryFace {
 export const definition: CollectorDefinition = {
   type: 'quno/calendar',
   contractVersion: 'quno.collector/v2',
-  implementationVersion: '0.1.0',
+  implementationVersion: '0.2.0',
   displayName: '日历（本地 .ics）',
   description: '读取本地 iCalendar 文件目录，按 UID + 修订号追踪新增、改期与取消的日程。',
   eventTypes: [
@@ -184,42 +184,113 @@ export function ingressRefusalOf(error: unknown): { readonly code: string; reado
   return { code: shape.code, message: error.message, retryable: shape.retryable === true }
 }
 
-/** One snapshot-diff pass over the configured calendar files. */
+/** A backlog that did not fit one run resumes this soon (the Host floor is 1s). */
+const CONTINUATION_MS = 5_000
+
+/** Per-batch headroom for the envelope wrapper beyond the events and the checkpoint. */
+const BATCH_OVERHEAD_BYTES = 4 * 1024
+
+/** One pending change: its envelope and how it moves the snapshot once committed. */
+interface Change {
+  readonly envelope: EventEnvelope
+  readonly uid: string
+  /** The revision the snapshot records after the commit; null = removed. */
+  readonly revision: string | null
+  readonly bytes: number
+}
+
+function change(envelope: EventEnvelope, uid: string, revision: string | null): Change {
+  return { envelope, uid, revision, bytes: Buffer.byteLength(JSON.stringify(envelope), 'utf8') }
+}
+
+/**
+ * One snapshot-diff pass over the configured calendar files.
+ *
+ * The change set is committed in batches that fit the Host's per-batch
+ * limits, up to the run's own budget. The snapshot (the checkpoint) only
+ * advances past COMMITTED changes: a change that did not fit keeps its old
+ * revision — a deferred removal keeps its entry — so the next run detects it
+ * again instead of silently skipping it.
+ */
 async function runOnce(ctx: CollectorRunContext<CalendarConfig>): Promise<CollectorRunOutcome> {
   const config = ctx.config
   const startedAt = Date.now()
+  const runKey = `calendar-${String(startedAt)}-${Math.random().toString(36).slice(2, 8)}`
   const { events, gaps, files } = readCalendar(config)
   const state = parseState(ctx.checkpoint.value)
-  const next = new Map<string, CalendarEvent>()
-  for (const event of events) next.set(event.uid, event)
-  const envelopes: EventEnvelope[] = []
+  const current = new Map<string, CalendarEvent>()
+  for (const event of events) current.set(event.uid, event)
+  const changes: Change[] = []
   for (const event of events) {
     const previous = state.events[event.uid]
     if (previous === event.revision) continue
-    envelopes.push(toEnvelope(event, previous === undefined ? 'created' : 'updated'))
+    changes.push(change(toEnvelope(event, previous === undefined ? 'created' : 'updated'), event.uid, event.revision))
   }
   for (const uid of Object.keys(state.events)) {
-    if (next.has(uid)) continue
-    envelopes.push(removalEnvelope(uid, state.events[uid] ?? 'unknown'))
-  }
-  const nextState: SnapshotState = {
-    events: Object.fromEntries([...next.entries()].map(([uid, event]) => [uid, event.revision])),
+    if (current.has(uid)) continue
+    changes.push(change(removalEnvelope(uid, state.events[uid] ?? 'unknown'), uid, null))
   }
   const gapReason = gaps.length === 0 ? null : gaps.join('；')
-  if (envelopes.length > 0) {
-    await ctx.commit({
-      batchKey: `calendar-${String(startedAt)}-${Math.random().toString(36).slice(2, 8)}`,
-      events: envelopes.slice(0, ctx.limits.maxEventsPerRun),
-      checkpointAfter: { value: JSON.stringify(nextState), revision: ctx.checkpoint.revision },
-      gap: gapReason === null ? null : { reason: gapReason },
+
+  const snapshot: Record<string, string> = { ...state.events }
+  // Upper bound of every intermediate snapshot: each uid either side knows.
+  const union = { ...state.events, ...Object.fromEntries(events.map(event => [event.uid, event.revision])) }
+  const reserve = Buffer.byteLength(JSON.stringify({ events: union }), 'utf8') + BATCH_OVERHEAD_BYTES
+  const limits = ctx.limits
+  let revision = ctx.checkpoint.revision
+  let emitted = 0
+  let runBytes = 0
+  let batch = 0
+  while (emitted < changes.length && emitted < limits.maxEventsPerRun) {
+    const chunk: Change[] = []
+    let chunkBytes = 0
+    for (const candidate of changes.slice(emitted)) {
+      if (emitted + chunk.length >= limits.maxEventsPerRun || chunk.length >= limits.maxEventsPerBatch) break
+      if (reserve + chunkBytes + candidate.bytes > limits.maxBytesPerBatch) break
+      if (runBytes + chunkBytes + candidate.bytes > limits.maxBytesPerRun) break
+      chunk.push(candidate)
+      chunkBytes += candidate.bytes
+    }
+    if (chunk.length === 0) {
+      if (emitted > 0) break // the run's byte budget is spent; the rest waits
+      return {
+        ok: false,
+        failure: {
+          state: 'degraded',
+          code: 'batch-too-large',
+          message: `单条日程变更（${String(changes[0]?.bytes ?? 0)} 字节）放不进一个批次（上限 ${String(limits.maxBytesPerBatch)} 字节，含检查点 ${String(reserve)} 字节）`,
+        },
+      }
+    }
+    for (const item of chunk) {
+      if (item.revision === null) delete snapshot[item.uid]
+      else snapshot[item.uid] = item.revision
+    }
+    const ack = await ctx.commit({
+      batchKey: `${runKey}-${String(batch)}`,
+      events: chunk.map(item => item.envelope),
+      checkpointAfter: { value: JSON.stringify({ events: snapshot } satisfies SnapshotState), revision },
+      gap: batch === 0 && gapReason !== null ? { reason: gapReason } : null,
     })
+    revision = ack.checkpointRevision
+    emitted += chunk.length
+    runBytes += chunkBytes
+    batch += 1
   }
+  const deferred = changes.length - emitted
+  const detail = [
+    ...(gapReason === null ? [] : [gapReason]),
+    ...(deferred > 0 ? [`${String(deferred)} 条日程变更超出单次运行上限，下一次运行继续`] : []),
+  ]
   return {
     ok: true,
-    nextRunAtMs: Date.now() + config.intervalSec * 1000,
+    nextRunAtMs: Date.now() + (deferred > 0 ? CONTINUATION_MS : config.intervalSec * 1000),
     health: {
       coveredThrough: `${String(files)} file(s)`,
-      ...(gapReason === null ? {} : { detail: gapReason, issues: [{ code: 'read-gap', detail: gapReason }] }),
+      ...(detail.length === 0 ? {} : { detail: detail.join('；') }),
+      ...(gapReason === null ? {} : { issues: [{ code: 'read-gap', detail: gapReason }] }),
+      // Queued change is progress, not a fault.
+      ...(deferred > 0 ? { progress: { pendingChanges: deferred } } : {}),
     },
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "dsh-quno-collector-feed",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Quno collector: RSS/Atom feed source with ETag/Last-Modified checkpoint and stable item identity",
   "type": "module",
   "main": "lib/index.js",

@@ -11,6 +11,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { QunoCollectorsService, type CollectorFactory, type CollectorRunContext, type CollectorRunOutcome } from '../src/collectors.ts'
 import { QunoIngressError } from '../src/ingress.ts'
+import { LIMITS } from '../src/contracts.ts'
 import { openFixture } from './helpers.ts'
 import type { CollectorDefinition } from '../src/types.ts'
 import type { IngestAck, IngestBatch } from '../src/types.ts'
@@ -130,6 +131,9 @@ test('S02 a collector run receives only its run context, with commit as the sole
     assert.equal(runtime.capabilities?.checkpointEntries, true, 'checkpoint-entries/v1 is declared')
     assert.equal(typeof runtime.checkpointEntries?.list, 'function')
     assert.equal(typeof runtime.commit, 'function')
+    // The per-batch ingest limits ride the context: plugins never import the Host constants.
+    assert.equal(runtime.limits.maxEventsPerBatch, LIMITS.maxBatchEvents)
+    assert.equal(runtime.limits.maxBytesPerBatch, LIMITS.maxBatchBytes)
     assert.equal('schedule' in runtime, false)
     assert.equal('notify' in runtime, false)
   } finally {

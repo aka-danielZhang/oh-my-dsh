@@ -17,7 +17,7 @@
  * @module dsh-quno/collectors
  */
 
-import { parseCollectorDefinition, COLLECTOR_CONTRACT_VERSION } from './contracts.ts'
+import { LIMITS, parseCollectorDefinition, COLLECTOR_CONTRACT_VERSION } from './contracts.ts'
 import type { CollectorHealthExtras, ContractFailure } from './contracts.ts'
 import { QunoIngress, QunoIngressError, readGapReport } from './ingress.ts'
 import type { IngressBinding, IngressTriggerSink } from './ingress.ts'
@@ -105,6 +105,13 @@ export interface CollectorRunContext<Config = Record<string, unknown>> {
   readonly limits: {
     readonly maxEventsPerRun: number
     readonly maxBytesPerRun: number
+    /**
+     * The ingest limits of ONE commit (the batch schema refuses anything
+     * larger). A run whose change set exceeds them commits several batches;
+     * plugins read these instead of importing the Host's constants.
+     */
+    readonly maxEventsPerBatch: number
+    readonly maxBytesPerBatch: number
   }
   readonly logger: { info(message: string): void; warn(message: string): void }
   /** The only write face. One run may commit several batches. */
@@ -233,8 +240,6 @@ interface LiveRun {
   readonly controller: AbortController
   readonly binding: IngressBinding
   promise: Promise<void>
-  /** Set when this run's commits reported an upstream gap (health input). */
-  gapReason?: string
 }
 
 /** Per-instance scheduling + mount state. */
@@ -488,6 +493,8 @@ export class QunoCollectorsService {
       limits: {
         maxEventsPerRun: registered.definition.schedule.quotas?.maxEventsPerRun ?? 100,
         maxBytesPerRun: registered.definition.schedule.quotas?.maxBytesPerRun ?? 1024 * 1024,
+        maxEventsPerBatch: LIMITS.maxBatchEvents,
+        maxBytesPerBatch: LIMITS.maxBatchBytes,
       },
       logger: {
         info: message => this.deps.logger.info(`[collector:${instance.type}] ${message}`),
@@ -746,10 +753,12 @@ export class QunoCollectorsService {
     }
     const ingress = new QunoIngress(this.deps.store, this.deps.qunoId, {
       onCommitted: (ack, sourceId) => this.deps.onIngest?.(ack, sourceId),
-      onGap: (sourceId, gapReason) => {
-        // The gap rides this run's health: the outcome write merges it, so a
-        // successful run that saw a gap still lands as degraded.
-        if (sourceId === binding.source.id) live.gapReason = gapReason
+      onGap: (_sourceId, gapReason) => {
+        // Visible while the run is in flight (and stored for the gap view by
+        // the ingress). The run's outcome then owns health: a COVERAGE debt
+        // that outlives the batch must come back as an `issues` entry — a
+        // batch gap alone can be routine progress (yzj's "older history is
+        // pinned as baseline, never replayed") and must not pin degraded.
         const latest = this.deps.store.getCollectorInstance(instanceId)
         this.deps.store.updateCollectorInstance(instanceId, {
           health: 'degraded',
@@ -782,6 +791,8 @@ export class QunoCollectorsService {
       limits: {
         maxEventsPerRun: registered.definition.schedule.quotas?.maxEventsPerRun ?? 100,
         maxBytesPerRun: registered.definition.schedule.quotas?.maxBytesPerRun ?? 1024 * 1024,
+        maxEventsPerBatch: LIMITS.maxBatchEvents,
+        maxBytesPerBatch: LIMITS.maxBatchBytes,
       },
       logger: {
         info: message => this.deps.logger.info(`[collector:${instance.type}] ${message}`),
@@ -831,7 +842,7 @@ export class QunoCollectorsService {
         'collector run',
       )
       if (controller.signal.aborted) return // stopped/reconfigured mid-run: state already written
-      this.applyOutcome(instanceId, definition, outcome, startedAt, live)
+      this.applyOutcome(instanceId, definition, outcome, startedAt)
     } catch (error) {
       if (controller.signal.aborted) return
       const message = (error as Error).message
@@ -856,7 +867,7 @@ export class QunoCollectorsService {
           state: 'degraded',
           code: 'run-threw',
           message,
-        }, startedAt, undefined, live)
+        }, startedAt)
       }
       this.deps.logger.warn(`dsh-quno: collector ${ctx.type} run failed: ${message}`)
     } finally {
@@ -889,12 +900,11 @@ export class QunoCollectorsService {
     definition: CollectorDefinition,
     outcome: CollectorRunOutcome,
     startedAt: number,
-    live: LiveRun,
   ): void {
     if (outcome.ok) {
-      this.applySuccess(instanceId, definition, outcome, startedAt, live)
+      this.applySuccess(instanceId, definition, outcome, startedAt)
     } else {
-      this.applyFailure(instanceId, definition, outcome.failure, startedAt, outcome.health, live)
+      this.applyFailure(instanceId, definition, outcome.failure, startedAt, outcome.health)
     }
   }
 
@@ -903,26 +913,22 @@ export class QunoCollectorsService {
     definition: CollectorDefinition,
     outcome: Extract<CollectorRunOutcome, { ok: true }>,
     startedAt: number,
-    live: LiveRun,
   ): void {
     const now = this.now()
     const extras = outcome.health ?? {}
     const issues = extras.issues ?? []
-    const gapReason = live.gapReason
-    const degraded = issues.length > 0 || gapReason !== undefined
+    const degraded = issues.length > 0
     const rawNext = typeof outcome.nextRunAtMs === 'number' && Number.isFinite(outcome.nextRunAtMs)
       ? outcome.nextRunAtMs
       : now + definition.schedule.defaultIntervalSec * 1000
     const next = Math.min(Math.max(rawNext, now + MIN_RUN_GAP_MS), now + MAX_SCHEDULE_DELAY_MS)
     this.writeHealth(instanceId, {
       state: degraded ? 'degraded' : 'healthy',
-      ...(gapReason !== undefined
-        ? { detail: `检测到数据缺口：${gapReason}` }
-        : extras.detail === undefined ? {} : { detail: extras.detail }),
+      ...(extras.detail === undefined ? {} : { detail: extras.detail }),
       lastAttemptAt: startedAt,
       lastSuccessfulSyncAt: now,
       consecutiveFailures: 0,
-      errorCode: degraded ? (issues[0]?.code ?? 'gap-reported') : null,
+      errorCode: degraded ? (issues[0]?.code ?? null) : null,
       nextRetryAt: null,
       ...(extras.coveredThrough === undefined ? {} : { coveredThrough: extras.coveredThrough }),
       ...(extras.sourceLagSec === undefined ? {} : { sourceLagSec: extras.sourceLagSec }),
@@ -938,7 +944,6 @@ export class QunoCollectorsService {
     failure: CollectorRunFailure,
     startedAt: number,
     extras?: CollectorHealthExtras,
-    live?: LiveRun,
   ): void {
     const now = this.now()
     const instance = this.deps.store.getCollectorInstance(instanceId)

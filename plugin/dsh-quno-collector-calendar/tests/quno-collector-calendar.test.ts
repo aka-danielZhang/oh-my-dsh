@@ -127,10 +127,16 @@ function ack(batch: IngestBatch, revision: number): IngestAck {
   }
 }
 
+type RunLimits = CollectorRunContext<CalendarConfig>['limits']
+
+/** The Host's real per-batch limits (contracts LIMITS) plus the declared per-run quota. */
+const HOST_LIMITS: RunLimits = { maxEventsPerRun: 200, maxBytesPerRun: 8 * 1024 * 1024, maxEventsPerBatch: 100, maxBytesPerBatch: 1024 * 1024 }
+
 function runCtx(
   config: CalendarConfig,
   commit: (batch: IngestBatch) => Promise<IngestAck>,
   checkpoint: { readonly value: string | null; readonly revision: number } = { value: null, revision: 0 },
+  limits: Partial<RunLimits> = {},
 ): CollectorRunContext<CalendarConfig> {
   return {
     instanceId: 'col-cal',
@@ -139,7 +145,7 @@ function runCtx(
     config,
     runId: 1,
     checkpoint,
-    limits: { maxEventsPerRun: 200, maxBytesPerRun: 8 * 1024 * 1024 },
+    limits: { ...HOST_LIMITS, ...limits },
     logger: { info: () => {}, warn: () => {} },
     signal: new AbortController().signal,
     commit,
@@ -203,4 +209,106 @@ test('ingressRefusalOf: only a QunoIngressError-shaped error is a refusal', () =
   assert.deepEqual(ingressRefusalOf(refusal('checkpoint-conflict', true)), { code: 'checkpoint-conflict', message: 'refused: checkpoint-conflict', retryable: true })
   assert.equal(ingressRefusalOf(Object.assign(new Error('nope'), { code: 'ENOENT' })), null, 'a filesystem code is not a Host refusal')
   assert.equal(ingressRefusalOf({ name: 'QunoIngressError', shape: { code: 'x' } }), null, 'a plain object is not an Error')
+})
+
+/** A VCALENDAR with several events inside the read window. */
+function icsWith(entries: readonly { readonly uid: string; readonly offsetMs: number; readonly description?: string }[]): string {
+  const stamp = (ms: number): string => new Date(ms).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')
+  const body = entries.map((entry) => {
+    const start = Date.now() + entry.offsetMs
+    return `BEGIN:VEVENT\nUID:${entry.uid}\nSUMMARY:评审 ${entry.uid}\nDTSTART:${stamp(start)}\nDTEND:${stamp(start + 3_600_000)}\nSEQUENCE:0\n${entry.description === undefined ? '' : `DESCRIPTION:${entry.description}\n`}END:VEVENT\n`
+  }).join('')
+  return `BEGIN:VCALENDAR\nVERSION:2.0\n${body}END:VCALENDAR\n`
+}
+
+/** A Host double that records every batch and keeps the checkpoint like the store does. */
+function recordingHost(): { readonly batches: IngestBatch[]; commit(batch: IngestBatch): Promise<IngestAck>; checkpoint(): { value: string | null; revision: number } } {
+  const batches: IngestBatch[] = []
+  return {
+    batches,
+    commit: async (batch) => {
+      batches.push(batch)
+      return ack(batch, batches.length)
+    },
+    checkpoint: () => ({ value: batches.at(-1)?.checkpointAfter?.value ?? null, revision: batches.length }),
+  }
+}
+
+function committedUids(batches: readonly IngestBatch[]): string[] {
+  return batches.flatMap(batch => batch.events.map(event => (event.data as { uid: string }).uid))
+}
+
+test('run: a change set beyond the run budget commits a prefix; the rest lands next run — nothing skipped', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'quno-cal-budget-'))
+  writeFileSync(join(directory, 'work.ics'), icsWith(['e1', 'e2', 'e3', 'e4', 'e5'].map((uid, index) => ({ uid, offsetMs: (index + 1) * 3_600_000 }))))
+  const config = validateConfig({ directory })
+  assert.ok(config.ok)
+  const host = recordingHost()
+  const budget = { maxEventsPerRun: 3, maxEventsPerBatch: 2 }
+
+  const first = await factory.run(runCtx(config.value, host.commit, host.checkpoint(), budget))
+  assert.ok(first.ok)
+  assert.deepEqual(host.batches.map(batch => batch.events.length), [2, 1], 'batches respect the per-batch count')
+  assert.ok(first.nextRunAtMs !== undefined && first.nextRunAtMs - Date.now() < 10_000, 'a backlog asks for a prompt continuation')
+  assert.equal((first.health?.progress as { pendingChanges?: number } | undefined)?.pendingChanges, 2)
+  const afterFirst = JSON.parse(host.checkpoint().value ?? '{}') as { events: Record<string, string> }
+  assert.deepEqual(Object.keys(afterFirst.events).sort(), committedUids(host.batches).sort(), 'the snapshot holds exactly the committed changes')
+
+  const second = await factory.run(runCtx(config.value, host.commit, host.checkpoint(), budget))
+  assert.ok(second.ok)
+  assert.ok(second.nextRunAtMs !== undefined && second.nextRunAtMs - Date.now() > 30_000, 'a drained backlog returns to the interval')
+  assert.deepEqual(committedUids(host.batches).sort(), ['e1', 'e2', 'e3', 'e4', 'e5'], 'every change is committed exactly once')
+
+  const third = await factory.run(runCtx(config.value, host.commit, host.checkpoint(), budget))
+  assert.ok(third.ok)
+  assert.equal(host.batches.length, 3, 'a settled snapshot commits nothing')
+})
+
+test('run: a deferred removal keeps its snapshot entry, so the retraction is not lost', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'quno-cal-removal-'))
+  writeFileSync(join(directory, 'work.ics'), icsWith([]))
+  const config = validateConfig({ directory })
+  assert.ok(config.ok)
+  const host = recordingHost()
+  const stored = { value: JSON.stringify({ events: { r1: '0:a', r2: '0:b', r3: '0:c' } }), revision: 0 }
+
+  const first = await factory.run(runCtx(config.value, host.commit, stored, { maxEventsPerRun: 2 }))
+  assert.ok(first.ok)
+  assert.deepEqual(host.batches[0]?.events.map(event => event.operation), ['retract', 'retract'])
+  const remaining = JSON.parse(host.checkpoint().value ?? '{}') as { events: Record<string, string> }
+  assert.deepEqual(Object.keys(remaining.events), ['r3'], 'the not-yet-retracted uid stays in the snapshot')
+
+  await factory.run(runCtx(config.value, host.commit, host.checkpoint(), { maxEventsPerRun: 2 }))
+  assert.deepEqual(committedUids(host.batches).sort(), ['r1', 'r2', 'r3'])
+  assert.deepEqual((JSON.parse(host.checkpoint().value ?? '{}') as { events: Record<string, string> }).events, {})
+})
+
+test('run: batches are cut by bytes as well as by count, and stay inside the batch limit', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'quno-cal-bytes-'))
+  const long = '详'.repeat(1500) // ~4.5 KB of UTF-8 per event
+  writeFileSync(join(directory, 'work.ics'), icsWith(['b1', 'b2', 'b3', 'b4'].map((uid, index) => ({ uid, offsetMs: (index + 1) * 3_600_000, description: long }))))
+  const config = validateConfig({ directory })
+  assert.ok(config.ok)
+  const host = recordingHost()
+  const maxBytesPerBatch = 16 * 1024
+  const outcome = await factory.run(runCtx(config.value, host.commit, host.checkpoint(), { maxBytesPerBatch }))
+  assert.ok(outcome.ok)
+  assert.ok(host.batches.length > 1, 'the byte limit split the change set')
+  for (const batch of host.batches) {
+    assert.ok(batch.events.length < 100, 'a byte cut, not a count cut')
+    assert.ok(Buffer.byteLength(JSON.stringify(batch), 'utf8') <= maxBytesPerBatch, 'each batch fits the Host batch limit')
+  }
+  assert.deepEqual(committedUids(host.batches).sort(), ['b1', 'b2', 'b3', 'b4'])
+})
+
+test('run: a single change larger than any batch is a loud failure, not a silent stall', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'quno-cal-huge-'))
+  writeFileSync(join(directory, 'work.ics'), icsWith([{ uid: 'huge', offsetMs: 3_600_000, description: '超'.repeat(1500) }]))
+  const config = validateConfig({ directory })
+  assert.ok(config.ok)
+  const host = recordingHost()
+  const outcome = await factory.run(runCtx(config.value, host.commit, host.checkpoint(), { maxBytesPerBatch: 6 * 1024 }))
+  assert.ok(!outcome.ok)
+  assert.equal(outcome.failure.code, 'batch-too-large')
+  assert.equal(host.batches.length, 0)
 })

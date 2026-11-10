@@ -1,6 +1,6 @@
 {
   "name": "dsh-quno-collector-yzj",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Quno collector: 云之家群聊消息（经宿主机 yzj-cli 只读采集）",
   "type": "module",
   "main": "lib/index.js",

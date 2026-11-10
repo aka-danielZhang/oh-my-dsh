@@ -283,7 +283,7 @@ function lastValue(h: Harness): string {
 
 test('declaration: shard scheduling fields, focused defaults, honest reliability', () => {
   assert.equal(definition.type, 'quno/yzj-im')
-  assert.equal(definition.implementationVersion, '0.3.0')
+  assert.equal(definition.implementationVersion, '0.4.0')
   assert.equal(definition.schedule.defaultIntervalSec, 300)
   assert.equal(definition.schedule.quotas?.maxEventsPerRun, 200)
   assert.equal(definition.firstSync, 'baseline-only')
@@ -1286,7 +1286,7 @@ function adapterCtx(host: AdapterHost, runId: number, maxEvents = 200): Collecto
     config: focusedConfig(),
     runId,
     checkpoint: { value: host.value, revision: host.revision },
-    limits: { maxEventsPerRun: maxEvents, maxBytesPerRun: 2 * 1024 * 1024 },
+    limits: { maxEventsPerRun: maxEvents, maxBytesPerRun: 2 * 1024 * 1024, maxEventsPerBatch: 100, maxBytesPerBatch: 1024 * 1024 },
     logger: { info: () => {}, warn: () => {} },
     signal: new AbortController().signal,
     commit: async (batch: IngestBatch): Promise<IngestAck> => {
