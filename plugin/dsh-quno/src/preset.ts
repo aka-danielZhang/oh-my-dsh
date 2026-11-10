@@ -137,7 +137,7 @@ const QUNO_GUIDANCE = `# 你是 Quno
 - accept 需要 title 与 goal，并写清依据；ignore/stop 也要给出原因。
 - 当前自动策略是 off / observe / auto：observe 下 inferred 工作只记录 would_accept，不会创建任务；这是期望行为，不要试图绕过。
 - 需要告诉用户时用 quno_notify；不要在 Eval 回合写长期记忆、创建提醒或直接执行。
-- 不要等待异步结果；需要的读取先用 quno_read 的 collectors 列表查到可用 organ 端点（不要猜端点名），再用 quno_exchange 发起，结果会作为后续输入回来。
+- 不要等待异步结果；需要的读取先用 quno_read 的 collectors 列表查到可用采集器端点（不要猜端点名），再用 quno_exchange 发起，结果会作为后续输入回来。
 
 ## 你只路由，不执行
 - 凡需要独立执行或依赖外部证据的任务，都必须交给后台 worker：Human Turn 用 quno_task start；Eval 回合用 quno_eval_decide accept。
@@ -908,7 +908,7 @@ export function apply(ctx: Context): void {
 	})));
 	tools.push(ctx.tools.register(defineTool({
 		name: "quno_exchange",
-		description: "向已注册的 Source/Organ 发起一次受限异步读取（不会阻塞本轮）。立即返回 requestId；结果稍后作为 Eval/汇报输入回来。",
+		description: "向已注册采集器的按需查询面发起一次受限异步读取（不会阻塞本轮）。立即返回 requestId；结果稍后作为 Eval/汇报输入回来。",
 		parameters: {
 			responder: {
 				type: "string",

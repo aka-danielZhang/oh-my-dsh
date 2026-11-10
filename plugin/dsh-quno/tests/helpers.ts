@@ -67,7 +67,7 @@ export function addCollector(fixture: Fixture, type = 'test/calendar', patch: Pa
   desiredState: 'enabled' | 'paused' | 'disabled'
   id: string
 }> = {}) {
-  const id = patch.id ?? `sense_${Math.random().toString(36).slice(2)}`
+  const id = patch.id ?? `col_${Math.random().toString(36).slice(2)}`
   const instance = fixture.store.insertCollectorInstance({
     id,
     qunoId: 'quno',

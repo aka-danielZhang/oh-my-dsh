@@ -53,7 +53,7 @@ export interface WorkerToolDeps {
   readonly engine: Engine
   readonly qunoId: string
   readonly now: () => number
-  /** Resolve one organ endpoint for a bounded asynchronous read. */
+  /** Resolve one collector endpoint for a bounded asynchronous read. */
   readonly resolveExchangeResponder?: (endpoint: string, kind: 'request' | 'command') => boolean
   /** The exchange-facing endpoints for `quno_read.collectors` and refusal directories. */
   readonly listCollectors?: () => readonly CollectorEndpointView[]
@@ -316,9 +316,9 @@ export function registerWorkerTools(ctx: Context, deps: WorkerToolDeps, identity
 
   ctx.tools.register(defineTool({
     name: 'quno_exchange',
-    description: '向一个已注册的 Source/Organ 发起受限异步读取。立即返回 requestId，结果稍后成为本 Ticket 的输入。端点从 quno_read 的 collectors 列表获取，不要猜端点名。',
+    description: '向一个已注册采集器的按需查询面发起受限异步读取。立即返回 requestId，结果稍后成为本 Ticket 的输入。端点从 quno_read 的 collectors 列表获取，不要猜端点名。',
     parameters: {
-      responder: { type: 'string', required: true, description: '目标 organ 端点（collector:<instanceId>，来自 quno_read 的 collectors 列表）' },
+      responder: { type: 'string', required: true, description: '目标采集器端点（collector:<instanceId>，来自 quno_read 的 collectors 列表）' },
       kind: { type: 'string', enum: ['request', 'command'], description: '显式请求或受限命令，默认 request' },
       payload: { type: 'json', description: '请求负载（只能是读取）', required: true },
       timeoutMs: { type: 'integer', description: '超时毫秒（1000-600000，默认 60000）' },
@@ -342,9 +342,9 @@ export function registerWorkerTools(ctx: Context, deps: WorkerToolDeps, identity
       if (deps.resolveExchangeResponder !== undefined && !deps.resolveExchangeResponder(responder, kind)) {
         const collectors = deps.listCollectors?.() ?? []
         const directory = collectors.length === 0
-          ? 'no organ endpoints are available right now (quno_read.collectors is empty)'
-          : `available: ${collectors.map(organ => `${organ.endpoint} (${organ.label})`).join(', ')}`
-        throw new QunoStateError('unknown-responder', `no mounted Organ answers ${responder}; ${directory}. Discover endpoints via quno_read.collectors — never guess one.`)
+          ? 'no collector endpoints are available right now (quno_read.collectors is empty)'
+          : `available: ${collectors.map(collector => `${collector.endpoint} (${collector.label})`).join(', ')}`
+        throw new QunoStateError('unknown-responder', `no mounted collector answers ${responder}; ${directory}. Discover endpoints via quno_read.collectors — never guess one.`)
       }
       const exchange = deps.engine.requestExchange({
         kind,

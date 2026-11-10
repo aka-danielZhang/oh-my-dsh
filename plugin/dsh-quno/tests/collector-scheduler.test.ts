@@ -66,14 +66,15 @@ function setup() {
   const timer = new ManualTimer(BASE)
   const now = (): number => timer.now
   const control: Control = { runtimes: [], mounts: 0, outcomes: [] }
+  const warnings: string[] = []
   const service = new QunoCollectorsService({
     store: fixture.store,
     qunoId: 'quno',
-    logger,
+    logger: { info: () => {}, warn: (message: string) => { warnings.push(message) } },
     now,
     setTimer: (callback, delayMs) => timer.setTimeout(callback, delayMs),
   })
-  return { fixture, timer, control, service }
+  return { fixture, timer, control, service, warnings }
 }
 
 /** Wait until the (synchronous, microtask-driven) run pipeline settles. */
@@ -209,8 +210,9 @@ test('a run that overruns maxRunMs is aborted hard and stops scheduling', async 
       mount() {
         return () => { control.mounts += 1 }
       },
-      run: () => new Promise<CollectorRunOutcome>(() => {
+      run: (ctx) => new Promise<CollectorRunOutcome>(() => {
         // hangs forever; the deadline must cut it off
+        control.runtimes.push(ctx)
       }),
     })
     const created = service.createInstance({ type: 'sched/slow', config: {}, desiredState: 'enabled' })
@@ -222,6 +224,19 @@ test('a run that overruns maxRunMs is aborted hard and stops scheduling', async 
     assert.equal(instance.health, 'unavailable')
     assert.equal(instance.errorCode, 'run-timeout')
     assert.equal(timer.nextDue(), null)
+
+    // The hung run keeps going in the background, but no later run will ever
+    // fence it — the timeout itself revokes its write face.
+    const hung = control.runtimes[0]!
+    assert.equal(hung.signal.aborted, true)
+    await assert.rejects(() => hung.commit({
+      batchKey: 'late',
+      events: [{ eventKey: 'late-1', type: 'test/changed', observedAt: new Date(BASE).toISOString(), summary: 'late' }],
+    }), (error: unknown) => {
+      assert.ok(error instanceof QunoIngressError)
+      assert.equal(error.shape.code, 'stale-generation')
+      return true
+    })
   } finally {
     await service.stopAll()
     fixture.store.close()
@@ -316,6 +331,128 @@ test('health is derived from outcomes: issues degrade a success, extras ride thr
     assert.equal((instance.healthDetail?.progress as { trackedConversations?: number }).trackedConversations, 7)
     assert.deepEqual(instance.healthDetail?.issues?.map(issue => issue.code), ['collection-delayed'])
     assert.equal(instance.nextRetryAt, null, 'a success never carries a retry time')
+  } finally {
+    await service.stopAll()
+    fixture.store.close()
+  }
+})
+
+test('health columns survive the run write: last event from the commit, last success across a failure', async () => {
+  const { fixture, timer, control, service } = setup()
+  try {
+    service.register(definition('sched/columns'), {
+      async run(ctx) {
+        control.runtimes.push(ctx)
+        const scripted = control.outcomes.shift()
+        if (scripted !== undefined) return scripted
+        await ctx.commit({
+          batchKey: `columns-${String(control.runtimes.length)}`,
+          events: [{ eventKey: `e${String(control.runtimes.length)}`, type: 'test/changed', observedAt: new Date(BASE).toISOString(), summary: 'x' }],
+          checkpointAfter: { value: 'c', revision: ctx.checkpoint.revision },
+        })
+        return { ok: true }
+      },
+    })
+    const created = service.createInstance({ type: 'sched/columns', config: {}, desiredState: 'enabled' })
+    assert.ok(created.ok)
+    timer.fireDue()
+    await drained()
+    const afterSuccess = fixture.store.getCollectorInstance(created.instance.id)
+    assert.equal(afterSuccess.lastEventAt, BASE, 'the run outcome must not erase the ingress-stamped last event')
+    assert.equal(afterSuccess.lastSuccessAt, BASE)
+
+    // The next run fails: both facts stay, in the columns and in the health JSON.
+    control.outcomes.push({ ok: false, failure: { state: 'unavailable', code: 'down', message: '源不可用' } })
+    timer.advance(timer.nextDue()! - timer.now)
+    timer.fireDue()
+    await drained()
+    const afterFailure = fixture.store.getCollectorInstance(created.instance.id)
+    assert.equal(afterFailure.health, 'unavailable')
+    assert.equal(afterFailure.lastSuccessAt, BASE, 'a failed run keeps the previous success')
+    assert.equal(afterFailure.lastEventAt, BASE)
+    assert.equal(afterFailure.healthDetail?.lastSuccessfulSyncAt, BASE)
+    assert.equal(afterFailure.healthDetail?.lastEventAt, BASE)
+  } finally {
+    await service.stopAll()
+    fixture.store.close()
+  }
+})
+
+test('a run that throws backs off as run-threw instead of crashing the scheduler', async () => {
+  const { fixture, timer, service } = setup()
+  try {
+    service.register(definition('sched/threw'), {
+      async run() {
+        throw new Error('plugin bug')
+      },
+    })
+    const created = service.createInstance({ type: 'sched/threw', config: {}, desiredState: 'enabled' })
+    assert.ok(created.ok)
+    timer.fireDue()
+    await drained()
+    const instance = fixture.store.getCollectorInstance(created.instance.id)
+    assert.equal(instance.health, 'degraded')
+    assert.equal(instance.errorCode, 'run-threw')
+    assert.equal(instance.consecutiveFailures, 1)
+    assert.equal(instance.lifecycle, 'idle', 'a thrown run is a backoff, not a stop')
+    assert.ok(timer.nextDue() !== null && instance.nextRetryAt === timer.nextDue())
+  } finally {
+    await service.stopAll()
+    fixture.store.close()
+  }
+})
+
+test('pause stops the timer and the mount; resume re-mounts and runs immediately', async () => {
+  const { fixture, timer, control, service } = setup()
+  try {
+    let mounted = 0
+    service.register(definition('sched/pause'), {
+      mount() {
+        mounted += 1
+        return () => { control.mounts += 1 }
+      },
+      async run(ctx) {
+        control.runtimes.push(ctx)
+        return { ok: true }
+      },
+    })
+    const created = service.createInstance({ type: 'sched/pause', config: {}, desiredState: 'enabled' })
+    assert.ok(created.ok)
+    timer.fireDue()
+    await drained()
+    assert.equal(control.runtimes.length, 1)
+    assert.equal(mounted, 1)
+
+    await service.pause(created.instance.id)
+    assert.equal(control.mounts, 1, 'pause disposes the mount')
+    assert.equal(timer.nextDue(), null, 'a paused instance has no armed run')
+    assert.equal(fixture.store.getCollectorInstance(created.instance.id).lifecycle, 'stopped')
+
+    await service.resume(created.instance.id)
+    assert.equal(mounted, 2, 'resume mounts again for the current config')
+    assert.equal(timer.nextDue(), timer.now, 'resume runs immediately')
+    timer.fireDue()
+    await drained()
+    assert.equal(control.runtimes.length, 2)
+    assert.equal(fixture.store.getCollectorInstance(created.instance.id).lifecycle, 'idle')
+  } finally {
+    await service.stopAll()
+    fixture.store.close()
+  }
+})
+
+test('a timer that fires for a vanished row logs instead of leaking a rejection', async () => {
+  const { fixture, timer, control, service, warnings } = setup()
+  try {
+    service.register(definition('sched/vanish'), fakeFactory(control))
+    const created = service.createInstance({ type: 'sched/vanish', config: {}, desiredState: 'enabled' })
+    assert.ok(created.ok)
+    // The row disappears behind the scheduler's back (no remove() → timer still armed).
+    fixture.store.deleteCollectorInstance(created.instance.id)
+    timer.fireDue()
+    await drained()
+    assert.equal(control.runtimes.length, 0)
+    assert.ok(warnings.some(message => /could not start/.test(message)), 'the failure is logged, not thrown into the void')
   } finally {
     await service.stopAll()
     fixture.store.close()

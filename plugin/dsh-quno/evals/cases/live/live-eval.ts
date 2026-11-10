@@ -31,7 +31,7 @@ export const liveEvalCases: readonly LiveEvalCase[] = [
     tags: ['live', 'policy'],
     fixtures: seed => generateHiddenFacts(seed),
     policy: async (rt) => {
-      await rt.host.updateConfig({ patch: { acceptMode: 'observe', autoSourceIds: [rt.options.organSourceId] } })
+      await rt.host.updateConfig({ patch: { acceptMode: 'observe', autoSourceIds: [rt.options.collectorSourceId] } })
     },
     steps: [
       { kind: 'ingest', envelopes: [{ eventKey: 'obs-bot-live', type: 'ci.pipeline.finished', subject: { key: 'obs-ci-live' }, summary: '例行流水线完成通知，可能需要关注' }] },
@@ -76,7 +76,7 @@ export const liveEvalCases: readonly LiveEvalCase[] = [
       return facts
     },
     policy: async (rt) => {
-      await rt.host.updateConfig({ patch: { acceptMode: 'auto', autoSourceIds: [rt.options.organSourceId] } })
+      await rt.host.updateConfig({ patch: { acceptMode: 'auto', autoSourceIds: [rt.options.collectorSourceId] } })
     },
     steps: [
       { kind: 'ingest', envelopes: [imMention('inv-trigger-live', '@Quno 调查一下这次发布事故：fixture 目录里有一份事故记录文件，把里面的错误码和失败步骤告诉我', Date.parse('2026-11-07T09:10:00Z'))] },
@@ -117,7 +117,7 @@ export const liveEvalCases: readonly LiveEvalCase[] = [
       return facts
     },
     policy: async (rt) => {
-      await rt.host.updateConfig({ patch: { acceptMode: 'auto', autoSourceIds: [rt.options.organSourceId] } })
+      await rt.host.updateConfig({ patch: { acceptMode: 'auto', autoSourceIds: [rt.options.collectorSourceId] } })
     },
     steps: [
       { kind: 'ingest', envelopes: [imMention('of-trigger-live-1', '@Quno 帮我整理交接备注里的关键信息', Date.parse('2026-11-07T09:15:00Z'))] },
@@ -150,15 +150,15 @@ export const liveEvalCases: readonly LiveEvalCase[] = [
     id: 'live-exchange',
     title: '两条并发 Exchange 各自正确返回（配对不串答）',
     priority: 'p0',
-    goal: '两条并发的 organ 异步查询：每条 Response 按 id 正确配对返回，不串答、不广播（路由器发起形态；Ticket 形态由 scripted exchange-roundtrip 覆盖）',
+    goal: '两条并发的采集器异步查询：每条 Response 按 id 正确配对返回，不串答、不广播（路由器发起形态；Ticket 形态由 scripted exchange-roundtrip 覆盖）',
     tags: ['live', 'exchange'],
     fixtures: seed => generateHiddenFacts(seed),
     policy: async (rt) => {
-      await rt.host.updateConfig({ patch: { acceptMode: 'auto', autoSourceIds: [rt.options.organSourceId] } })
+      await rt.host.updateConfig({ patch: { acceptMode: 'auto', autoSourceIds: [rt.options.collectorSourceId] } })
     },
     steps: [
       // 被测能力：Exchange 引擎的配对不变量——并发查询按 id 各自正确返回。
-      // 经服务面直接驱动真实 Engine/Organ 引擎（requester=路由器，与
+      // 经服务面直接驱动真实 Engine/采集器引擎（requester=路由器，与
       // quno_exchange 在 eval 回合的生产用法一致），绕开模型的路径方差。
       { kind: 'exchange', ticketIndex: -1, payload: { query: 'today' } },
       { kind: 'exchange', ticketIndex: -1, payload: { query: 'week' } },

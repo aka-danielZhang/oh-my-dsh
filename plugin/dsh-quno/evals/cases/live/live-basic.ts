@@ -196,7 +196,7 @@ export const liveConversationCases: readonly LiveEvalCase[] = [
     id: 'live-third-party-tool-unavailable',
     title: '第三方 CLI 未接入时如实报告能力缺口',
     priority: 'p1',
-    goal: '真实模型面对未接入的 yzj-cli 按需查询：可经 quno_read.collectors 发现端点、可委派和探测，但不得把合成 organ 冒充云之家数据，不得虚构 organ、桌面更新根因或查询结果',
+    goal: '真实模型面对未接入的 yzj-cli 按需查询：可经 quno_read.collectors 发现端点、可委派和探测，但不得把合成采集器冒充云之家数据，不得虚构采集器端点、桌面更新根因或查询结果',
     tags: ['live', 'third-party', 'capability', 'grounding'],
     fixtures: seed => generateHiddenFacts(seed),
     steps: [
@@ -214,9 +214,9 @@ export const liveConversationCases: readonly LiveEvalCase[] = [
       const report = ticket === undefined ? undefined : repo.listAssignmentsByTicket(ticket.id).at(-1)?.report
       const replies = assistantTexts(rt, MAIN_SESSION).join('\n')
       const exchanges = repo.listExchanges(rt.host.qunoId, { limit: 20 })
-      const unsupportedCause = /重启.*(?:恢复|解决)|(?:桌面|运行时).*(?:更新|构建).*(?:导致|回归|丢)|shell\s*(?:插件|organ).*(?:没|未)(?:加载|挂载)/i.test(replies)
+      const unsupportedCause = /重启.*(?:恢复|解决)|(?:桌面|运行时).*(?:更新|构建).*(?:导致|回归|丢)|shell\s*(?:插件|organ|采集器|collector).*(?:没|未)(?:加载|挂载)/i.test(replies)
       const fakeSuccess = /最近会话如下|查询成功|已(?:为你)?(?:查询|整理)(?:完|好|了)/.test(replies)
-      const refusals = workerResults.filter(text => /no mounted Organ answers|unknown-responder/.test(text))
+      const refusals = workerResults.filter(text => /no mounted collector answers|unknown-responder/.test(text))
       return {
         chain: [
           check('ticket.mandate', 'delegated-exactly-once', tickets.length === 1, 1, tickets.length),

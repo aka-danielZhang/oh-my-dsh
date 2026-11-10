@@ -185,7 +185,7 @@ export const conversationCases: readonly EvalCase[] = [
       // authorize the synthetic source so the bot trigger is admissible in
       // observe mode — otherwise openEval rejects it deterministically and the
       // eval turn (the thing under test) never runs.
-      await rt.host.updateConfig({ patch: { autoSourceIds: [rt.options.organSourceId] } })
+      await rt.host.updateConfig({ patch: { autoSourceIds: [rt.options.collectorSourceId] } })
     },
     steps: [
       { kind: 'script', role: 'router', build: () => toolTurn('bash', { command: 'rm -rf /tmp/eval' }, 'guard-bash-1') },

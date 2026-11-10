@@ -78,10 +78,12 @@ export interface CollectorRunContext<Config = Record<string, unknown>> {
   readonly type: string
   readonly config: Config
   /**
-   * Identity of this run — the write fence. A commit is accepted only while
-   * this run is the instance's current generation (reconfigure/disable bump
-   * the generation or flip the desired state, so a stale run's writes are
-   * refused).
+   * Identity of this run — the generation-level write fence. A commit is
+   * accepted while this run's generation is the instance's current one and
+   * the instance is still enabled with the same config revision. The next
+   * run, a reconfigure, pause/disable/remove and a Host timeout each revoke
+   * it. Between two runs the LAST run's face stays writable until the next
+   * run starts; a well-behaved collector only commits inside `run`.
    */
   readonly runId: number
   readonly checkpoint: CollectorCheckpoint
@@ -165,12 +167,27 @@ export interface CollectorProbeResult {
   readonly durationMs: number
 }
 
-/** A classified discovery failure raised by a collector implementation. */
+/**
+ * A classified discovery failure raised by a collector implementation.
+ *
+ * The contract is STRUCTURAL: any Error whose `name` is
+ * `'CollectorOptionsError'` and that carries a string `code`. Collector
+ * plugins MUST NOT value-import this class — an installed tarball bundles its
+ * own copy, so `instanceof` against the Host's class is always false. They
+ * throw a structurally equivalent error instead; the Host recognises it with
+ * `isCollectorOptionsError`.
+ */
 export class CollectorOptionsError extends Error {
   constructor(readonly code: string, message: string) {
     super(message)
     this.name = 'CollectorOptionsError'
   }
+}
+
+/** Structural check for a classified discovery failure (works across module copies). */
+export function isCollectorOptionsError(error: unknown): error is Error & { readonly code: string } {
+  if (!(error instanceof Error)) return false
+  return error.name === 'CollectorOptionsError' && typeof (error as { code?: unknown }).code === 'string'
 }
 
 /** One discovery response after Host-side bounding and validation. */
@@ -555,7 +572,7 @@ export class QunoCollectorsService {
         ...(result.detail === undefined ? {} : { detail: result.detail }),
       }
     } catch (error) {
-      if (error instanceof CollectorOptionsError) {
+      if (isCollectorOptionsError(error)) {
         return { ok: false, options: [], more: false, error: { code: error.code, message: error.message } }
       }
       const message = (error as Error).message
@@ -607,18 +624,6 @@ export class QunoCollectorsService {
     return { ok: true, value: result.value as Record<string, unknown> }
   }
 
-  /**
-   * The on-demand query capabilities declared by the collector type that owns
-   * one source. Used by the domain sink to resolve Threads and read originals.
-   */
-  capabilitiesForSource(sourceId: string): CollectorDefinition['query'] | undefined {
-    const source = this.deps.store.listSources(this.deps.qunoId).find(candidate => candidate.id === sourceId)
-    if (source === undefined) return undefined
-    const instance = this.deps.store.listCollectorInstances(this.deps.qunoId).find(candidate => candidate.id === source.instanceId)
-    if (instance === undefined) return undefined
-    return this.types.get(instance.type)?.definition.query
-  }
-
   /** The query capabilities of one collector instance (by instance id). */
   queryCapabilitiesForInstance(instanceId: string): CollectorDefinition['query'] | undefined {
     const instance = this.deps.store.listCollectorInstances(this.deps.qunoId).find(candidate => candidate.id === instanceId)
@@ -646,7 +651,11 @@ export class QunoCollectorsService {
     const delay = Math.max(0, Math.min(MAX_TIMER_DELAY_MS, atMs - this.now()))
     rt.timerDispose = this.deps.setTimer(() => {
       rt.timerDispose = undefined
-      void this.runInstance(instanceId)
+      // Fire-and-forget must never leak an unhandled rejection (a row deleted
+      // or the store closed between arming and firing).
+      void this.runInstance(instanceId).catch((error: unknown) => {
+        this.deps.logger.warn(`dsh-quno: collector run could not start: ${(error as Error).message}`)
+      })
     }, delay)
   }
 
@@ -741,9 +750,10 @@ export class QunoCollectorsService {
         // The gap rides this run's health: the outcome write merges it, so a
         // successful run that saw a gap still lands as degraded.
         if (sourceId === binding.source.id) live.gapReason = gapReason
+        const latest = this.deps.store.getCollectorInstance(instanceId)
         this.deps.store.updateCollectorInstance(instanceId, {
           health: 'degraded',
-          healthDetail: { state: 'degraded', detail: `检测到数据缺口：${gapReason}` },
+          healthDetail: { ...(latest.healthDetail ?? {}), state: 'degraded', detail: `检测到数据缺口：${gapReason}` },
           now: this.now(),
         })
         this.deps.onChange?.()
@@ -826,9 +836,11 @@ export class QunoCollectorsService {
       if (controller.signal.aborted) return
       const message = (error as Error).message
       if (message.startsWith('collector run timed out')) {
-        // A run that ignores its deadline is stopped hard: abort the signal
-        // and stop scheduling until a human acts.
+        // A run that ignores its deadline is stopped hard: abort the signal,
+        // revoke its write face (no later run will ever fence it — scheduling
+        // stops here) and stop scheduling until a human acts.
         controller.abort(new Error('run timed out'))
+        this.revokeWrites(instanceId)
         this.writeHealth(instanceId, {
           state: 'unavailable',
           detail: `采集运行超时（${String(definition.schedule.maxRunMs)}ms），已停止调度`,
@@ -852,6 +864,15 @@ export class QunoCollectorsService {
       if (current !== undefined && current.run !== undefined && current.run.runId === ctx.runId) {
         current.run = undefined
       }
+    }
+  }
+
+  /** Bump the generation so every outstanding commit face is refused. */
+  private revokeWrites(instanceId: string): void {
+    try {
+      this.deps.store.bumpGeneration(instanceId, this.now())
+    } catch (error) {
+      this.deps.logger.warn(`dsh-quno: collector write revocation failed: ${(error as Error).message}`)
     }
   }
 
@@ -968,12 +989,23 @@ export class QunoCollectorsService {
     lifecycle?: Extract<CollectorLifecycle, 'idle' | 'running' | 'stopped' | 'failed'>,
   ): void {
     try {
+      const current = this.deps.store.getCollectorInstance(instanceId)
+      // A run does not own the "last success" and "last event" facts: a failed
+      // run keeps the previous success, and last_event_at belongs to the
+      // ingress (stamped inside the commit transaction). The columns are only
+      // patched when this write carries a value — `undefined` keeps the row,
+      // `null` would erase it — and the health JSON carries both forward.
+      const merged: CollectorHealthDetail = {
+        ...detail,
+        lastSuccessfulSyncAt: detail.lastSuccessfulSyncAt ?? current.lastSuccessAt,
+        lastEventAt: detail.lastEventAt ?? current.lastEventAt,
+      }
       this.deps.store.updateCollectorInstance(instanceId, {
         health: detail.state as CollectorHealthState,
-        healthDetail: detail,
-        lastAttemptAt: detail.lastAttemptAt ?? null,
-        lastSuccessAt: detail.lastSuccessfulSyncAt ?? null,
-        lastEventAt: detail.lastEventAt ?? null,
+        healthDetail: merged,
+        ...(detail.lastAttemptAt === undefined ? {} : { lastAttemptAt: detail.lastAttemptAt }),
+        ...(detail.lastSuccessfulSyncAt === undefined ? {} : { lastSuccessAt: detail.lastSuccessfulSyncAt }),
+        ...(detail.lastEventAt === undefined ? {} : { lastEventAt: detail.lastEventAt }),
         consecutiveFailures: detail.consecutiveFailures ?? 0,
         errorCode: detail.errorCode ?? null,
         nextRetryAt: detail.nextRetryAt ?? null,

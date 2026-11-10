@@ -1864,8 +1864,6 @@ export interface CandidateView {
   }[]
 }
 
-/** Role-scoped Engine surface used by Organ/Collector adapters. */
-export type EngineForOrgans = Pick<Engine, 'receive' | 'threadClosed' | 'completeExchange' | 'exchangeDelivered' | 'activeEvalForThread'>
 /** Role-scoped Engine surface used by the permanent-conversation Router. */
 export type EngineForRouter = Pick<
   Engine,

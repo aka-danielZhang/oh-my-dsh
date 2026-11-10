@@ -18,7 +18,7 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { QunoLocaleKey } from './locales.ts'
 import type { CollectorTypeWire, CollectorWire } from '../api-types.ts'
 import { CollectorForm, initialCollectorConfig, type CollectorFormInjected } from './collector-form.tsx'
-import { firstSyncText } from './collector-detail.tsx'
+import { firstSyncText, lifecycleLabel } from './collector-detail.tsx'
 import { creationPhase, type CreationPhase } from './panel-state.ts'
 import { PanelIcon, StatusLabel } from './panel-primitives.tsx'
 import { ErrorBanner } from './ui.tsx'
@@ -379,7 +379,7 @@ function CreationState(props: { readonly instance: CollectorWire; readonly t: (k
     <div style={styles.stack}>
       <div style={styles.instanceAxes}>
         <StatusLabel tone={tone}>{t(creationTitleKey(phase))}</StatusLabel>
-        <span style={styles.axisChip}>{t('collectorAxisLifecycle')}：{instance.lifecycle}</span>
+        <span style={styles.axisChip}>{t('collectorAxisLifecycle')}：{lifecycleLabel(instance.lifecycle, t)}</span>
         <span style={styles.axisChip}>{t('collectorAxisHealth')}：{instance.health}</span>
       </div>
       <p style={styles.bodyText}>{detail}</p>

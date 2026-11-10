@@ -812,6 +812,17 @@ export class QunoStore {
     if (columns.includes('sense_config_revision')) {
       db.exec('ALTER TABLE events RENAME COLUMN sense_config_revision TO collector_config_revision')
     }
+    // SQLite keeps an index's name across a table RENAME: give the legacy
+    // index the name a fresh v4 database creates, so both shapes converge.
+    const indexes = new Set(
+      (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as { name: string }[]).map(row => row.name),
+    )
+    if (indexes.has('sense_instances_quno')) {
+      db.exec('DROP INDEX sense_instances_quno')
+      if (!indexes.has('collector_instances_quno')) {
+        db.exec('CREATE INDEX collector_instances_quno ON collector_instances(quno_id, type)')
+      }
+    }
   }
 
   private createV1(now: number): void {

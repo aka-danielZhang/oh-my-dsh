@@ -25,6 +25,7 @@ import {
   collectorRowState,
   collectorRowTone,
   sourceDisplayName,
+  lifecycleKey,
 } from './panel-state.ts'
 import { sourceSummary, sourceSummaryText } from './collector-summary.ts'
 import { Callout, DetailHeader, DetailSection, StatusLabel } from './panel-primitives.tsx'
@@ -296,16 +297,10 @@ export function desiredStateLabel(state: string, t: (key: Parameters<QunoTransla
   }
 }
 
-/** Localized lifecycle label. */
+/** Localized lifecycle label; an unknown (newer) value is shown as-is rather than hidden. */
 export function lifecycleLabel(lifecycle: string, t: (key: Parameters<QunoTranslate>[0]) => string): string {
-  switch (lifecycle) {
-    case 'starting': return t('lifecycleStarting')
-    case 'running': return t('lifecycleRunning')
-    case 'stopping': return t('lifecycleStopping')
-    case 'stopped': return t('lifecycleStopped')
-    case 'failed': return t('lifecycleFailed')
-    default: return lifecycle
-  }
+  const key = lifecycleKey(lifecycle)
+  return key === null ? lifecycle : t(key)
 }
 
 /** Localized first-sync semantics, never a guess. */

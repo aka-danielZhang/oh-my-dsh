@@ -16,6 +16,7 @@ import {
   collectorRowKey,
   collectorRowState,
   collectorRowTone,
+  lifecycleKey,
   taskSections,
   taskStatusKey,
   type CollectorPageInput,
@@ -253,4 +254,26 @@ test('a settled run without a finish time has no duration', () => {
   assert.equal(runDurationOf({ status: 'failed', startedAt: 1_000, finishedAt: null }, 5_000), null)
   assert.equal(runDurationOf({ status: 'running', startedAt: 1_000, finishedAt: null }, 5_000), 4_000)
   assert.equal(runDurationOf({ status: 'committed', startedAt: 1_000, finishedAt: 4_000 }, 5_000), 3_000)
+})
+
+test('every runtime lifecycle value has a localized label in both languages (idle included)', async () => {
+  const { zh, en } = await import('../src/client/locales.ts')
+  // Exhaustive by construction: a new CollectorLifecycle value fails to
+  // typecheck here until it gets a label.
+  const all: Record<import('../src/types.ts').CollectorLifecycle, true> = {
+    idle: true,
+    starting: true,
+    running: true,
+    stopping: true,
+    stopped: true,
+    failed: true,
+  }
+  for (const lifecycle of Object.keys(all)) {
+    const key = lifecycleKey(lifecycle)
+    assert.ok(key !== null, `${lifecycle} has a locale key`)
+    assert.ok(zh[key].length > 0 && en[key].length > 0)
+    assert.notEqual(zh[key], lifecycle, `${lifecycle} is never shown raw`)
+  }
+  assert.equal(zh[lifecycleKey('idle') ?? 'lifecycleIdle'], '待下次运行')
+  assert.equal(lifecycleKey('from-the-future'), null, 'an unknown value falls back to showing itself')
 })

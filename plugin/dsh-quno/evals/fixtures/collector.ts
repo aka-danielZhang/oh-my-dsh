@@ -1,12 +1,12 @@
 /**
- * The Fixture Organ (design §2 L3): a synthetic Collector registered through the
+ * The fixture collector (design §2 L3): a synthetic collector registered through the
  * REAL `qunoCollectors` registry, producing Triggers through the REAL ingress
  * (dedupe, checkpoint, same-transaction Trigger/Thread commit) and answering
- * Exchanges through the REAL organ capability surface.
+ * Exchanges through the REAL query capability surface.
  *
  * All fixture content is synthetic; nothing here touches a real source.
  *
- * @module dsh-quno/evals/fixtures/organ
+ * @module dsh-quno/evals/fixtures/collector
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -14,16 +14,16 @@ import type { EventEnvelope, IngestBatch, IngestAck, CollectorDefinition } from 
 import type { CollectorFactory, CollectorRunContext } from '../../src/collectors.ts'
 
 /** The synthetic source type mounted for cases. */
-export const EVAL_ORGAN_TYPE = 'eval/synthetic'
+export const EVAL_COLLECTOR_TYPE = 'eval/synthetic'
 
 /** The op set of the plan §5 whitelist, mirrored by the contract double. */
 const WHITELIST_OPS = ['im.group.recent', 'im.group.search', 'im.message.list'] as const
 
 /**
  * The plan §5 whitelist as a contract double: the same refusal reasons the
- * real yzj organ enforces, so cases can exercise the refusal→Input plumbing.
+ * real yzj collector enforces, so cases can exercise the refusal→Input plumbing.
  * The matrix itself is pinned by dsh-quno-collector-yzj node tests; this double
- * must never make a whitelist case pass that the real organ would refuse.
+ * must never make a whitelist case pass that the real collector would refuse.
  * `null` means the payload is inside the whitelist.
  */
 export function whitelistRefusal(payload: unknown): string | null {
@@ -52,8 +52,8 @@ interface ProgrammedResponse {
   readonly payload: unknown
 }
 
-/** State + entry points for the synthetic organ. */
-export class EvalOrgan {
+/** State + entry points for the synthetic collector. */
+export class EvalCollector {
   private readonly runtimes = new Map<string, CollectorRunContext>()
   private readonly checkpointRevisions = new Map<string, number>()
   private programmed: ProgrammedResponse | undefined
@@ -85,9 +85,9 @@ export class EvalOrgan {
 
   /** Create one enabled instance through the real service; returns its id. */
   async createInstance(collectors: { createInstance(input: { type: string; config: Record<string, unknown> }): { readonly ok: boolean; readonly instance?: { readonly id: string }; readonly error?: unknown } }, config: Record<string, unknown> = {}, pump?: () => void): Promise<string> {
-    const result = collectors.createInstance({ type: EVAL_ORGAN_TYPE, config: { label: '评测合成来源', ...config } })
+    const result = collectors.createInstance({ type: EVAL_COLLECTOR_TYPE, config: { label: '评测合成来源', ...config } })
     if (!result.ok || result.instance === undefined) {
-      throw new Error(`eval organ instance failed: ${JSON.stringify(result.error)}`)
+      throw new Error(`eval collector instance failed: ${JSON.stringify(result.error)}`)
     }
     const instanceId = result.instance.id
     // The Host arms the first run on the virtual timer; pump it so the run
@@ -95,7 +95,7 @@ export class EvalOrgan {
     await waitFor(5_000, () => {
       pump?.()
       return this.runtimes.has(instanceId)
-    }, 'eval organ instance did not start')
+    }, 'eval collector instance did not start')
     return instanceId
   }
 
@@ -108,7 +108,7 @@ export class EvalOrgan {
    */
   async ingest(instanceId: string, envelopes: readonly EventEnvelope[]): Promise<IngestAck> {
     const runtime = this.runtimes.get(instanceId)
-    if (runtime === undefined) throw new Error(`eval organ ${instanceId} is not running`)
+    if (runtime === undefined) throw new Error(`eval collector ${instanceId} is not running`)
     const revision = this.checkpointRevisions.get(instanceId) ?? runtime.checkpoint.revision
     const batch: IngestBatch = {
       batchKey: `eval-batch-${String(++this.counter)}`,
@@ -123,14 +123,14 @@ export class EvalOrgan {
   /** The sourceId of one instance (for policy rules and evidence refs). */
   sourceIdOf(instanceId: string): string {
     const runtime = this.runtimes.get(instanceId)
-    if (runtime === undefined) throw new Error(`eval organ ${instanceId} is not running`)
+    if (runtime === undefined) throw new Error(`eval collector ${instanceId} is not running`)
     return runtime.sourceId
   }
 
   /** The honest declaration: five reliability fields, synthetic scope. */
   private definition(): CollectorDefinition {
     return {
-      type: EVAL_ORGAN_TYPE,
+      type: EVAL_COLLECTOR_TYPE,
       contractVersion: 'quno.collector/v2',
       implementationVersion: '0.1.0',
       displayName: '评测合成来源',

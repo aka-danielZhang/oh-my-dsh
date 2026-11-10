@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { QunoCollectorsService, CollectorOptionsError, type CollectorFactory } from '../src/collectors.ts'
+import { QunoCollectorsService, CollectorOptionsError, isCollectorOptionsError, type CollectorFactory } from '../src/collectors.ts'
 import { maskCollectorConfig } from '../src/api.ts'
 import { openFixture } from './helpers.ts'
 import type { CollectorDefinition } from '../src/types.ts'
@@ -228,6 +228,26 @@ test('discovered options are sanitized, deduped, capped and keep classified fail
     await failing.stopAll()
     second.store.close()
   }
+
+  // An installed collector never shares the Host's class: it throws a
+  // STRUCTURALLY equivalent error, which must classify all the same.
+  const third = openFixture()
+  const { service: structural } = serviceFor(third.store)
+  try {
+    structural.register(definition('test/options-structural'), quietFactory({
+      listOptions: async () => {
+        throw Object.assign(new Error('CLI 返回内容无法解析'), { name: 'CollectorOptionsError', code: 'bad-envelope' })
+      },
+    }))
+    const page = await structural.listFieldOptions({ type: 'test/options-structural', field: 'groups' })
+    assert.equal(page.ok, false)
+    assert.equal(page.error?.code, 'bad-envelope', 'not degraded to discovery-failed')
+    assert.equal(isCollectorOptionsError(new Error('plain')), false)
+    assert.equal(isCollectorOptionsError({ name: 'CollectorOptionsError', code: 'x' }), false, 'a non-Error is never classified')
+  } finally {
+    await structural.stopAll()
+    third.store.close()
+  }
 })
 
 test('a masked secret survives reconfigure while an explicit empty string clears it', async () => {
@@ -272,4 +292,3 @@ test('the wire masks declared secrets and reports which ones hold a value', () =
   assert.equal(untouched.config, untouched.config)
   assert.deepEqual(untouched.secretSet, [])
 })
-

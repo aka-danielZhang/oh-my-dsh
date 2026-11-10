@@ -212,18 +212,34 @@ export interface CollectorRowInput {
  * shows, in the documented priority order: auth/unavailable, then
  * rate-limited/degraded, then paused/disabled, then starting, then stale, then
  * "never synced", then healthy.
- * @param collectors - the wire instance slice.
+ * @param instance - the wire instance slice.
  * @returns the single row state.
  */
-export function collectorRowState(collectors: CollectorRowInput): CollectorRowState {
-  if (collectors.health === 'auth-required' || collectors.health === 'unavailable') return collectors.health
-  if (collectors.health === 'rate-limited' || collectors.health === 'degraded') return collectors.health
-  if (collectors.desiredState === 'paused') return 'paused'
-  if (collectors.desiredState === 'disabled') return 'disabled'
-  if (collectors.lifecycle === 'starting') return 'starting'
-  if (collectors.stale) return 'stale'
-  if (collectors.lastSuccessAt === null) return 'syncing'
+export function collectorRowState(instance: CollectorRowInput): CollectorRowState {
+  if (instance.health === 'auth-required' || instance.health === 'unavailable') return instance.health
+  if (instance.health === 'rate-limited' || instance.health === 'degraded') return instance.health
+  if (instance.desiredState === 'paused') return 'paused'
+  if (instance.desiredState === 'disabled') return 'disabled'
+  if (instance.lifecycle === 'starting') return 'starting'
+  if (instance.stale) return 'stale'
+  if (instance.lastSuccessAt === null) return 'syncing'
   return 'ok'
+}
+
+/**
+ * Locale key of one runtime lifecycle value (`idle` is the resting state
+ * between two Host-scheduled runs); null for a value this client predates.
+ */
+export function lifecycleKey(lifecycle: string): QunoLocaleKey | null {
+  switch (lifecycle) {
+    case 'idle': return 'lifecycleIdle'
+    case 'starting': return 'lifecycleStarting'
+    case 'running': return 'lifecycleRunning'
+    case 'stopping': return 'lifecycleStopping'
+    case 'stopped': return 'lifecycleStopped'
+    case 'failed': return 'lifecycleFailed'
+    default: return null
+  }
 }
 
 /** Locale key of one row state. */

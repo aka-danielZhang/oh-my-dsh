@@ -35,7 +35,7 @@ import { Engine } from './core/engine.ts'
 import type { EnginePolicyState } from './core/engine.ts'
 import { buildPolicy } from './core/policy.ts'
 import type { PolicyRule } from './core/policy.ts'
-import { QunoStateError as QunoDomainError, routerEndpoint } from './core/model.ts'
+import { QunoStateError as QunoDomainError, collectorEndpoint, collectorInstanceOf, routerEndpoint } from './core/model.ts'
 import type { EffectKind, EffectRecord, ExchangeKind, ThreadRef, TriggerDraft } from './core/model.ts'
 import type { CollectorEndpointView, CollectorDefinition, CollectorInstanceRecord } from './types.ts'
 import { SessionTransport } from './app/transport.ts'
@@ -145,7 +145,7 @@ export function collectorEndpointsOf(
     const query = queryFor(instance.id)
     if (query?.handleRequest === undefined) continue
     endpoints.push({
-      endpoint: `collector:${instance.id}`,
+      endpoint: collectorEndpoint(instance.id),
       label: instance.label,
       type: instance.type,
       capabilities: {
@@ -597,8 +597,8 @@ export class QunoHost implements QunoServiceFace {
   }
 
   private queryAdvertises(endpoint: string, kind: 'request' | 'command'): boolean {
-    if (!endpoint.startsWith('collector:')) return false
-    const instanceId = endpoint.slice('collector:'.length)
+    const instanceId = collectorInstanceOf(endpoint)
+    if (instanceId === null) return false
     return queryAdvertises(this.collectors.queryCapabilitiesForInstance(instanceId), kind)
   }
 
@@ -684,8 +684,8 @@ export class QunoHost implements QunoServiceFace {
     const exchange = this.repo.getExchange(payload.exchangeId)
     if (exchange === undefined || (exchange.status !== 'pending' && exchange.status !== 'delivered')) return
     const endpoint = exchange.responder
-    const instanceId = endpoint.startsWith('collector:') ? endpoint.slice('collector:'.length) : ''
-    const query = instanceId === '' ? undefined : this.collectors.queryCapabilitiesForInstance(instanceId)
+    const instanceId = collectorInstanceOf(endpoint)
+    const query = instanceId === null ? undefined : this.collectors.queryCapabilitiesForInstance(instanceId)
     const requestMessage = this.repo.getExchangeMessages(exchange.id).find(message => message.kind === 'request')
     const handler = exchange.kind === 'request' ? query?.handleRequest : undefined
     if (handler === undefined || requestMessage === undefined) {

@@ -22,7 +22,7 @@ export const evalCases: readonly EvalCase[] = [
     model: { router: 'scripted', worker: 'scripted' },
     setup: async (rt) => {
       // authorize the synthetic source; observe mode turns accepts into would_accept
-      await rt.host.updateConfig({ patch: { acceptMode: 'observe', autoSourceIds: [rt.options.organSourceId] } })
+      await rt.host.updateConfig({ patch: { acceptMode: 'observe', autoSourceIds: [rt.options.collectorSourceId] } })
     },
     steps: [
       // Scripts are queued before the ingest settles, or the eval turn races

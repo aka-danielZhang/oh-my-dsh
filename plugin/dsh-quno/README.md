@@ -4,7 +4,7 @@ Quno 是 DSH 里的**常驻个人助理**：它把外部变化（日历、订阅
 
 一个 `dsh-quno` 包同时提供 Host 与浏览器两半：
 
-- **Host**：专用 SQLite（`~/.dsh/quno/quno.sqlite`）、Collector 注册与 Host 调度（run ctx commit 与 Intake 同事务、per-run generation 棚栏、健康推导）、2 秒有界 pass + 持久 Effect outbox、主对话 Eval Router、Ticket/Assignment/WorkerRun、关注事项、统一通知 outbox（安静时段/频控/去重/重启对账）、`quno` 与 `quno-task` 两个程序化 agent preset，以及 Typert `quno` Remote。
+- **Host**：专用 SQLite（`~/.dsh/quno/quno.sqlite`）、Collector 注册与 Host 调度（run ctx commit 与 Intake 同事务、per-run generation 栅栏、健康推导）、2 秒有界 pass + 持久 Effect outbox、主对话 Eval Router、Ticket/Assignment/WorkerRun、关注事项、统一通知 outbox（安静时段/频控/去重/重启对账）、`quno` 与 `quno-task` 两个程序化 agent preset，以及 Typert `quno` Remote。
 - **浏览器**：设置页 Quno 面板（配置/来源/关注/运行/任务五个页签）、侧栏原生 Quno 入口行、右栏 Quno 面板（动态/关注/任务三视图；采集器详情钻取、关注完结分组、事件详情、任务详情与取消）、正文右上悬浮胶囊（Portal 到对话内容容器；点击出任务/关注/动态概要，按行打开右栏）、三栏接入向导（`shell.overlay`，创建与编辑同一表单）、按 Turn 绑定的主动汇报卡、`quno_task` 任务卡。
 
 完整设计见 [docs/quno-bot-design.md](../../docs/quno-bot-design.md)。

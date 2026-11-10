@@ -60,7 +60,7 @@ export interface ExecutorDeps {
   readonly maxTokens?: () => number
   readonly defaultCwd: string
   readonly maxWorkers?: number
-  /** Resolve one mounted Organ endpoint for worker-initiated exchanges. */
+  /** Resolve one mounted collector endpoint for worker-initiated exchanges. */
   readonly resolveExchangeResponder?: (endpoint: string, kind: 'request' | 'command') => boolean
   /** The exchange-facing endpoints for worker discovery and refusal directories. */
   readonly listCollectors?: () => readonly CollectorEndpointView[]
