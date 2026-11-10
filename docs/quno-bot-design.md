@@ -283,7 +283,7 @@ Collector（就一个东西）
 
 工厂接口（`register(definition, factory) → disposer`）：
 
-- `run(ctx)`：一次采集尝试。ctx 下发 instanceId/sourceId/type/config、**runId（本次 run 的 generation 栅栏）**、checkpoint（含 `checkpoint-entries/v1` 分条读面）、limits、logger、`commit(batch)`（唯一写面，一次 run 可多次 commit，提交与事件/checkpoint/回执同事务）与 abort signal。返回 outcome：
+- `run(ctx)`：一次采集尝试。ctx 下发 instanceId/sourceId/type/config、**runId（本次 run 的 generation 栅栏）**、checkpoint（含 `checkpoint-entries/v1` 分条读面）、limits（`maxEventsPerRun/maxBytesPerRun` 为声明的单次运行配额；`maxEventsPerBatch/maxBytesPerBatch` 为 Host 单次 commit 的批次上限，插件据此分批而不必值导入 Host 常量）、logger、`commit(batch)`（唯一写面，一次 run 可多次 commit，提交与事件/checkpoint/回执同事务）与 abort signal。返回 outcome：
   - `{ ok: true, nextRunAtMs?, health? }`——成功；`nextRunAtMs` 是下次运行 hint；
   - `{ ok: false, failure: { state: 'auth-required'|'rate-limited'|'unavailable'|'degraded', code, message, retryAfterMs?, fatal? }, health? }`——失败；`fatal: true` 表示 Host 停止调度该实例，直至改配/重启用。
   - `health` extras 只报 Host 推不出来的东西：detail / coveredThrough / sourceLagSec / progress / issues。
@@ -295,7 +295,7 @@ Collector（就一个东西）
 - 成功：`next = clamp(nextRunAtMs ?? now+defaultIntervalSec, [now+1s, now+24h])`。hint 只受 24h 上限约束，**允许远小于 minIntervalSec 的续跑**（积压续跑 5s、令牌等待、1s 下限）；`minIntervalSec` 只约束无 hint 时的默认间隔。
 - 失败非 fatal：`failures+1`，`next = max(now+interval, retryAfterMs ?? backoffMs(failures))`（确定性退避 + attempt 抖动）。
 - 失败 fatal / 超时（`maxRunMs`，强 abort signal）：lifecycle=failed，不再排程，直至改配/重启用。
-- 健康由 Host 从 run 结果推导：state/code/consecutiveFailures/nextRetryAt/lastAttemptAt/lastSuccessAt 直接落列；extras 合并进 `health_json`（与旧自报形状 wire 兼容）。两次 run 之间保持上次推导结果，`stale` 仍按 lastSuccessAt 阈值算；**运行间隔之外无心跳**。
+- 健康由 Host 从 run 结果推导：state/code/consecutiveFailures/nextRetryAt/lastAttemptAt/lastSuccessAt 直接落列；extras 合并进 `health_json`（与旧自报形状 wire 兼容）。两次 run 之间保持上次推导结果，`stale` 仍按 lastSuccessAt 阈值算；**运行间隔之外无心跳**。成功 run 是否降级只看插件报告的 `issues`：单批 gap（含 yzj「首轮只钉基线不回放」这类声明过的常规进度）由 ingress 记入缺口视图，不作为降级输入。
 - 生命周期词表：`idle`（两次 run 之间）| running | stopped | failed（`starting/stopping` 为历史值保留）。期望状态仍是 enabled/paused/disabled，三层状态分离不变。
 
 **栅栏与重启语义**：每次 run `bumpGeneration` 发新 runId，同实例同一时刻只有一个可写 generation；ingress `assertWritable` 语义不变（generation + desiredState + configRevision 三查），所以暂停/撤销/改配/下一次 run 启动后，旧 run 晚到提交被拒。栅栏是 **generation 级**：两次 run 之间，最近一次 run 的 commit 面在下一次 run 起跑前仍可写（规范的采集器只在 `run` 内提交）；run 超时被强停时 Host 立即再 bump 一次 generation，撤销这个从此不会再被下一次 run 栅栏的写面。已提交事务保持有效；stop 不回滚过去。配置变更走「停 run → 回收 mount → 存新 revision → 挂载 → 立即 run」统一重启语义。暂停不删 checkpoint；停用保留配置与历史；删除实例不级联删其他 Quno 的事项与证据。
@@ -310,6 +310,7 @@ Collector（就一个东西）
 6. 错误可分类：validation / identity-conflict / stale-generation / checkpoint-conflict / quota-exceeded / temporarily-unavailable + retryable/retryAfter。`stale-generation`/`checkpoint-conflict` 对 run 是 fatal（停排），三个内置采集器统一此语义。
 7. 毒数据不静默跳过：必须越过时先持久诊断（身份、失败、缺口）再显式推进 checkpoint。
 8. 分页溢出（「最近 100 条」型 API）必须检测并分页或报告缺口；支持「覆盖未知」。
+9. 超出单次运行配额或单批上限的变更集：按批提交可容纳的前缀，checkpoint（含条件请求校验器）只推进到已提交部分，余量以续跑 hint 交给下一次 run——不得整批越过上限被拒、不得静默跳过（2026-11-10 起 calendar/feed 遵守，yzj 按页提交天然在限内）。
 
 ### 6.7 健康与成本
 
@@ -410,7 +411,7 @@ Collector（就一个东西）
 ```yaml
 contractVersion: quno.collector/v2
 type: quno/yzj-im
-implementationVersion: 0.3.0
+implementationVersion: 0.4.0
 displayName: 云之家群聊
 eventTypes: [{ type: im.message.created, schema: quno.yzj-im.message/v1 }]
 configFields: [collectionMode(默认 focused), groupIds(focused 白名单可空/legacy 必选), yzjProfile(默认 default),

@@ -15,7 +15,7 @@
 - **名字用 Collector**；纯定时器（每工作日 9:00 丢 trigger 类）本轮不做，协议里 `nextRunAtMs` hint 与 `schedule.defaultIntervalSec` 已留好位置。
 - 契约 `quno.sense/v1` → `quno.collector/v2`：声明 `runtime.{modes,concurrency,timeoutMs}` 删除，改 `schedule.{defaultIntervalSec,minIntervalSec,maxRunMs}`；quotas 改按 run 计；`organ` → `query`（仅 `handleRequest`）；`handleCommand`/`organ.readOriginal`/`resolveThreads` 删除（resolveThreads 生产 fallback `object:<eventKey>` 行为不变）；`reliability.readOriginal` 布尔声明保留。
 - **Host 调度规则**（`collectors.ts`，与 2s pass 循环分开）：启用/改配/boot 即跑；成功 `next = clamp(hint ?? now+defaultIntervalSec, [now+1s, now+24h])`（hint 允许远小于 minIntervalSec——yzj 积压续跑 5s/令牌等待依赖此）；失败非 fatal `next = max(now+interval, retryAfterMs ?? backoffMs(failures))`；fatal/超时停排。
-- **健康由 Host 推导**：state/code/consecutiveFailures/nextRetryAt/lastAttemptAt/lastSuccessAt 从 outcome 落列；extras（detail/coveredThrough/sourceLagSec/progress/issues）合并进 `health_json`，与旧自报形状 wire 兼容；两次 run 之间保持上次推导结果；成功 run 带 issues 或上报 gap 判 degraded。
+- **健康由 Host 推导**：state/code/consecutiveFailures/nextRetryAt/lastAttemptAt/lastSuccessAt 从 outcome 落列；extras（detail/coveredThrough/sourceLagSec/progress/issues）合并进 `health_json`，与旧自报形状 wire 兼容；两次 run 之间保持上次推导结果；成功 run 带 issues 判 degraded（batch gap 只进缺口视图与运行中的瞬时显示——2026-11-10 实机冒烟修正，见「实机冒烟发现并修正的回归」；初版误把 gap 也当降级输入）。
 - **generation 级栅栏**：每次 run `bumpGeneration`；ingress `assertWritable` 三查语义不变。两次 run 之间最后一次 run 的 ctx 仍可写（评测器 fixture 依赖），下一次 run 启动/改配/停用即栅栏生效；run 超时被强停时 Host 额外 bump 一次，撤销那个再也不会被下一次 run 栅栏的写面（评审修订，见下）。
 - `IngestBatch`/`quno.event/v1`/Exchange 状态机/checkpoint-entries/v1/批次幂等/checkpoint CAS 全部不变；feed 304 空 cursor commit 保留。
 - **实施落地**：`senses.ts` 重写为 `collectors.ts`；store v3→v4（四表 RENAME + `events.collector_config_revision`，存量数据零改写，实例 id `sense-*` 保留、新实例 `col-` 前缀）；`organ:<id>` → `collector:<id>`、`quno_read.organs` → `collectors`、服务键 `qunoSenses` → `qunoCollectors`、`ctx.qunoIngress` 删除（唯一使用者评测器改走 run ctx commit 面）；面板视图 id `'sense'` → `'collectors'`，文案「感知器/感知来源」→「采集器/采集来源」。
@@ -36,7 +36,7 @@
 - **迁移验证**：真实 `~/.dsh` Quno DB（v3：1719 批次、1454 checkpoint 条目、1 个 yzj 实例）经 backup API 取快照后跑 v3→v4：14 项断言全 PASS——`user_version=4`、旧四表消失、新四表行数与实例行逐字段一致、`events` 列改名且行数不变、批次回执与 checkpoint 条目可读、重开幂等。
 - **scratch home 挂载**：`dsh plugin add` 四包（dsh-quno + 三个 collector）→ boot 后 Host 真实调度 calendar run：事件入库（`calendar/event-updated`）、批次回执、checkpoint 推进 revision 1、实例 `healthy/idle`。顺手修复 calendar 对未经 `validateConfig` 的存量行 `file/directory` 为 undefined 时的误读（`?? null` 归一，readCalendar 加固）。
 - **桌面 e2e**：`DSH_DESKTOP_E2E_PROBE=1 DSH_DESKTOP_E2E_EXIT=1 pnpm desktop:dev` → `DSH_E2E_OK`（exit 0）；壳未动，`desktop:typecheck`（干净）与 `desktop:test`（148 项）全绿。
-- **待办（实机）**：yzj 实机只读交换 smoke 需真实云之家账号经 `quno_read.collectors` 发现端点后完成，留给下一次真实 profile 会话验证（合成 fixture 与 54 项单测已覆盖协议面）。
+- **yzj 实机只读冒烟（2026-11-10，宿主机已登录的 yzj-cli 0.1.8，default profile）**：一次性 scratch store（跑完即删，未碰真实 profile），最小读取范围（每片 2 会话、2 目录页、每会话 1 页）。真实 `definition` 通过 v2 schema 注册 → Host 调度的两次连续 run 均 `healthy/idle`，建立 33 个会话的 checkpoint 条目、0 事件（focused 首轮只钉基线，符合声明）、第二次 run 按续跑 hint 约 2 秒后执行且未重新发现目录（长生命周期 worker 生效）→ 发现面恰好列出 `collector:<该实例>`，门控 request=true / command=false → 经 Host 分派的 `handleRequest` 真实执行 `im.group.recent`（limit 3）完成并回传有界结果 → 写操作 `im.message.send` 在白名单处以 `unsupported-op` 拒绝、未触达 CLI。全程只输出计数与字段名，不输出会话名或消息正文。
 
 ## 评审修订（2026-11-10，同 PR）
 
@@ -50,12 +50,14 @@
 
 **补的测试**（全部对原缺陷做过变异验证）：yzj 适配器 3 项（worker 跨 run 存活且第二次 run 不再发现目录、栅栏后提交走当前 run 的 commit 面、remount 重建、fatal 后丢弃、auth 失败映射）；calendar run 级 4 项（快照差分提交与无变化不提交、缺目录分类、结构化 fatal/暂态拒绝、`ingressRefusalOf` 只认 QunoIngressError 形）；feed run 级 3 项（200 提交 → 仅校验器变化的空 cursor 提交 → 304 不提交、429 Retry-After 成为 Host 重试延迟、结构化 fatal）；Host 调度 4 项（健康列跨 run 保持、run-threw 退避、pause→resume 重挂载即跑、删行竞态只告警）+ 超时撤销写面；v3→v4 迁移 2 项（以**反向降级**真实写入的 v4 库构造逐列一致的 v3 夹具：改名、行数、实例行逐字段、回执/条目可读、幂等、新库同名）；Host 结构化 options 错误分类。
 
+**实机冒烟发现并修正的回归**：初版评审修订让「本次 run 有 batch gap」把成功 run 定为 degraded（`errorCode: gap-reported`）。实机首轮即触发——yzj 初始化时 `newest` 还有更早历史，按声明「只钉基线不回放」并附 gap 记录，这是常规进度而非故障。旧 Sense 时代 `onGap` 同样写 degraded，但插件随后的自报健康总会覆盖它，所以持久的覆盖缺口一直是经 `issues` 表达的（yzj 把常驻 gap 放进 issues，calendar/feed 把同一个 gap 同时放进 issues）。修正：run 结束后只按插件报告的 `issues` 判降级；batch gap 仍由 ingress 记入缺口视图、运行中仍短暂显示。新增调度单测钉住两种情形，实机重跑两次 run 均 `healthy` 且缺口视图保留 1 条记录。
+
 **需要知道的行为语义**（非缺陷，记录在案）：
 - 升级后存量 `organ:<id>` Exchange 在启动即 `failed/capability-unavailable`——响亮、不吞，模型侧经 `quno_read.collectors` 重新发现端点。
 - 栅栏是 generation 级：两次 run 之间最近一次 run 的写面仍有效（规范采集器只在 run 内提交）；超时停排已补撤销。
 - `minIntervalSec` 只约束无 hint 的默认间隔（hint 可低于它，yzj 续跑的必要设计）；失败重试下限沿旧语义为 `defaultIntervalSec`。
-- **已知问题（既有，非本次引入，下轮修）**：calendar 单次事件数超配额时只发前缀，但 checkpoint 写全量快照，截断部分被静默跳过（`complete` 字段删除前也只是不被读取的标记）。正确修法是只 checkpoint 已发前缀或报 gap。
-- 三包 `implementationVersion` 与包版本未 bump，进下一次发版清单（发版提交统一 bump）；退役清扫与新包首装都要等下一次桌面 `v*`。
+- **既有问题，已在同 PR 修复**：calendar 单次事件数超配额时只发前缀、却 checkpoint 全量快照，截断部分被静默跳过；更糟的是它声明的单次运行配额（200）大于 Host 单批上限（100）且只做一次提交——窗口内变更超过 100 条（大日历首同步）即被批次校验拒绝、无限重试。feed 同类：完全不按上限切分，`maxItems` 设到 100 以上即同样卡死。修法：Host 在 `ctx.limits` 下发 `maxEventsPerBatch/maxBytesPerBatch`；两插件按条数+字节（预留 checkpoint 上界）分批提交，checkpoint 只推进到已提交前缀（calendar 未提交的变更保留旧修订、延后的删除保留快照条目），余量以 5 秒续跑 hint 交给下一次 run，单条放不进任何批次时以 `batch-too-large` 失败报出；feed 的 ETag/Last-Modified 只随最后一批推进，余量用无条件请求续上（否则 304 会吞掉没提交的条目）。测试与变异验证见各包。
+- 版本：本仓惯例是在改动提交里同时 bump 插件版本（只有仓根桌面版本在 release 提交里改）——初版说「留给发版提交」是错的，已更正：dsh-quno 0.3.0、calendar/feed 0.2.0、yzj 0.4.0（`implementationVersion` 同步；0.x 的破坏性契约变更走 minor）。桌面 `v*` 发版仍是独立的发布动作：退役清扫与新包首装都要等它。
 - 评测 case id / check id（如 `organ-discovery`、`organ-answered`）**保持不变**：它们是历史基线的比对键，改名会使基线对比断档；代码标识符、夹具文件名与描述文案已改。
 
 验证（修订后）：dsh-quno 195、calendar 13、feed 12、yzj 59 全绿；四包构建通过且产物内无 Host 类副本；scripted evals 21/21、新增失败无；全仓 `plugins:check` 20 包全绿；壳层 `desktop:typecheck` 干净、`desktop:test` 148、`shipped-plugins` 9 全绿。
