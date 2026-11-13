@@ -43,6 +43,7 @@ import { EffectRetryError, EffectsRuntime } from './app/effects.ts'
 import type { EffectHandler } from './app/effects.ts'
 import { Executor } from './app/executor.ts'
 import { Assessor } from './app/assessor.ts'
+import { CliCapabilityBroker } from './cli-broker.ts'
 import { Watchdog } from './app/watchdog.ts'
 import { computeMetrics } from './app/metrics.ts'
 import type { EngineMetrics } from './app/metrics.ts'
@@ -175,6 +176,8 @@ export class QunoHost implements QunoServiceFace {
   readonly store: QunoStore
   readonly repo: SqliteRepository
   readonly engine: Engine
+  /** The structured read-only CLI surface every Worker call goes through. */
+  readonly cli: CliCapabilityBroker
   readonly transport: SessionTransport
   readonly assessor: Assessor
   readonly executor: Executor
@@ -204,6 +207,12 @@ export class QunoHost implements QunoServiceFace {
       logger: { warn: message => logger.warn(message) },
     })
     this.repo = new SqliteRepository(this.store)
+    // The capability table exists before the Engine because every Ticket's
+    // Mandate snapshots the read grants that currently have a configured
+    // target.
+    this.cli = new CliCapabilityBroker({
+      listInstances: () => this.store.listCollectorInstances(this.qunoId),
+    })
     this.engine = new Engine({
       repo: this.repo,
       qunoId: this.qunoId,
@@ -217,6 +226,7 @@ export class QunoHost implements QunoServiceFace {
       }),
       nextId: prefix => `${prefix}_${String(this.now())}_${Math.random().toString(36).slice(2, 8)}`,
       defaultCwd: homedir(),
+      cliGrant: () => this.cli.grantSnapshot(),
       logger,
     })
 
@@ -275,6 +285,7 @@ export class QunoHost implements QunoServiceFace {
       maxWorkers: 4,
       resolveExchangeResponder: (endpoint, kind) => this.queryAdvertises(endpoint, kind),
       listCollectors: () => this.collectorEndpoints(),
+      cli: this.cli,
       onChange: () => {},
     })
     this.effects = new EffectsRuntime({

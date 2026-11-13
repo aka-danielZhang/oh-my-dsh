@@ -12,7 +12,7 @@
 
 - **一个 Quno = 一条永久主对话**：没有「新建会话」，对话只追加、永不重开。身份连续，用户始终知道去哪找它。
 - **三条独立节奏**：采集频率（Host 按采集器声明与 hint 调度）、思考频率（用户给 Quno 配置）、通知频率（打扰策略 + Quno 判断）。高频采集 ≠ 高频推理 ≠ 高频通知。
-- **感知靠 Collector**：采集器按统一契约（`quno.collector/v2`）实现 `run(ctx)`，由 Host 统一定时调度并推导健康；每次 run 的观察经同一事务性 ingest 提交 Trigger。采集器可另声明受限的按需查询面（Exchange 白名单）：端点 `collector:<instanceId>` 经 `quno_read.collectors` 发现，门控校验「实例挂载且类型声明 `handleRequest`」，拒绝时列出真实可用端点。
+- **感知靠 Collector**：采集器按统一契约（`quno.collector/v2`）实现 `run(ctx)`，由 Host 统一定时调度并推导健康；每次 run 的观察经同一事务性 ingest 提交 Trigger。只读查询有两条面：**同步结构化 CLI**（`quno_cli_call`，能力/操作闭表授权，本地短查询首选）与**异步 Exchange**（采集器 `handleRequest` 白名单，真正异步/远端读取）。两者都经发现面取名字（`quno_read.cliCapabilities` / `quno_read.collectors`），不猜名字，拒绝时列出真实可用项。
 - **判断与执行分离**：Eval 在永久主对话里按 Thread 串行合批判定；actual 工作跑在独立只读 Executor 会话（Ticket/Assignment/WorkerRun），结果经结构化 Report → Router relay → 通知 outbox 回流主对话。
 - **主对话激进压缩 + 可检索历史**：上下文 ~50% 即滚动压缩，摘要带原文指针；全量历史永不删除，靠 `quno_recall` 全文检索召回。长期记忆复用 OhMyMemo。
 - **落点**：一个 dual 插件 `dsh-quno`（preset-owned）+ 采集器插件族 `dsh-quno-collector-<name>`；壳与桥零改动、零新 IPC、不改 harness loop。
@@ -216,8 +216,15 @@ Executor 会话是独立的只读子会话（`quno-task` preset，稳定 id `qun
 
 ### 5.4 Worker 工具与能力边界
 
-- 只读 preset `quno-task` + `quno-task-guard`；新增 worker 控制工具（不算执行权限）：`quno_worker_report`、`quno_thread_handback`、`quno_thread_follow`、`quno_thread_unrelated`、`quno_read`、`quno_recall`、`quno_exchange`。
-- 首版只读：不写文件、不发外部消息、不下单；产物通过 Report.artifacts 结构化登记。
+- 只读 preset `quno-task` + `quno-task-guard`；worker 控制工具（不算执行权限）：`quno_worker_report`、`quno_thread_handback`、`quno_thread_follow`、`quno_thread_unrelated`、`quno_read`、`quno_recall`、`quno_exchange`、`quno_cli_call`。
+- **结构化只读 CLI（2026-11-13 起）**：`quno_cli_call { capability, operation, params?, target? }` 在同一回合返回结果，取代「本地短查询也走异步 Exchange」。授权与校验全部在 Host 的 `CliCapabilityBroker`（`ctx.qunoCli`）内完成，不靠 prompt、不靠 guard 文案：
+  - 能力由插件注册（capability id + 闭表 operation + executor），不是 shell；executable 与 argv 由 provider 生成，全程不经 shell；
+  - **只有 `access: 'read'` 的 operation 对 Worker 开放**，`command` 可声明但永不可执行（写操作需独立审批设计）；
+  - 参数按声明校验：未知键拒绝（`profile`/`argv`/第二条命令因此无法进 payload）、越界拒绝而非裁剪；profile/凭据只来自实例配置；
+  - 授权取 Ticket `Mandate.cli` 的 accept 时快照（capability + 只读 operation），旧 Ticket 无字段即无授权；
+  - target 是该采集器类型下 `desiredState != disabled` 的实例；多账号必须显式选 id，禁用/删除才撤销——**采集暂停不影响显式授权的只读查询**；
+  - broker 自己强制并发上限、截止时间（不信任 provider 自觉）与输出字符上限；拒绝文案自描述（现有能力/端点/参数/上限）。
+- 首版只读：不写文件、不发外部消息、不下单；产物通过 Report.artifacts 结构化登记。工具名放行 ≠ 权限：`quno-task` guard 仍无 `bash`，`quno_cli_call` 的真正边界在 broker。
 - 容量：初始 4 个 WorkerSlot（active turn 占槽）；等待人工回答/结果验收释放槽；人类 follow-up 可用一个额外槽，wake 优先于新 launch。
 - 对外写操作与审批卡仍是后续阶段；Channel 只保存地址与未来发送能力，当前不执行外部 send。
 
@@ -399,6 +406,8 @@ Collector（就一个东西）
 
 **健康分类**（两层判定：先看 CLI 进程级信号，再看 API 业务码。失败时 stdout 为空、stderr 单行 `{"success":false,"error":{type,subtype,message,hint,code}}`；分类在 worker 内完成，经 run 的 failure/outcome 上交 Host）：
 
+**同步结构化查询（`quno_cli_call`，2026-11-13 起）**：同一批 op 同时以 Host 能力 `yzj` 声明给 Worker，`capability` + `operation` + 声明参数同步返回结果——本地短查询不再走异步往返。两条面共用 `runYzjOperation` 的 argv 构造、`classifyRun` 失败分类与 per-profile 每分钟预算，因此不可能出现「异步面受限、同步面放开」的口径漂移。差异只在生命周期与传输：query 面随运行代际存活（暂停即 `instance-not-running`），能力面随实例**配置**存活（暂停仍可被显式授权的 Worker 查询，禁用/删除才撤销）；失败终态在 query 面走 Exchange 错误消息 + 请求方唤醒，在能力面直接作为工具错误返回给同一回合，由 Worker 自行修正参数或如实 `blocked`。
+
 - **进程级**：exit 3（如本地未登录 `credentials_missing`——**此时没有 errorCode**，只认 errorCode 会把登出态漏成「未知错误」）→ `auth-required`，引导 `yzj-cli auth login`（无浏览器环境 `--device`）；exit 4（网络/超时）→ `unavailable`，**429/限流单独报 `rate-limited`**（`retryAfterMs` 交 Host 退避，最大 30 分钟）；exit 2 与 exit 5 → `degraded`（实现侧 bug，不甩给来源）。
 - **API 级**（exit 1）：10000400/93001/43001 → `auth-required`；429 → `rate-limited`；其他按 `message`/`hint` 归类。
 - **成功判定**：exit 0 **且** 信封 `success: true`。CLI 不存在 → probe 即失败。
@@ -488,6 +497,7 @@ CloudEvents 风格的来源/类型/主体/时间/数据分离，首版用自有�
 
 - 每 2 秒及 Effect 请求时执行有界 pass：到期 Exchange → 超时 Eval → 打开 pending Eval → 执行到期 Effect → 通知 outbox。无 Trigger、无到期记录时一次 pass 只做一次廉价事务与零模型调用。
 - 所有提交后动作走持久 Effect（Action Outbox）：`eval-delivery`、`assignment-launch`、`input-delivery`、`router-relay`、`notice`、`exchange-delivery`（`channel-reply` 预留）。同 kind/key 合并并递增 generation；执行完成/失败按 seq/generation 校验，旧执行不能覆盖新 payload；pause/shutdown 保留等待行。
+- **Exchange 终态必须可送达（2026-11-13）**：`failed` / `expired` 都是终态，先在 `exchange_messages` 落一条 `kind = 'error'` 的持久证据（`{ outcome, reason, responder }`，按 `(exchange, kind, hash)` 幂等），再唤醒请求方——Ticket 请求方得到 `TicketInput`，Router 请求方得到 `router-relay` Effect。过期**不是**静默状态变化；晚到的响应只作证据，不产生第二次唤醒。`relayExchange` 未读到终态时抛 `EffectRetryError` 让 Effect 保留重试，handler 返回「无事可做」只允许用于已结束/已取消的请求方，绝不把「投不出去」当成完成。
 - 用户配置：检查间隔（默认 300s，最小 60s）、时区、工作时段、安静时段；暂停停自动投递，采集器继续按调度运行。`checkIntervalSec` 是普通 Eval 的最大等待/合并节奏，不是模型轮询周期。
 - **只读 Watchdog**：按需检查超时 Eval、连续失败的 Effect、长时间无 active Eval 的 pending Thread、输入未投递且无 WorkerRun 的 Ticket，只报告不修改提示词/权限/Policy/状态；报告进入 `quno_status`，由人或 Effect 重试决定后续动作。
 
@@ -567,6 +577,8 @@ Notice:    pending → prepared → inbox-durable → presented
 | DSH 已 flush、outbox 未标记 | 按 messageId 查 inbox/日志对账，不盲目重新 followup |
 | flush 失败或无法确认 | 标 uncertain，等可靠读写对账；不凭超时认定未发送 |
 | 输入已入队、回复失败/取消 | 区分未接纳/回合失败/部分可见；有限重试并关联旧 attempt |
+| Exchange 终态失败/过期未送达 | 先查 `exchange_messages` 的 `error` 证据；请求方是否有 Input/relay 决定重投，绝不因「没有响应可转述」而完成 Effect |
+| 同步 CLI 查询失败 | 工具错误回到同一 Worker 回合（含 code 与可修正提示）；Worker 自行改参数重试或如实 `blocked`，不占用 Exchange 的 attempts 预算 |
 | 会话已删/不可恢复 | 标 delivery-blocked，UI 引导重新绑定，不自动造第二个身份不明的对话 |
 | 同进程 flush 失败但内存 inbox 有消息 | 恢复先查内存与持久日志，先可靠 flush 再决定是否重投 |
 
@@ -885,6 +897,7 @@ dsh-quno-collector-<name>   各来源采集器（日历、订阅源、云之家�
 | 唤醒与注入 | `followup` 唤醒；`inject` 不唤醒 | 汇报/回流用 followup；不拿 inject 当唤醒 |
 | 可靠写入 | `ctx.sessions.flush` | outbox 投递必经检查 |
 | 原生 Schedule | 持久任务、冷会话恢复、合并错过周期、最小 60s | 只用于用户显式提醒（投递进主对话） |
+| 结构化 CLI | 插件自有子进程调用（yzj 先例：`spawn` 无 shell、超时、输出上限、失败分类） | Host `ctx.qunoCli` 能力登记 + Worker `quno_cli_call`；授权/参数/超时/并发/输出上限由 broker 强制 |
 | 压缩 | compaction realm（per-preset isolate）+ hierarchical Provider | 主对话激进参数（§4.3） |
 | 历史检索 | `sessionQuery`（全文、`traceEvent` 替换链） | `quno_recall`（§4.4） |
 | 记忆 | OhMyMemo 全套 | 只读召回 + 显式写入纪律（§4.5） |
@@ -898,7 +911,7 @@ dsh-quno-collector-<name>   各来源采集器（日历、订阅源、云之家�
 
 ## 15. 验收（行为验证）
 
-> 链路评测的 case、节点证据、Live/Replay 与本地运行设计见 [Quno 链路评测集与本地回放设计](notes/2026-11-06-quno-link-evaluation-design.md)。**评测器已落地**（`plugin/dsh-quno/evals/`，`pnpm run eval`；scripted 全量 21 case 绿 + 8 blocked，实施记录与所修缺陷见 [评测器落地](notes/2026-11-06-quno-link-evaluation-impl.md)，organ 发现/白名单用例见 [按需只读查询落地](notes/2026-11-08-quno-organ-on-demand-read-impl.md)）；发布门仍以 Live P0 连续三次全绿为准，尚未执行。
+> 链路评测的 case、节点证据、Live/Replay 与本地运行设计见 [Quno 链路评测集与本地回放设计](notes/2026-11-06-quno-link-evaluation-design.md)。**评测器已落地**（`plugin/dsh-quno/evals/`，`pnpm run eval`；scripted 全量 25 case 绿 + 9 blocked，实施记录与所修缺陷见 [评测器落地](notes/2026-11-06-quno-link-evaluation-impl.md)，organ 发现/白名单用例见 [按需只读查询落地](notes/2026-11-08-quno-organ-on-demand-read-impl.md)）；发布门仍以 Live P0 连续三次全绿为准，尚未执行。
 
 ### 15.1 主对话、Ticket 与 Worker
 
@@ -907,6 +920,8 @@ dsh-quno-collector-<name>   各来源采集器（日历、订阅源、云之家�
 | 永久对话 | 任意重启/压缩后身份、记忆、话题连续；无新建会话入口 |
 | 主对话只路由 | 执行型请求的唯一工具调用为 `quno_task start`（Eval 回合为 `quno_eval_decide accept`），返回后立即应答「已交后台」；主 preset 无 shell/文件/网页/Skill/Goal 工具 |
 | 第三方工具不可用 | Worker 无对应通道时必须明确 blocked/failed/waiting 并如实回流；端点经 `quno_read.collectors` 发现、不猜端点名，`queryAdvertises` 校验「实例挂载且类型声明 `handleRequest`」，拒绝文案列出真实可用端点（endpoint + label）；不得虚构 `collector:*` 已挂载、桌面更新根因或第三方查询结果；白名单外 payload 被 organ 拒绝且原因回流（`organ-whitelist-reject`）；真实来源正向读取单独验收（`third-party-cli-live-read`，保持 blocked），不用合成 Organ 冒充 |
+| 结构化 CLI 读取（P0 发布门） | Worker 经 `quno_read.cliCapabilities` 发现能力 → `quno_cli_call` 在**同一回合**拿到真实子进程结果 → Report 引用事实 → 主对话只汇报一次（`cli-capability-read`，实例处于**暂停**态仍可查询）；带 `profile`/`argv` 的 payload 被拒且**零进程启动**，纠正参数后成功（`cli-capability-refuse`）；鉴权失败等 CLI 失败作为工具错误回到同回合，Worker 如实 `blocked` 并带一个具体问题（`cli-capability-failure`）；能力/操作/参数/账号越权一律在启动前拒绝 |
+| Exchange 失败回流（P0 发布门） | `failed`/`expired` 落 `error` 证据并唤醒请求方；Router 侧失败各注入**一次** relay、不得声称查询成功（`exchange-failure-relay`）；Ticket 侧失败成为可修正的 Input；晚到响应不重复唤醒 |
 | Ticket 正常回流 | 主对话立即回应 → 任务卡进度 → Worker Report 经 Router relay 自然语言汇报 + 卡片定格 |
 | direct accept 幂等 | 同一 `sessionId+messageId+toolCallId` 重复调用只产生一个 Ticket/Assignment |
 | Eval accept | 单事务写 Decision/Ticket/Mandate/Assignment/Subscription/launch Effect；重复 accept 返回原 Ticket |
@@ -1051,6 +1066,14 @@ dsh-quno-collector-<name>   各来源采集器（日历、订阅源、云之家�
 - **验证**（`plugin/dsh-quno`）：`pnpm run typecheck`、`pnpm run build`、`pnpm test` 全绿；新增领域测试 26 项、SQLite 迁移/保留期 6 项、Effect/Transport 8 项、端到端 Eval/Report 流程 7 项、Executor 7 项、Watchdog 4 项、真实 AgentLoop Eval 回合 1 项；合计 172 项通过。
 - **未在本轮验证的运行时项**（P0 接缝的实机部分）：真实桌面 `dsh web`/Electron 下的 followup/steer/inject 合批、无 live Human parent 的冷创建、后台 Shell/Subagent 占槽行为需在实机 scratch `DSH_HOME` 复验；单测已用真实 AgentLoop testkit 与结构化 stub 覆盖接口契约。
 
+### 18.2 2026-11-13 结构化 CLI 能力层与结果回流落地
+
+- **能力层**：新增 `src/cli-broker.ts`（`CliCapabilityBroker`，Host 服务 `ctx.qunoCli`，`src/index.ts` 提供）。授权 = 已注册能力的只读 operation ∩ Ticket `Mandate.cli` 快照 ∩ 有可用 target；参数闭表校验、并发/截止/输出上限由 broker 自行强制（截止时间用 `Promise.race`，不信任 provider）。`Mandate.cli` 为可选字段，旧 Ticket 读回 `undefined` 即无授权，不需要数据迁移。
+- **Worker 面**：`app/worker-tools.ts` 新增 `quno_cli_call`，`quno_read` 输出新增 `cliCapabilities` 发现面，`WORKER_TOOL_NAMES` 同步放行工具名；主对话 preset 仍未挂 CLI 工具。
+- **yzj**：`plugin/dsh-quno-collector-yzj/src/organ.ts` 抽出 `runYzjOperation` 作为唯一执行路径，异步 query 面改为兼容适配；新增 `src/capability.ts` 声明三个只读 op 与 target 解析，`apply` 内以 effect 注册能力（target 为 `qunoCollectors` 下的实例）。
+- **回流正确性**：`Engine.settleExchangeFailure` 统一失败/过期终态（error 消息 + 请求方唤醒），`assessor.relayExchange` 改读终态证据并在未终态时抛 `EffectRetryError`，relay 改 `queue` 不打断 Router 当前回合。
+- **验证**：`dsh-quno` 219 项、`dsh-quno-collector-yzj` 66 项 node:test 全绿；scripted 链路评测 25 通过 + 9 blocked、0 fail，新增四条 P0（`cli-capability-read`/`cli-capability-refuse`/`cli-capability-failure`/`exchange-failure-relay`）。实施记录与四处设计判断见 [2026-11-13 结构化 CLI 能力层与结果回流修复](notes/2026-11-13-quno-cli-capability-and-result-delivery.md)。
+
 ## 19. 文档沿革
 
 - 2026-10-22 三份原始提案（主对话设计、事件流设计、Sense 契约）各自成文于 `docs/notes/`。
@@ -1100,6 +1123,7 @@ dsh-quno-collector-<name>   各来源采集器（日历、订阅源、云之家�
 **验证**：`dsh-quno` 94 项测试、`dsh-quno-sense-yzj` 18 项、日历/订阅源各 7 项全绿；四包 typecheck/build 通过。决策与实施记录见 `docs/notes/2026-10-27-quno-interaction-completion.md`。
 - 2026-10-27 视觉对齐：Q 标、卡片规格、面板、胶囊（会话头工具区）与去幻影气泡落地；侧栏行副标题/徽标列为 fork 项（§21；记录见 `docs/notes/2026-10-27-quno-visual-parity.md`）。
 - 2026-10-28 交互方案收敛：设置只保留「配置 / 来源」；右栏扩为「动态 / 关注 / 任务 / 运行」，设置里的运行态与「立即检查」迁入右栏；胶囊回会话头工具区；首开回 Hero 接缝；证据按 readOriginal/pruned 决定可读性（记录见 `docs/notes/2026-10-28-quno-interaction-plan.md`）。
+- 2026-11-13 §0/§5.4/§6.11/§8.3/§10.3/§14.2/§15.1 增补结构化只读 CLI 能力层（`quno_cli_call` + `ctx.qunoCli`）与 Exchange 终态回流口径；新增 §18.2 落地记录（记录见 `docs/notes/2026-11-13-quno-cli-capability-and-result-delivery.md`）。
 - 2026-10-29 Quno 会话可见性收敛：主会话与后台会话均从工作区树、扁平列表和搜索中过滤；fork 提供通用可注销过滤注册点，Quno 声明主 preset 过滤，直接导航与历史检索不受影响（记录见 `docs/notes/2026-10-29-quno-session-visibility.md`）。
 - 2026-10-29 设置项使用盘点：移除设置页底部主对话行，主对话统一由侧栏 Quno 入口创建或打开；各项真实消费与未生效边界记录见 `docs/notes/2026-10-29-quno-settings-usage-audit.md`。
 - 2026-10-29 §6.11 扩展设计 v2（待实现）：登录态验证结构化 @、私聊方向与分页；修订目录续扫、初始化、过滤分类及容量限制。方案与剩余验收门见 [登录态核验版设计](notes/2026-10-29-quno-sense-yzj-mentions-direct-design-v2.md)，保留旧稿为决策历史。

@@ -25,6 +25,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { AgentRegistry } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { WORKER_BOUNDARY, registerWorkerTools, ticketIdFromExecutorSession } from './worker-tools.ts'
+import type { WorkerCliFace } from './worker-tools.ts'
 import { EffectRetryError } from './effects.ts'
 import { SessionTransport } from './transport.ts'
 import type { Engine } from '../core/engine.ts'
@@ -64,6 +65,8 @@ export interface ExecutorDeps {
   readonly resolveExchangeResponder?: (endpoint: string, kind: 'request' | 'command') => boolean
   /** The exchange-facing endpoints for worker discovery and refusal directories. */
   readonly listCollectors?: () => readonly CollectorEndpointView[]
+  /** The structured read-only CLI surface (`quno_cli_call`). */
+  readonly cli?: WorkerCliFace
   /** Called after a durable worker state change (UI refresh). */
   readonly onChange?: () => void
 }
@@ -488,6 +491,7 @@ export class Executor {
         now: this.deps.now,
         ...(this.deps.resolveExchangeResponder === undefined ? {} : { resolveExchangeResponder: this.deps.resolveExchangeResponder }),
         ...(this.deps.listCollectors === undefined ? {} : { listCollectors: this.deps.listCollectors }),
+        ...(this.deps.cli === undefined ? {} : { cli: this.deps.cli }),
       }, { ticketId, executorSessionId: `quno-exec-${ticketId}` })
       const presets = this.deps.ctx.get('agentPresets') as unknown as PresetRegistryFace | undefined
       if (presets !== undefined) {

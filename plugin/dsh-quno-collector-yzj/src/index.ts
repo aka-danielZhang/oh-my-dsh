@@ -25,6 +25,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { CollectorDefinition } from '../../dsh-quno/src/types.ts'
 import type { CollectorFactory, CollectorMountContext, CollectorRunContext, CollectorRunOutcome } from '../../dsh-quno/src/collectors.ts'
 import { CALL_TIMEOUT_MS, CLI, classifyRun, hasMore, parseEnvelope, readList, type CliExec, type CliRun } from './cli.ts'
+import { createYzjCapability } from './capability.ts'
 import { handleOrganRequest, registerOrganInstance } from './organ.ts'
 import { parseRecentConversations, toGroupOption } from './messages.ts'
 import { createWorker, type RoundDeps, type RoundOutcome, type Worker } from './round.ts'
@@ -123,11 +124,26 @@ interface CollectorRegistryFace {
   register(definition: unknown, factory: unknown): () => Promise<void>
 }
 
-/** Register the Collector while the plugin is mounted. */
+/** Minimal structural face of the host's CLI capability broker. */
+interface CliBrokerFace {
+  register(provider: unknown): () => void
+}
+
+/** Register the collector and its structured read capability while mounted. */
 export function apply(ctx: Context): void {
   const registry = ctx.get('qunoCollectors') as unknown as CollectorRegistryFace | undefined
   if (registry === undefined) throw new Error('dsh-quno-collector-yzj: qunoCollectors service is not mounted')
   ctx.effect(() => registry.register(definition, factory), 'dsh-quno-collector-yzj: registration')
+
+  // The capability is a separate surface from polling: it stays available
+  // while the instance is paused (configuring the account is the
+  // authorization), and disappears with the plugin, not with a schedule.
+  const broker = ctx.get('qunoCli') as unknown as CliBrokerFace | undefined
+  if (broker === undefined) {
+    ctx.logger.warn('dsh-quno-collector-yzj: qunoCli is not mounted; the structured read capability (quno_cli_call) stays unavailable')
+    return
+  }
+  ctx.effect(() => broker.register(createYzjCapability(spawnCli)), 'dsh-quno-collector-yzj: cli capability')
 }
 
 /** The factory. */

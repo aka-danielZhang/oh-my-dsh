@@ -17,6 +17,7 @@ import z from '@deepseek-ai/schemastery'
 import TYPERT_HOST from './typert.host.ts'
 import { QunoHost, type QunoPluginConfig } from './service.ts'
 import type { QunoCollectorsService } from './collectors.ts'
+import type { CliCapabilityBroker } from './cli-broker.ts'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'dsh-quno'
@@ -49,6 +50,8 @@ declare module '@deepseek-ai/cordis' {
     quno: QunoHost
     /** Collector registration and lifecycle. */
     qunoCollectors: QunoCollectorsService
+    /** Structured read-only CLI capabilities registered by host plugins. */
+    qunoCli: CliCapabilityBroker
   }
 }
 
@@ -73,6 +76,7 @@ export async function apply(ctx: Context, config: QunoPluginConfig = {}): Promis
   // Collector plugins (which inject `qunoCollectors`) can mount in the same boot.
   ctx.provide('quno', host)
   ctx.provide('qunoCollectors', host.collectors)
+  ctx.provide('qunoCli', host.cli)
 
   const disposeSessionEvents = ctx.on('session/event', (session, event) => {
     host.observeSession(String(session.id), event)
