@@ -70,6 +70,10 @@ export class Assessor {
   /**
    * Relay one Worker Report. The report is rendered deterministically; the
    * Router only decides how to tell the user.
+   *
+   * A missing report on an open Ticket is not success: the Effect must stay
+   * queued until the report exists, or the Router would never learn the
+   * outcome. Only an ended Ticket makes the relay obsolete.
    */
   async relayReport(ticketId: string, assignmentId: string | null, signal?: AbortSignal): Promise<boolean> {
     const ticket = this.deps.repo.getTicket(ticketId)
@@ -77,15 +81,19 @@ export class Assessor {
     const assignment = assignmentId === null
       ? this.deps.repo.listAssignmentsByTicket(ticket.id).at(-1)
       : this.deps.repo.getAssignment(assignmentId)
-    if (assignment === undefined || assignment.report === null) return false
+    if (assignment === undefined || assignment.report === null) {
+      if (ticket.ended !== null) return false
+      throw new EffectRetryError(`assignment of ticket ${ticket.id} has no report yet`, 30_000)
+    }
     const agent = await this.deps.resolveRouter()
     if (agent === undefined) throw new EffectRetryError('the permanent conversation cannot be resolved', 30_000)
     const text = renderReport(ticket, assignment)
-    const mode = agent.status === 'running' ? 'steer' : 'queue'
     await this.deps.transport.send(agent, {
       requestId: `report:${assignment.id}:${String(assignment.report.at)}:${String(assignment.report.nonce ?? 0)}`,
       text,
-      mode,
+      // A result is a direct answer: queue behind the Router's current turn
+      // instead of steering into the middle of an unrelated reply.
+      mode: 'queue',
       source: {
         kind: 'quno-report',
         form: 'relay',
@@ -98,24 +106,37 @@ export class Assessor {
     return true
   }
 
-  /** Relay one Exchange response that was requested by the Router itself. */
+  /**
+   * Relay the terminal outcome of an Exchange the Router itself requested.
+   *
+   * `responded`/`consumed` carry a response message; `failed`/`expired` carry
+   * the persisted error message. Both are rendered from durable evidence, so a
+   * replay produces identical text and the transport's stable id deduplicates
+   * it. A non-terminal Exchange throws: the Effect must retry, never "complete"
+   * without telling the Router anything.
+   */
   async relayExchange(exchangeId: string, signal?: AbortSignal): Promise<boolean> {
     const exchange = this.deps.repo.getExchange(exchangeId)
-    if (exchange === undefined || exchange.status !== 'responded') return false
+    if (exchange === undefined) return false
     const messages = this.deps.repo.getExchangeMessages(exchangeId)
-    const response = messages.find(message => message.kind === 'response')
-    if (response === undefined) return false
+    const outcome = exchangeRelayOutcome(exchange.status, messages)
+    if (outcome === null) {
+      if (exchange.status === 'pending' || exchange.status === 'delivered') {
+        throw new EffectRetryError(`exchange ${exchange.id} is not terminal yet`, 30_000)
+      }
+      // A cancelled exchange has no outcome to relay in this version.
+      return false
+    }
     const agent = await this.deps.resolveRouter()
     if (agent === undefined) throw new EffectRetryError('the permanent conversation cannot be resolved', 30_000)
-    const text = `【Quno 异步读取结果】\n${boundedJson(response.payload)}`
     await this.deps.transport.send(agent, {
       requestId: `exchange:${exchange.id}`,
-      text,
-      mode: agent.status === 'running' ? 'steer' : 'queue',
+      text: outcome.text,
+      mode: 'queue',
       source: {
         kind: 'quno-report',
         form: 'relay',
-        summary: '异步读取结果',
+        summary: outcome.summary,
         ticketId: exchange.id,
         assignmentId: exchange.id,
       },
@@ -123,6 +144,53 @@ export class Assessor {
     void signal
     return true
   }
+}
+
+/** One deterministic Router-facing rendering of a terminal Exchange outcome. */
+export interface ExchangeRelayOutcome {
+  readonly text: string
+  readonly summary: string
+}
+
+/**
+ * Render the terminal outcome of one Exchange from its durable messages.
+ * `null` while the Exchange is not terminal or the evidence it needs is
+ * missing — the caller decides whether that is a retry or an obsolete relay.
+ */
+export function exchangeRelayOutcome(
+  status: string,
+  messages: readonly { readonly kind: string; readonly payload: unknown }[],
+): ExchangeRelayOutcome | null {
+  if (status === 'responded' || status === 'consumed') {
+    const response = messages.find(message => message.kind === 'response')
+    if (response === undefined) return null
+    // The Router sees a bounded rendering; the full payload stays in the
+    // Exchange evidence (and in the requester's TicketInput when there is one).
+    const text = JSON.stringify(response.payload) ?? '（空）'
+    const body = text.length > 4_000
+      ? `${text.slice(0, 4_000)}…（结果已截断，原始 ${String(text.length)} 字符）`
+      : text
+    return { text: `【Quno 异步读取结果】\n${body}`, summary: '异步读取结果' }
+  }
+  if (status === 'failed' || status === 'expired') {
+    const error = messages.find(message => message.kind === 'error')
+    const reason = error === undefined ? (status === 'expired' ? '超时未返回' : '没有记录失败原因') : errorReason(error.payload)
+    const headline = status === 'expired' ? '【Quno 异步读取超时】' : '【Quno 异步读取失败】'
+    return {
+      text: `${headline}\n${reason}\n可以修正参数后重试，或改用其它可用的 organ。`,
+      summary: status === 'expired' ? '异步读取超时' : '异步读取失败',
+    }
+  }
+  return null
+}
+
+/** Read the human reason out of one persisted `error` ExchangeMessage payload. */
+function errorReason(payload: unknown): string {
+  if (typeof payload === 'object' && payload !== null) {
+    const reason = (payload as Record<string, unknown>)['reason']
+    if (typeof reason === 'string' && reason.trim() !== '') return reason
+  }
+  return '没有记录失败原因'
 }
 
 /** Render one bounded Eval candidate for the permanent conversation. */
@@ -169,15 +237,6 @@ export function renderReport(ticket: TicketRecord, assignment: AssignmentRecord)
   lines.push(`ticketId=${ticket.id}`)
   lines.push('请用自然语言向用户转述结果、影响和下一步；不要重新执行工作。')
   return lines.join('\n')
-}
-
-function boundedJson(value: unknown): string {
-  try {
-    const text = JSON.stringify(value)
-    return text === undefined ? '（空）' : clip(text, 4000)
-  } catch {
-    return '（无法序列化）'
-  }
 }
 
 function boundedData(value: unknown): string | null {

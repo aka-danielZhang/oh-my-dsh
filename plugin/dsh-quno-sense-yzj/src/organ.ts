@@ -14,6 +14,7 @@
 
 import { CALL_TIMEOUT_MS, classifyRun, hasMore, parseEnvelope, readList, type CliExec } from './cli.ts'
 import { takeToken } from './round.ts'
+import type { CliCallOutcome, CliOperationSpec } from '../../dsh-quno/src/cli-broker.ts'
 import type { OrganExchangeRequest } from '../../dsh-quno/src/types.ts'
 
 /** The closed set of on-demand read operations (v1 whitelist). */
@@ -136,15 +137,29 @@ function argvFor(parsed: Extract<ParsedOrganPayload, { readonly ok: true }>, pro
 /**
  * Bound one CLI list to the whitelist shape: at most `limit` items, and no
  * string field longer than `itemTextMaxChars`. Everything clipped is reported
- * through `truncated` instead of being passed off as complete.
+ * through `truncated` instead of being passed off as complete. `maxChars`
+ * additionally drops trailing items once the serialized result would exceed
+ * the caller's ceiling — the caller learns it got less, never silently.
  */
 export function boundOrganList(
   list: readonly unknown[],
   limit: number,
+  maxChars = Number.POSITIVE_INFINITY,
 ): { readonly items: readonly unknown[]; readonly truncated: boolean } {
   let truncated = list.length > limit
-  const items = list.slice(0, limit).map((item) => {
-    if (typeof item !== 'object' || item === null) return item
+  const items: unknown[] = []
+  let budget = maxChars
+  for (const item of list.slice(0, limit)) {
+    if (typeof item !== 'object' || item === null) {
+      const cost = JSON.stringify(item)?.length ?? 0
+      if (cost > budget) {
+        truncated = true
+        break
+      }
+      budget -= cost
+      items.push(item)
+      continue
+    }
     const record: Record<string, unknown> = {}
     let clipped = false
     for (const [key, value] of Object.entries(item as Record<string, unknown>)) {
@@ -156,9 +171,68 @@ export function boundOrganList(
       }
     }
     truncated = truncated || clipped
-    return record
-  })
+    const cost = JSON.stringify(record)?.length ?? 0
+    if (cost > budget) {
+      truncated = true
+      break
+    }
+    budget -= cost
+    items.push(record)
+  }
   return { items, truncated }
+}
+
+/**
+ * Execute one already-validated operation. This is the single CLI execution
+ * path: the Sense's asynchronous Organ face and the Worker's synchronous
+ * `quno_cli_call` both end up here, so argv construction, failure
+ * classification and the shared per-profile rate budget cannot drift apart.
+ */
+export async function runYzjOperation(input: {
+  readonly parsed: Extract<ParsedOrganPayload, { readonly ok: true }>
+  readonly profile: string
+  readonly exec: CliExec
+  readonly signal: AbortSignal | undefined
+  readonly timeoutMs: number
+  readonly maxOutputChars?: number
+}): Promise<CliCallOutcome> {
+  // The on-demand read shares the polling budget of the same profile — one
+  // rate limiter per profile, never a separate on-demand quota.
+  const token = takeToken(input.profile, Date.now())
+  if (!token.ok) {
+    const waitMs = Math.max(0, token.nextTokenAt - Date.now())
+    return {
+      ok: false,
+      code: 'rate-limited',
+      message: `与轮询共享的每分钟请求预算已用尽，约 ${String(waitMs)}ms 后恢复`,
+      retryable: true,
+    }
+  }
+  const run = await input.exec(argvFor(input.parsed, input.profile), input.signal, input.timeoutMs)
+  const failure = classifyRun(run)
+  if (failure !== null) {
+    const retryable = failure.state === 'rate-limited' || (failure.state === 'unavailable' && failure.code !== 'cli-missing')
+    return { ok: false, code: failure.state, message: failure.detail, retryable }
+  }
+  const envelope = parseEnvelope(run.stdout)
+  const list = readList(envelope)
+  if (envelope === null || list === null) {
+    return { ok: false, code: 'bad-envelope', message: 'CLI 返回内容无法解析为 { success, data.list } 信封' }
+  }
+  if (envelope.success !== true) {
+    return { ok: false, code: 'cli-error', message: envelope.error?.message ?? 'CLI 返回失败信封' }
+  }
+  const bounded = boundOrganList(list, input.parsed.limit, input.maxOutputChars)
+  return {
+    ok: true,
+    data: {
+      op: input.parsed.op,
+      count: bounded.items.length,
+      more: hasMore(envelope),
+      truncated: bounded.truncated,
+      list: bounded.items,
+    },
+  }
 }
 
 interface OrganInstanceRegistration {
@@ -198,37 +272,16 @@ export async function handleOrganRequest(request: OrganExchangeRequest, exec: Cl
     await request.failExchange(`${parsed.reason}：${parsed.detail}`, false)
     return
   }
-  // The on-demand read shares the polling budget of the same profile — one
-  // rate limiter per profile, never a separate on-demand quota.
-  const token = takeToken(instance.profile, Date.now())
-  if (!token.ok) {
-    const waitMs = Math.max(0, token.nextTokenAt - Date.now())
-    await request.failExchange(`rate-limited：与轮询共享的每分钟请求预算已用尽，约 ${String(waitMs)}ms 后恢复`, true)
-    return
-  }
-  const run = await exec(argvFor(parsed, instance.profile), request.signal, CALL_TIMEOUT_MS)
-  const failure = classifyRun(run)
-  if (failure !== null) {
-    const retryable = failure.state === 'rate-limited' || (failure.state === 'unavailable' && failure.code !== 'cli-missing')
-    await request.failExchange(`${failure.state}：${failure.detail}`, retryable)
-    return
-  }
-  const envelope = parseEnvelope(run.stdout)
-  const list = readList(envelope)
-  if (envelope === null || list === null) {
-    await request.failExchange('bad-envelope：CLI 返回内容无法解析为 { success, data.list } 信封', false)
-    return
-  }
-  if (envelope.success !== true) {
-    await request.failExchange(`cli-error：${envelope.error?.message ?? 'CLI 返回失败信封'}`, false)
-    return
-  }
-  const bounded = boundOrganList(list, parsed.limit)
-  await request.completeExchange({
-    op: parsed.op,
-    count: bounded.items.length,
-    more: hasMore(envelope),
-    truncated: bounded.truncated,
-    list: bounded.items,
+  const outcome = await runYzjOperation({
+    parsed,
+    profile: instance.profile,
+    exec,
+    signal: request.signal,
+    timeoutMs: CALL_TIMEOUT_MS,
   })
+  if (!outcome.ok) {
+    await request.failExchange(`${outcome.code}：${outcome.message}`, outcome.retryable === true)
+    return
+  }
+  await request.completeExchange(outcome.data)
 }

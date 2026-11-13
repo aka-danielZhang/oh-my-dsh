@@ -69,15 +69,15 @@ evals/
                   organ 能力面响应真实 Exchange
     fs.ts         fixture 目录 + 只读 read/glob/grep + 真实但惰性的全局 bash
     hidden.ts     Live 隐藏事实生成器（seeded RNG：负责人/截止日期/文件名/错误码 + 干扰值）
-  cases/          Scripted：P0（9）+ P1（10）+ blocked 清单（含真实第三方来源）
+  cases/          Scripted：P0（13）+ P1（12）+ blocked 清单（含真实第三方来源）
   cases/live/     Live E2E：P0 全部 12 个 + P1 第三方能力缺口
 ```
 
 ## 覆盖与边界（诚实清单）
 
-**Scripted P0（回归层，每次修改必跑）**：`chat-simple`、`direct-read`、`status-result`、`eval-observe`、`auto-investigate`、`owned-followup`、`worker-restart`、`notification-quiet`、`tool-guard`。
+**Scripted P0（回归层 + 发布门，每次修改必跑）**：`chat-simple`、`direct-read`、`status-result`、`eval-observe`、`auto-investigate`、`owned-followup`、`worker-restart`、`notification-quiet`、`tool-guard`，以及结构化 CLI / 回流发布门三条：`cli-capability-read`（暂停中的实例仍可查；真实子进程 → 同回合结果 → report → 只汇报一次）、`cli-capability-refuse`（未知参数拒绝且零进程，纠正后成功）、`cli-capability-failure`（鉴权失败如实回流、只汇报一次且不称成功）、`exchange-failure-relay`（Exchange 终态失败回流一次，不得声称成功）。
 
-**Scripted P1**：`irrelevant-ignore`、`explicit-source-accept`、`worker-blocked-answer`、`worker-handback`、`worker-stop-late`、`policy-change`、`exchange-roundtrip`、`third-party-tool-unavailable`、`notification-dedupe`、`memory-isolation`。
+**Scripted P1**：`irrelevant-ignore`、`explicit-source-accept`、`worker-blocked-answer`、`worker-handback`、`worker-stop-late`、`policy-change`、`exchange-roundtrip`、`organ-discovery`、`organ-whitelist-reject`、`third-party-tool-unavailable`、`notification-dedupe`、`memory-isolation`。
 
 **Scripted blocked（registry 中带原因，不假通过）**：`desktop-entry`、`desktop-task-card`（L4 DOM）、`compaction-recall`、`burst-100`、`two-threads-timeout`、`feedback-cas`、`notification-flush`、`exchange-restart`、`third-party-cli-live-read`（真实 yzj-cli 正向读取；生产按需 Organ 与显式 live-source 选择尚未提供）。
 

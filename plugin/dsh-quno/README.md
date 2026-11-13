@@ -27,6 +27,7 @@ Host 行常驻；`quno` 的 agent preset 由 Host 在启动时**程序化注册*
 - **安静时段与频控**：默认 22:00–08:00 静默、同主题最小间隔 10 分钟、每小时最多 3 条；`quno_mute` 可临时让出。
 - **反馈**：通知/任务卡提供「已处理 / 稍后 / 关闭」；自然语言反馈由主对话模型调用 `quno_attention` 吸收。汇报卡按携带 `notificationId` 的那条消息绑定到所属 Turn，重载后仍可操作；历史通知按需读取（`noticeDetail`）。
 - **只读委派**：每个 Ticket 复用稳定的 `quno-exec-<ticketId>` 只读子会话（`quno-task` preset，无 shell、无写工具）；Worker 用 `quno_worker_report` 结构化返回结论、产物与待答问题，Report 经 Router relay 进入通知 outbox。停止/重试先落库再处理激活，晚到写入不会改回状态。
+- **结构化只读 CLI**：Worker 用 `quno_cli_call` 调用插件登记的能力（capability + operation + 声明参数），结果在**同一回合**返回，本地短查询不必走异步 Exchange。授权与校验在 Host 的 `qunoCli` broker 内：只放行 `access: 'read'`、按 Ticket `Mandate` 快照授权、参数闭表校验（`profile`/`argv` 进不来）、并发/超时/输出上限强制，全程不经 shell。能力必须先从 `quno_read.cliCapabilities` 发现；采集实例暂停不影响显式授权的只读查询。异步 `quno_exchange` 只留给真正远端/异步的器官读取，其失败与过期都会带原因回流并被唤醒一次。
 - **感知器接入**：字段驱动表单（数值边界、静态选项、多值、远程选项、密钥留空保持）；云之家「最近群聊」经 `senseOptions` 发现，仅多人群聊可选。接入向导只承诺「已创建，正在首次同步」，健康以真实结果更新。
 - **真实探测**：`probeSense` 只检查可达性，不重启实例、不改配置版本、不推进检查点、不写健康，也不代表同步成功。
 - **数据归 Quno**：会话消息仍在 DSH 会话日志里；Quno 只持久化事件、关注、通知、任务与调度状态，可整体删除 `~/.dsh/quno/` 重置。

@@ -26,6 +26,7 @@ import type { SenseDefinition } from '../../dsh-quno/src/types.ts'
 import type { SenseFactory, SenseHandle, SenseRuntime } from '../../dsh-quno/src/senses.ts'
 import { SenseOptionsError } from '../../dsh-quno/src/senses.ts'
 import { CALL_TIMEOUT_MS, CLI, classifyRun, hasMore, parseEnvelope, readList, type CliExec, type CliRun } from './cli.ts'
+import { createYzjCapability } from './capability.ts'
 import { handleOrganRequest, registerOrganInstance } from './organ.ts'
 import { parseRecentConversations, toGroupOption } from './messages.ts'
 import { createWorker, MIN_SHARD_GAP_MS, type RoundDeps } from './round.ts'
@@ -126,11 +127,26 @@ interface SenseRegistryFace {
   register(definition: unknown, factory: unknown): () => Promise<void>
 }
 
-/** Register the Sense while the plugin is mounted. */
+/** Minimal structural face of the host's CLI capability broker. */
+interface CliBrokerFace {
+  register(provider: unknown): () => void
+}
+
+/** Register the Sense and its structured read capability while mounted. */
 export function apply(ctx: Context): void {
   const registry = ctx.get('qunoSenses') as unknown as SenseRegistryFace | undefined
   if (registry === undefined) throw new Error('dsh-quno-sense-yzj: qunoSenses service is not mounted')
   ctx.effect(() => registry.register(definition, factory), 'dsh-quno-sense-yzj: registration')
+
+  // The capability is a separate surface from polling: it stays available
+  // while the instance is paused (configuring the account is the
+  // authorization), and disappears with the plugin, not with a schedule.
+  const broker = ctx.get('qunoCli') as unknown as CliBrokerFace | undefined
+  if (broker === undefined) {
+    ctx.logger.warn('dsh-quno-sense-yzj: qunoCli is not mounted; the structured read capability (quno_cli_call) stays unavailable')
+    return
+  }
+  ctx.effect(() => broker.register(createYzjCapability(spawnCli)), 'dsh-quno-sense-yzj: cli capability')
 }
 
 /** The factory. */

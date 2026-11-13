@@ -23,6 +23,7 @@ import type {
 } from '../core/model.ts'
 import type { Engine } from '../core/engine.ts'
 import type { DomainRepository } from '../core/repository.ts'
+import type { CliCallInput, CliCallResult, CliCapabilityView } from '../cli-broker.ts'
 import type { OrganEndpointView } from '../types.ts'
 
 /** Names a worker session may call (also allowed by the preset guard). */
@@ -34,12 +35,19 @@ export const WORKER_TOOL_NAMES: readonly string[] = [
   'quno_read',
   'quno_recall',
   'quno_exchange',
+  'quno_cli_call',
 ]
 
 /** Per-agent worker identity. */
 export interface WorkerIdentity {
   readonly ticketId: TicketId
   readonly executorSessionId: string
+}
+
+/** The narrow face of the CLI capability broker a Worker tool may use. */
+export interface WorkerCliFace {
+  readonly describe: () => readonly CliCapabilityView[]
+  readonly call: (input: CliCallInput) => Promise<CliCallResult>
 }
 
 /** Resolve the Ticket owned by one executor session id. */
@@ -57,6 +65,8 @@ export interface WorkerToolDeps {
   readonly resolveExchangeResponder?: (endpoint: string, kind: 'request' | 'command') => boolean
   /** The exchange-facing endpoints for `quno_read.organs` and refusal directories. */
   readonly listOrgans?: () => readonly OrganEndpointView[]
+  /** The structured read-only CLI surface (`quno_cli_call`). */
+  readonly cli?: WorkerCliFace
 }
 
 /** Prompt section that teaches the report protocol. */
@@ -75,6 +85,11 @@ session; the permanent conversation receives your structured Report.
   ready with a "missing" annotation — report \`waiting\` (or \`blocked\`) and put
   one concrete question in \`question.question\`. The user's answer will be
   routed back to you in this same session to continue the task.
+- Local read-only lookups that a configured CLI can answer belong in this turn:
+  call \`quno_cli_call\` with a capability/operation you first read from
+  \`quno_read.cliCapabilities\`. Never guess a capability, operation, or endpoint
+  name, and never describe a queued or refused call as a successful query.
+  Reserve \`quno_exchange\` for genuinely asynchronous or remote work.
 - A follow-up message on a Thread owned by this Ticket is yours to judge. If it
   is out of scope, call \`quno_thread_handback\` so it can be re-evaluated.
 - Never invent ids, artifacts, or progress. Only report what you actually did.`
@@ -271,6 +286,7 @@ export function registerWorkerTools(ctx: Context, deps: WorkerToolDeps, identity
           subscriptions: { type: 'array', items: { type: 'json' }, required: true },
           triggers: { type: 'array', items: { type: 'json' }, required: true },
           organs: { type: 'array', items: { type: 'json' }, required: true },
+          cliCapabilities: { type: 'array', items: { type: 'json' }, required: true },
         },
       },
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
@@ -310,6 +326,51 @@ export function registerWorkerTools(ctx: Context, deps: WorkerToolDeps, identity
         })) as unknown as JsonValue[],
         triggers: triggers as unknown as JsonValue[],
         organs: (deps.listOrgans?.() ?? []) as unknown as JsonValue[],
+        cliCapabilities: (deps.cli?.describe() ?? []) as unknown as JsonValue[],
+      }
+    },
+  }))
+
+  ctx.tools.register(defineTool({
+    name: 'quno_cli_call',
+    description: '调用一个已授权的结构化只读 CLI 能力。capability / operation / params 必须来自 quno_read 的 cliCapabilities，不要猜名字，也不接受自由命令。结果在同一回合返回；本地短查询首选本工具，只有真正异步或远端的工作才用 quno_exchange。',
+    parameters: {
+      capability: { type: 'string', required: true, description: '能力 id（来自 quno_read.cliCapabilities）' },
+      operation: { type: 'string', required: true, description: '只读 operation（同一来源）' },
+      params: { type: 'json', description: '参数对象，严格按该 operation 声明的参数与上限' },
+      target: { type: 'string', description: '多账号时按 cliCapabilities.targets 的 id 选择；只有一个账号时可省略' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          capability: { type: 'string', required: true },
+          operation: { type: 'string', required: true },
+          target: { type: 'json', required: true },
+          data: { type: 'json', required: true },
+        },
+      },
+      render: (_args, value) => [{ type: 'text', text: JSON.stringify(value.data) }],
+    },
+    async execute(args) {
+      const { ticket } = resolveAssignment()
+      const cli = deps.cli
+      if (cli === undefined) {
+        throw new QunoStateError('cli-unavailable', '本进程没有挂载 CLI 能力层；这一轮无法执行结构化 CLI 查询')
+      }
+      const result = await cli.call({
+        capability: String(args.capability),
+        operation: String(args.operation),
+        params: args.params,
+        ...(args.target === undefined ? {} : { target: String(args.target) }),
+        ...(ticket.mandate.cli === undefined ? {} : { grant: ticket.mandate.cli }),
+      })
+      return {
+        capability: result.capability,
+        operation: result.operation,
+        target: result.target as unknown as JsonValue,
+        data: result.data as JsonValue,
       }
     },
   }))

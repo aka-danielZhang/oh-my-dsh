@@ -26,6 +26,7 @@ dsh plugin --profile web add <repo>/plugin/dsh-quno-sense-yzj
 - **健康展示（进度 ≠ 故障）**：目录跨页推进、会话排队等待展示为同步进度（含结构化 `progress` 字段）；只有会话受阻、范围外未覆盖、最老等待超阈值（`pendingWaitThresholdSec`，默认 600s）、目录停滞超阈值（`directoryStalledSec`，默认 900s）或登录/限流/网络故障才报 degraded/异常；历史覆盖缺口不会被安静分片抹平。
 - **只读**：采集主路径只调用 `whoami`、`im group recent`、`im message list`，探活 `contact user get`，接入选项发现 `im group recent`。不写、不发、不标已读、不用已读状态做筛选。
 - **按需读取（organ `handleRequest`）**：实例运行期间，Quno 侧可经 `quno_exchange` 对 `organ:<instanceId>` 发起白名单内的只读查询（端点经 `quno_read.organs` 发现）。与轮询共享同 profile 的每分钟请求预算；`reliability.readOriginal` 仍为 `false`——该声明描述入库载荷完整性，与按需查询正交。详见下节。
+- **同步结构化查询（`quno_cli_call`）**：同一批 op 也注册为 Host 能力 `yzj`，Worker 可在同一回合直接取回结果（`capability: "yzj"` + `operation` + 声明参数；多账号用 `target` 选择实例 id）。profile 只来自实例配置；与轮询、异步 organ 面共享同一份每秒请求预算；查询能力随**实例配置**存活，暂停采集仍可用，禁用或删除实例才撤销。
 
 ### 按需读取白名单（v1）
 

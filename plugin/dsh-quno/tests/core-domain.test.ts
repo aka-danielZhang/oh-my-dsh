@@ -548,7 +548,7 @@ test('exchange responses return to the recorded requester, not a claimed replyTo
   assert.equal(input.kind, 'response')
 })
 
-test('an expired exchange keeps a late response as evidence without reopening work', () => {
+test('an expired exchange wakes the requester once and keeps a late response as evidence', () => {
   const f = fixture()
   const { ticket } = acceptFirstEval(f)
   const exchange = f.engine.requestExchange({
@@ -560,6 +560,17 @@ test('an expired exchange keeps a late response as evidence without reopening wo
     now: now(),
   })
   assert.equal(f.engine.expireExchanges(now() + 5000), 1)
+  // Expiry is a terminal outcome: the reason is durable evidence and the
+  // requester is woken, because otherwise nobody would ever learn it failed.
+  const expired = f.repo.getExchange(exchange.id)
+  assert.equal(expired?.status, 'expired')
+  const errorMessage = f.repo.getExchangeMessages(exchange.id).find(message => message.kind === 'error')
+  assert.ok(errorMessage !== undefined)
+  assert.equal((errorMessage.payload as { outcome?: string }).outcome, 'expired')
+  const wakeup = f.repo.listInputsByTicket(ticket.id)
+  assert.equal(wakeup.length, 1)
+  assert.match(wakeup[0]?.text ?? '', /异步读取超时/)
+
   const late = f.engine.completeExchange({
     exchangeId: exchange.id,
     responder: 'organ:calendar',
@@ -568,7 +579,8 @@ test('an expired exchange keeps a late response as evidence without reopening wo
   })
   assert.equal(late.late, true)
   assert.equal(late.inputId, null)
-  assert.equal(f.repo.listInputsByTicket(ticket.id).length, 0) // no TicketInput for a late response
+  // A late response stays evidence: it never produces a second wake-up.
+  assert.equal(f.repo.listInputsByTicket(ticket.id).length, 1)
 })
 
 test('effect merge bumps generation and a stale completion is rejected', () => {

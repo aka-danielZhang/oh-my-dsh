@@ -56,6 +56,7 @@ import type {
   ExchangeRecord,
   InputKind,
   Mandate,
+  MandateCli,
   PolicySnapshot,
   ReportState,
   SubscriptionMode,
@@ -96,6 +97,11 @@ export interface EngineDeps {
   readonly defaultCwd: string
   /** Source scope filter (absence = admit all). */
   readonly filterTrigger?: (trigger: TriggerRecord) => { readonly filtered: boolean; readonly reason: string | null }
+  /**
+   * The structured read-only CLI grant a newly accepted Ticket receives. Read
+   * as a snapshot at accept time; absence grants nothing.
+   */
+  readonly cliGrant?: () => MandateCli
   readonly logger?: { warn(message: string): void }
 }
 
@@ -670,6 +676,7 @@ export class Engine {
         actor: primary?.actor ?? { source: 'quno', id: 'quno' },
         basis: evalRecord.basis,
         permissionPreset: 'quno-task',
+        cli: this.cliGrant(),
       }
       const mode = input.mode ?? (input.persistent === true ? 'persistent' : 'once')
       const channels = triggers.flatMap(trigger => trigger.channel === null ? [] : [trigger.channel])
@@ -781,6 +788,7 @@ export class Engine {
           matchedRuleIds: [],
         },
         permissionPreset: 'quno-task',
+        cli: this.cliGrant(),
       }
       const decision: DecisionRecord = {
         id: this.deps.nextId('dec'),
@@ -1303,39 +1311,78 @@ export class Engine {
         return
       }
       this.repo.updateExchange(exchange.id, { status: 'failed', updatedAt: input.now })
-      const ticketId = ticketIdFromEndpoint(exchange.requester)
-      if (ticketId === null) {
-        this.repo.enqueueEffect({
-          kind: 'router-relay',
-          key: `exchange:${exchange.id}`,
-          payload: { exchangeId: exchange.id, failed: true, reason: input.reason },
-          now: input.now,
-        })
-        return
-      }
-      const ticket = this.repo.getTicket(ticketId)
-      if (ticket === undefined || ticket.ended !== null) return
-      const id = inputIdFor({ ticketId, kind: 'response', exchangeId: exchange.id })
-      if (this.repo.getInput(id) !== undefined) return
-      this.repo.insertInput({
-        id,
-        qunoId: this.deps.qunoId,
-        ticketId,
-        kind: 'response',
-        triggerId: null,
-        exchangeId: exchange.id,
-        human: false,
-        context: false,
-        text: `异步读取失败：${input.reason}`,
-        createdAt: input.now,
-        deliveredTo: null,
-        deliveredAt: null,
-        readAt: null,
-        acknowledgedAt: null,
-        handedBackAt: null,
-      })
-      this.repo.enqueueEffect({ kind: 'input-delivery', key: ticketId, payload: { ticketId }, now: input.now })
+      this.settleExchangeFailure(exchange, 'failed', input.reason, input.now)
     })
+  }
+
+  /**
+   * One terminal failure/expiry, two durable consequences:
+   *
+   * 1. the reason itself becomes an `error` ExchangeMessage (evidence — a
+   *    later reader never has to reconstruct why nothing arrived);
+   * 2. the requester receives a durable input/relay pointing at that evidence.
+   *
+   * Retryable attempts never reach here: they reschedule in `failExchange`
+   * and expire only when the deadline really passed.
+   */
+  private settleExchangeFailure(
+    exchange: ExchangeRecord,
+    outcome: 'failed' | 'expired',
+    reason: string,
+    now: number,
+  ): void {
+    const payload = { outcome, reason, responder: exchange.responder }
+    this.repo.insertExchangeMessage({
+      id: `quno:exchange:${exchange.id}:error`,
+      exchangeId: exchange.id,
+      kind: 'error',
+      producerEndpoint: exchange.responder,
+      payload,
+      contentRef: null,
+      contentHash: contentHashOf(payload),
+      responseTo: exchange.requestMessageId,
+      createdAt: now,
+    })
+    const ticketId = ticketIdFromEndpoint(exchange.requester)
+    if (ticketId === null) {
+      // Router requester: the failure is relayed into the permanent
+      // conversation instead of being silently dropped with the Effect.
+      this.repo.enqueueEffect({
+        kind: 'router-relay',
+        key: `exchange:${exchange.id}`,
+        payload: { exchangeId: exchange.id },
+        now,
+      })
+      return
+    }
+    const ticket = this.repo.getTicket(ticketId)
+    if (ticket === undefined || ticket.ended !== null) return
+    const id = inputIdFor({ ticketId, kind: 'response', exchangeId: exchange.id })
+    if (this.repo.getInput(id) !== undefined) return
+    const label = outcome === 'expired' ? '异步读取超时' : '异步读取失败'
+    this.repo.insertInput({
+      id,
+      qunoId: this.deps.qunoId,
+      ticketId,
+      kind: 'response',
+      triggerId: null,
+      exchangeId: exchange.id,
+      human: false,
+      context: false,
+      text: `${label}：${reason}`,
+      createdAt: now,
+      deliveredTo: null,
+      deliveredAt: null,
+      readAt: null,
+      acknowledgedAt: null,
+      handedBackAt: null,
+    })
+    this.repo.enqueueEffect({ kind: 'input-delivery', key: ticketId, payload: { ticketId }, now })
+  }
+
+  /** The structured read-only CLI grant recorded on a newly accepted Ticket. */
+  private cliGrant(): MandateCli {
+    return this.deps.cliGrant?.() ?? { capabilities: [], operations: {} }
   }
 
   /** Mark a response consumed by the requester's turn. */
@@ -1347,7 +1394,11 @@ export class Engine {
     })
   }
 
-  /** Expire exchanges past their deadline; late responses stay evidence-only. */
+  /**
+   * Expire exchanges past their deadline. Expiry is a terminal outcome, not a
+   * quiet state change: the reason is persisted and the requester is woken
+   * exactly like a failure. Late responses stay evidence-only.
+   */
   expireExchanges(now: number, limit = 50): number {
     let expired = 0
     for (const exchange of this.repo.listExchangesDue(now, limit)) {
@@ -1357,6 +1408,13 @@ export class Engine {
         if (current.status !== 'pending' && current.status !== 'delivered') return
         this.repo.updateExchange(current.id, { status: 'expired', updatedAt: now })
         expired += 1
+        const waitedSec = Math.max(1, Math.round((now - current.createdAt) / 1000))
+        this.settleExchangeFailure(
+          current,
+          'expired',
+          `${current.responder} 在 ${String(waitedSec)}s 内没有返回结果（deadline 已过）`,
+          now,
+        )
       })
     }
     return expired

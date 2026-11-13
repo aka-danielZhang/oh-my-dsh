@@ -231,6 +231,20 @@ export type AcceptMode = 'off' | 'observe' | 'auto'
 /** How strong the authorization evidence is. */
 export type Strength = 'explicit' | 'inferred'
 
+/**
+ * The structured CLI capabilities one Mandate granted at accept time.
+ *
+ * The grant is a snapshot: a capability registered after the Ticket was
+ * accepted is not silently usable by work that was authorized before it
+ * existed. `operations` narrows each capability to the operations that were
+ * declared read-only at that moment; an empty list means "declared, none
+ * available", never "all".
+ */
+export interface MandateCli {
+  readonly capabilities: readonly string[]
+  readonly operations: Readonly<Record<string, readonly string[]>>
+}
+
 /** The immutable authorization attached to one accepted Ticket. */
 export interface Mandate {
   readonly strength: Strength
@@ -244,6 +258,11 @@ export interface Mandate {
     readonly matchedRuleIds: readonly string[]
   }
   readonly permissionPreset: 'quno-task'
+  /**
+   * Structured read-only CLI grant (optional because Tickets accepted before
+   * the capability layer existed carry none — they authorize nothing).
+   */
+  readonly cli?: MandateCli
 }
 
 /** One gate judgement for one Trigger on one Thread. */
