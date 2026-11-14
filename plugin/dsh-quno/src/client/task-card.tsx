@@ -1,6 +1,9 @@
 /**
- * Inline task card for `quno_task` calls: L1 status, L2 details, L3 jump to the
- * child session (design §5.3).
+ * Inline task card for `quno_task` calls (design §5.2): a light, honest card —
+ * title, user status, the settled result when there is one, and exactly one
+ * primary action (查看详情). Running tasks may also offer 停止; failed tasks
+ * offer 重试. No technical ids, no child-session jump, no raw error dumps:
+ * those live in the read-only execution record.
  *
  * @module dsh-quno/client/task-card
  */
@@ -11,13 +14,14 @@ import type { ToolCallViewProps } from '@deepseek-ai/dsh-client-ui-tool/client'
 import type { QunoLocaleKey } from './locales.ts'
 import type { QunoClientStore } from './store.ts'
 import { formatClock, clip } from './format.ts'
+import { taskUserStatus, taskUserStatusKey } from './panel-state.ts'
+import { QunoCard } from './ui.tsx'
 
 /** Injected face of the task card. */
 export interface QunoTaskCardInjected {
   readonly store: QunoClientStore
   readonly t: (key: QunoLocaleKey) => string
-  readonly openSession: (sessionId: string) => void
-  /** Focus the task in the right panel (§13.6); undefined degrades to the child-session jump. */
+  /** Focus the task in the right panel (§13.6); undefined degrades to no-op. */
   readonly openPanel: ((taskId?: string) => void) | undefined
 }
 
@@ -25,8 +29,6 @@ interface TaskMeta {
   readonly taskId?: string
   readonly title?: string
   readonly status?: string
-  readonly childSessionId?: string | null
-  readonly message?: string
 }
 
 /** Render the quno_task tool card. */
@@ -35,88 +37,95 @@ export function QunoTaskCard(props: ToolCallViewProps & QunoTaskCardInjected): R
   const { t } = props
   const block = props.block
   if (!('kind' in block) || block.kind !== 'tool-result') {
-    return <div style={styles.root}>{t('taskStatusRunning')}…</div>
+    // Same card shell and near-identical height while running: the landed
+    // result must not push the conversation upwards.
+    return (
+      <div className="dsh-quno-card" style={{ marginTop: 6 }} aria-busy="true">
+        <div className="dsh-quno-card__hd">
+          <span className="dsh-quno-card__label">{t('taskCardLabel')}</span>
+          <span className="dsh-quno-skeleton" style={styles.skeletonTitle} />
+        </div>
+        <div className="dsh-quno-skeleton" style={styles.skeletonBody} />
+      </div>
+    )
   }
   if (block.isError) {
-    return <div style={styles.root}>{t('taskStatusFailed')}</div>
+    return <div style={styles.pending}>{t('taskStatusFailed')}</div>
   }
   const meta = (block.meta ?? {}) as TaskMeta
   const task = meta.taskId === undefined
     ? undefined
     : snapshot.state?.tasks.find(candidate => candidate.id === meta.taskId)
-  const status = task?.status ?? meta.status ?? 'running'
+  const status = taskUserStatus({
+    status: task?.status ?? meta.status ?? 'running',
+    ...(task?.presentationStatus === undefined ? {} : { presentationStatus: task.presentationStatus }),
+  })
   const title = task?.title ?? meta.title ?? ''
-  const childSessionId = task?.childSessionId ?? meta.childSessionId ?? null
-
+  const open = meta.taskId !== undefined && props.openPanel !== undefined
   return (
-    <div style={styles.root}>
-      <div style={styles.header}>
-        <span style={styles.label}>Quno 任务</span>
-        <span style={styles.title}>{title}</span>
-        <span style={styles.status}>{statusLabel(status, t)}</span>
+    <QunoCard accent={accentOf(status)} style={{ marginTop: 6 }}>
+      <div className="dsh-quno-card__hd">
+        <span className="dsh-quno-card__label">{t('taskCardLabel')}</span>
+        <span className="dsh-quno-card__title" style={{ color: 'var(--dsw-alias-label-primary)', fontWeight: 600 }}>{title}</span>
+        <span className="dsh-quno-card__meta">
+          <span style={{ width: 7, height: 7, borderRadius: 999, display: 'inline-block', background: dotColor(status) }} aria-hidden="true" />
+          {t(taskUserStatusKey(status))}
+        </span>
       </div>
-      {task?.result !== null && task?.result !== undefined && (
-        <p style={styles.body}>{clip(task.result, 600)}</p>
-      )}
-      {task?.error !== null && task?.error !== undefined && (
-        <p style={styles.error}>{task.error.message}</p>
-      )}
-      {task !== undefined && task.artifacts.length > 0 && (
-        <div style={styles.meta}>
-          {task.artifacts.map(artifact => <span key={artifact.uri}>{artifact.label}（{artifact.kind}）</span>)}
-        </div>
+      {/* The settled result, bounded: this is a card, not the record. */}
+      {status === 'done' && task?.result !== null && task?.result !== undefined && (
+        <p className="dsh-quno-card__body">{clip(task.result, 500)}</p>
       )}
       <div style={styles.actions}>
-        {meta.taskId !== undefined && props.openPanel !== undefined && (
+        {open && (
           <Button size="sm" variant="primary" onClick={() => { props.openPanel?.(meta.taskId ?? '') }}>
-            {t('taskOpenPanel')}
+            {t('taskOpenDetail')}
           </Button>
         )}
-        {childSessionId !== null && (
-          <Button size="sm" variant={props.openPanel !== undefined ? 'outline' : 'primary'} onClick={() => { if (childSessionId !== null) props.openSession(childSessionId) }}>
-            {props.openPanel !== undefined ? t('panelTaskChild') : t('taskOpen')}
+        {open && (status === 'running' || status === 'accepted' || status === 'waiting') && task !== undefined && (
+          <Button size="sm" variant="ghost" onClick={() => { void props.store.taskCommand(task.id, 'cancel') }}>
+            {t('taskStop')}
           </Button>
         )}
-        {(status === 'interrupted' || status === 'failed') && task !== undefined && (
-          <>
-            <Button size="sm" variant="primary" onClick={() => { void props.store.taskCommand(task.id, 'resume') }}>{t('taskResume')}</Button>
-            <Button size="sm" variant="ghost" onClick={() => { void props.store.taskCommand(task.id, 'abandon') }}>{t('taskAbandon')}</Button>
-          </>
+        {open && status === 'failed' && task !== undefined && (
+          <Button size="sm" variant="outline" onClick={() => { void props.store.taskCommand(task.id, 'resume') }}>
+            {t('taskRetry')}
+          </Button>
         )}
         {task?.settledAt !== null && task?.settledAt !== undefined && (
           <span style={styles.when}>{formatClock(task.settledAt)}</span>
         )}
       </div>
-    </div>
+    </QunoCard>
   )
 }
 
-function statusLabel(status: string, t: QunoTaskCardInjected['t']): string {
+function accentOf(status: ReturnType<typeof taskUserStatus>): string {
   switch (status) {
-    case 'running': return t('taskStatusRunning')
-    case 'done': return t('taskStatusDone')
-    case 'failed': return t('taskStatusFailed')
-    case 'interrupted': return t('taskStatusInterrupted')
-    case 'cancelled': return t('taskStatusCancelled')
-    default: return status
+    case 'accepted':
+    case 'running': return 'var(--dsw-alias-brand-primary)'
+    case 'needs-you': return 'var(--dsw-alias-state-warn-primary)'
+    case 'done': return 'var(--dsw-alias-state-success-primary)'
+    case 'failed': return 'var(--dsw-alias-state-error-primary)'
+    default: return 'var(--dsw-alias-label-tertiary)'
+  }
+}
+
+function dotColor(status: ReturnType<typeof taskUserStatus>): string {
+  switch (status) {
+    case 'accepted': return 'var(--dsw-alias-state-warn-primary)'
+    case 'running': return 'var(--dsw-alias-state-success-primary)'
+    case 'needs-you': return 'var(--dsw-alias-state-warn-primary)'
+    case 'done': return 'var(--dsw-alias-label-tertiary)'
+    case 'failed': return 'var(--dsw-alias-state-error-primary)'
+    default: return 'var(--dsw-alias-label-tertiary)'
   }
 }
 
 const styles = {
-  root: {
-    display: 'flex', flexDirection: 'column', gap: 8, padding: 12,
-    border: '1px solid var(--dsw-alias-border-l1)', borderRadius: 12, background: 'var(--dsw-alias-bg-layer-1)',
-  },
-  header: { display: 'flex', alignItems: 'center', gap: 8 },
-  label: {
-    flex: 'none', fontSize: 11, fontWeight: 600, color: 'var(--dsw-alias-brand-primary)',
-    padding: '1px 6px', borderRadius: 6, background: 'var(--dsw-alias-bg-layer-2)',
-  },
-  title: { flex: 1, minWidth: 0, fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  status: { flex: 'none', fontSize: 11, color: 'var(--dsw-alias-label-secondary)' },
-  body: { margin: 0, fontSize: 12, lineHeight: 1.6, color: 'var(--dsw-alias-label-primary)', whiteSpace: 'pre-wrap' },
-  error: { margin: 0, fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' },
-  meta: { display: 'flex', gap: 10, flexWrap: 'wrap', fontSize: 11, color: 'var(--dsw-alias-label-secondary)' },
-  actions: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+  pending: { padding: 10, fontSize: 12, color: 'var(--dsw-alias-label-secondary)' },
+  skeletonTitle: { flex: 1, height: 12, borderRadius: 6, background: 'var(--dsw-alias-bg-layer-2)' },
+  skeletonBody: { marginTop: 8, height: 34, borderRadius: 8, background: 'var(--dsw-alias-bg-layer-2)' },
+  actions: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 10 },
   when: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary)' },
 } as const

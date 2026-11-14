@@ -122,6 +122,14 @@ export interface QunoConfig {
   readonly retention: QunoRetention
   /** Notifications are computed and recorded but never delivered (dry-run onboarding). */
   readonly dryRun: boolean
+  /**
+   * Automatic-work admission: `off` admits only addressed human messages,
+   * `observe` evaluates inferred work but records `would_accept` instead of
+   * creating Tickets, `auto` accepts rule-matched inferred work.
+   */
+  readonly acceptMode: 'off' | 'observe' | 'auto'
+  /** Source ids explicitly authorized for automatic (inferred) work. */
+  readonly autoSourceIds: readonly string[]
 }
 
 /** One local wall-clock window, inclusive start, exclusive end; start > end crosses midnight. */
@@ -440,9 +448,39 @@ export interface SenseHealthDetail {
   readonly nextRetryAt?: number | null
   readonly coveredThrough?: string | null
   readonly sourceLagSec?: number | null
+  /**
+   * Structured queue progress (redesign §8): normal scheduling pressure is
+   * progress, not a fault. Optional; older clients ignore it.
+   */
+  readonly progress?: Record<string, unknown>
+  /** Current faults distinct from progress (code + human detail + count). */
+  readonly issues?: readonly { readonly code: string; readonly detail: string; readonly count?: number }[]
 }
 
-/** Registered Sense type metadata (the declaration is stored as JSON). */
+/** One asynchronous Exchange handed to a Source/Organ implementation. */
+export interface OrganExchangeRequest {
+  readonly exchangeId: string
+  readonly endpoint: string
+  readonly payload: unknown
+  readonly signal: AbortSignal
+  completeExchange(result: unknown): Promise<void>
+  failExchange(reason: string, retryable: boolean): Promise<void>
+}
+
+/**
+ * One discoverable organ endpoint, as `quno_read.organs` and the refusal
+ * directories advertise it. Only instances whose type declares at least one
+ * exchange handler appear here — a listed endpoint is one the gate will let
+ * through.
+ */
+export interface OrganEndpointView {
+  readonly endpoint: string
+  readonly label: string
+  readonly type: string
+  readonly capabilities: { readonly request: boolean; readonly command: boolean }
+  readonly health: string
+}
+
 export interface SenseTypeRecord {
   readonly type: string
   readonly contractVersion: number
@@ -532,7 +570,31 @@ export interface SenseDefinition {
     readonly gapDetection: 'explicit' | 'partial' | 'none'
     readonly readOriginal: boolean
   }
+  /** Honest first-synchronization semantics; omission means "unknown". */
+  readonly firstSync?: SenseFirstSync
   readonly defaults?: Record<string, unknown>
+  /** Optional Organ capabilities beyond producing Triggers. */
+  readonly organ?: OrganCapabilitiesDeclaration
+}
+
+/** Thread/context capabilities a Source can declare (structurally the core contract). */
+export interface OrganCapabilitiesDeclaration {
+  resolveThreads?(event: EventEnvelope): { readonly status: 'resolved'; readonly threads: readonly { readonly source: string; readonly id: string }[] } | { readonly status: 'unresolved'; readonly reason: string }
+  handleRequest?(request: OrganExchangeRequest): Promise<void> | void
+  handleCommand?(request: OrganExchangeRequest): Promise<void> | void
+  readOriginal?(request: {
+    readonly triggerId: string
+    readonly part: 'self' | 'thread' | 'root' | 'parent'
+    readonly cursor: string | null
+    readonly signal: AbortSignal
+  }): Promise<{ readonly items: readonly unknown[]; readonly nextCursor: string | null; readonly truncated: boolean }>
+}
+
+/** One static choice a field offers. */
+export interface SenseConfigChoice {
+  readonly value: string
+  readonly label: string
+  readonly description?: string
 }
 
 /** Declarative UI hint for one Sense config key (the generic JSON fallback stays available). */
@@ -545,6 +607,48 @@ export interface SenseConfigField {
   readonly placeholder?: string
   readonly help?: string
   readonly defaultValue?: string | number | boolean
+  /** Lower bound for a `number` field (client hint; the Host still owns validation). */
+  readonly min?: number
+  /** Upper bound for a `number` field. */
+  readonly max?: number
+  /** Stepper increment for a `number` field. */
+  readonly step?: number
+  /** Static choices; `value` is what gets persisted. */
+  readonly options?: readonly SenseConfigChoice[]
+  /** The field accepts a list of strings (an array value). */
+  readonly multiple?: boolean
+  /**
+   * The field's choices come from the Sense's optional `listOptions`, not from
+   * a static list. The Host refuses discovery for fields without this flag.
+   */
+  readonly discover?: boolean
+  /** Render inside the collapsed "advanced" group instead of the main form. */
+  readonly advanced?: boolean
+}
+
+/**
+ * What the first synchronization of a fresh instance really does. Kept
+ * explicit because the three shipped Senses differ, and a single generic
+ * sentence would be a lie for at least one of them.
+ */
+export type SenseFirstSync =
+  | 'baseline-only'
+  | 'snapshot-events'
+  | 'current-window-events'
+  | 'unknown'
+
+/** One discovered option for a field that supports remote discovery. */
+export interface SenseOption {
+  /** Stable identifier saved into the configuration. */
+  readonly value: string
+  /** Human-readable name. */
+  readonly label: string
+  /** Optional qualifier (member count, last activity, …). */
+  readonly description?: string
+  /** Unsupported value: shown but not selectable. */
+  readonly disabled?: boolean
+  /** Why the option cannot be used. */
+  readonly disabledReason?: string
 }
 
 /** One event envelope submitted by a Sense. */
@@ -572,6 +676,31 @@ export interface EventEnvelope {
     readonly bytes?: number
   }[]
   readonly expiresAt?: string | null
+  /** Source-bound author identity (never guessed from text). */
+  readonly actor?: { readonly source: string; readonly id: string }
+  /** Whether the author is a human (bot/CI stays false when unknown). */
+  readonly human?: boolean
+  /** Whether the message addressed Quno explicitly. */
+  readonly addressed?: 'mention' | 'direct' | null
+  /** The source-managed external write address for this event, when one exists. */
+  readonly channel?: { readonly source: string; readonly thread: string; readonly address: Record<string, string> } | null
+  /** A durable reference to the original content instead of a copy. */
+  readonly contentRef?: {
+    readonly kind: 'session-message'
+    readonly sessionId: string
+    readonly messageId: string
+  } | {
+    readonly kind: 'session-seq'
+    readonly sessionId: string
+    readonly seq: number
+  } | {
+    readonly kind: 'quno-event'
+    readonly eventId: string
+  } | {
+    readonly kind: 'blob'
+    readonly ref: string
+    readonly sha256?: string
+  } | null
 }
 
 /** Wire shape of provenance: derived inputs may cite event keys instead of host ids. */
@@ -585,12 +714,27 @@ export type ProvenanceInput =
     readonly confidence?: number
   }
 
+/** One keyed checkpoint state entry (opaque to the Host). */
+export interface CheckpointEntryPatch {
+  readonly key: string
+  readonly value: string
+}
+
 /** One submission batch. */
 export interface IngestBatch {
   /** Stable per source batch identity; retried batches return the same receipt. */
   readonly batchKey: string
   readonly events: readonly EventEnvelope[]
   readonly checkpointAfter?: { readonly value: string | null; readonly revision: number } | null
+  /**
+   * `checkpoint-entries/v1`: keyed state entries committed in the SAME SQLite
+   * transaction as the events, the root checkpoint and the batch receipt.
+   * Absent = the Sense keeps a single-blob checkpoint.
+   */
+  readonly checkpointPatch?: {
+    readonly upserts?: readonly CheckpointEntryPatch[]
+    readonly deletes?: readonly string[]
+  } | null
   /** False when the Sense knows it read a partial page. */
   readonly complete?: boolean
   /** Explicit coverage gap the Sense detected (pagination overflow, upstream hole). */

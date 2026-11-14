@@ -17,6 +17,7 @@ import z from '@deepseek-ai/schemastery'
 import TYPERT_HOST from './typert.host.ts'
 import { QunoHost, type QunoPluginConfig } from './service.ts'
 import type { QunoSensesService } from './senses.ts'
+import type { CliCapabilityBroker } from './cli-broker.ts'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'dsh-quno'
@@ -53,6 +54,8 @@ declare module '@deepseek-ai/cordis' {
     qunoIngress: {
       ingest: (instanceId: string, generation: number, batch: unknown) => unknown
     }
+    /** Structured read-only CLI capabilities registered by host plugins. */
+    qunoCli: CliCapabilityBroker
   }
 }
 
@@ -77,6 +80,7 @@ export async function apply(ctx: Context, config: QunoPluginConfig = {}): Promis
   // Sense plugins (which inject `qunoSenses`) can mount in the same boot.
   ctx.provide('quno', host)
   ctx.provide('qunoSenses', host.senses)
+  ctx.provide('qunoCli', host.cli)
   ctx.provide('qunoIngress', {
     ingest: (instanceId: string, generation: number, batch: unknown) =>
       host.senses.ingest(instanceId, generation, batch),

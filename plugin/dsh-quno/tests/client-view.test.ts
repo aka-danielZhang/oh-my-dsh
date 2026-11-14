@@ -1,11 +1,18 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  capsuleItems,
+  capsuleSummaries,
+  capsuleTotal,
+  capsuleVisibility,
   eventLine,
+  hasCapsuleContent,
+  isCapsuleVisible,
   mainPresence,
   panelCounts,
-  shouldShowCapsule,
+  qunoWorkspaceSessionVisible,
   surfaceEnabled,
+  type CapsuleVisibilityInput,
   type StateSlice,
 } from '../src/client/view-model.ts'
 import { narrowPanelParams } from '../src/client/right-tab.ts'
@@ -58,19 +65,67 @@ test('panelCounts reads the actionable slices', () => {
   assert.deepEqual(panelCounts(slice), { runningTasks: 2, attentionOpen: 2, senseAlarms: 1 })
 })
 
-test('shouldShowCapsule requires a resolved quno preset, a collapsed panel and content', () => {
-  const base = {
-    preset: 'quno' as const,
-    panelExpanded: false,
+test('capsuleVisibility names one reason per state', () => {
+  const base: CapsuleVisibilityInput = {
+    preset: 'quno',
+    hasFace: true,
     hasContent: true,
+    hasAnchor: true,
+    panelVisible: false,
+    navigationHidden: false,
+    open: false,
   }
-  assert.equal(shouldShowCapsule(base), true)
-  assert.equal(shouldShowCapsule({ ...base, panelExpanded: true }), false)
-  assert.equal(shouldShowCapsule({ ...base, hasContent: false }), false)
-  assert.equal(shouldShowCapsule({ ...base, preset: 'default' }), false)
-  // A pending projection keeps the capsule off instead of flashing it.
-  assert.equal(shouldShowCapsule({ ...base, preset: undefined }), false)
-  assert.equal(shouldShowCapsule({ ...base, preset: null }), false)
+  assert.equal(capsuleVisibility(base), 'visible-collapsed')
+  assert.equal(capsuleVisibility({ ...base, open: true }), 'visible-flyout')
+  // A pending projection keeps the pill off instead of flashing it.
+  assert.equal(capsuleVisibility({ ...base, preset: undefined }), 'hidden-not-quno')
+  assert.equal(capsuleVisibility({ ...base, preset: null }), 'hidden-not-quno')
+  assert.equal(capsuleVisibility({ ...base, preset: 'default' }), 'hidden-not-quno')
+  assert.equal(capsuleVisibility({ ...base, hasFace: false }), 'hidden-no-face')
+  assert.equal(capsuleVisibility({ ...base, hasContent: false }), 'hidden-no-content')
+  assert.equal(capsuleVisibility({ ...base, hasAnchor: false }), 'hidden-no-anchor')
+  // The panel takeover outranks the just-clicked navigation state.
+  assert.equal(capsuleVisibility({ ...base, panelVisible: true }), 'hidden-right-panel')
+  assert.equal(capsuleVisibility({ ...base, navigationHidden: true }), 'hidden-navigation')
+  assert.equal(capsuleVisibility({ ...base, panelVisible: true, navigationHidden: true }), 'hidden-right-panel')
+
+  assert.equal(isCapsuleVisible('visible-collapsed'), true)
+  assert.equal(isCapsuleVisible('visible-flyout'), true)
+  for (const hidden of ['hidden-not-quno', 'hidden-no-face', 'hidden-no-content', 'hidden-no-anchor', 'hidden-right-panel', 'hidden-navigation'] as const) {
+    assert.equal(isCapsuleVisible(hidden), false, hidden)
+  }
+})
+
+test('capsuleSummaries names one real record per non-zero category', () => {
+  const rows = capsuleSummaries({
+    tasks: [{ status: 'running', title: '整理评审材料' }, { status: 'done', title: '旧任务' }],
+    attention: [{ status: 'open', title: '明日评审改期确认' }, { status: 'resolved', title: '已处理' }],
+    senses: [
+      { desiredState: 'enabled', health: 'auth-required', stale: false, label: '', type: 'yzj' },
+      { desiredState: 'paused', health: 'degraded', stale: true, label: '订阅源', type: 'feed' },
+    ],
+    senseTypes: [{ type: 'yzj', displayName: '云之家群聊' }],
+  })
+  assert.deepEqual(rows.map(row => [row.kind, row.count, row.subject]), [
+    ['tasks', 1, '整理评审材料'],
+    ['attention', 1, '明日评审改期确认'],
+    ['activity', 1, '云之家群聊'],
+  ])
+})
+
+test('capsuleSummaries drops empty categories and keeps the fixed order', () => {
+  const rows = capsuleSummaries({
+    tasks: [],
+    attention: [{ status: 'snoozed', title: '等待回复' }],
+    senses: [{ desiredState: 'disabled', health: 'unavailable', stale: false, label: '停用的源', type: 'feed' }],
+    senseTypes: [],
+  })
+  assert.deepEqual(rows.map(row => row.kind), ['attention'])
+})
+
+test('the compact pill counts exactly the non-zero categories', () => {
+  assert.equal(capsuleTotal({ runningTasks: 2, attentionOpen: 4, senseAlarms: 1 }), 7)
+  assert.equal(capsuleTotal({ runningTasks: 0, attentionOpen: 0, senseAlarms: 0 }), 0)
 })
 
 test('narrowPanelParams accepts only the declared shapes', () => {
@@ -82,6 +137,11 @@ test('narrowPanelParams accepts only the declared shapes', () => {
   assert.deepEqual(narrowPanelParams(undefined), undefined)
   // The typed face of the right-tab module shares the same narrowing.
   assert.deepEqual(narrowPanelParams({ taskId: 't2' }), { taskId: 't2' })
+  // A Sense focus is a first-class navigation target, and junk is dropped.
+  assert.deepEqual(narrowPanelParams({ senseId: 'sense-1', view: 'sense' }), { senseId: 'sense-1', view: 'sense' })
+  assert.deepEqual(narrowPanelParams({ senseId: '' }), undefined)
+  assert.deepEqual(narrowPanelParams({ senseId: 42 }), undefined)
+  assert.deepEqual(narrowPanelParams({ senseId: 's1', taskId: 't1' }), { taskId: 't1', senseId: 's1' })
 })
 
 test('eventLine prefers the summary and falls back to type · operation', () => {
@@ -94,4 +154,24 @@ test('surfaceEnabled gates on the master switch and treats absence as off', () =
   assert.equal(surfaceEnabled({ config: { enabled: false } }), false)
   assert.equal(surfaceEnabled({ config: {} }), true)
   assert.equal(surfaceEnabled(null), false)
+})
+
+test('Quno hides only its main preset from Workspace browsing views', () => {
+  assert.equal(qunoWorkspaceSessionVisible({ projectionValues: { agentPreset: 'quno' } }), false)
+  assert.equal(qunoWorkspaceSessionVisible({ projectionValues: { agentPreset: 'default' } }), true)
+  assert.equal(qunoWorkspaceSessionVisible({ projectionValues: { agentPreset: null } }), true)
+  assert.equal(qunoWorkspaceSessionVisible({}), true)
+})
+
+test('the capsule lists only non-zero counts', () => {
+  assert.deepEqual(capsuleItems({ runningTasks: 0, attentionOpen: 0, senseAlarms: 0 }), [])
+  assert.equal(hasCapsuleContent({ runningTasks: 0, attentionOpen: 0, senseAlarms: 0 }), false)
+  assert.deepEqual(
+    capsuleItems({ runningTasks: 2, attentionOpen: 0, senseAlarms: 0 }),
+    [{ kind: 'tasks', count: 2 }],
+  )
+  assert.deepEqual(
+    capsuleItems({ runningTasks: 0, attentionOpen: 3, senseAlarms: 1 }),
+    [{ kind: 'attention', count: 3 }, { kind: 'activity', count: 1 }],
+  )
 })

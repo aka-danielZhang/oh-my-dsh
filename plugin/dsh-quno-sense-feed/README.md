@@ -17,6 +17,7 @@ dsh plugin --profile web add <repo>/plugin/dsh-quno-sense-feed
 - 只取最近 `maxItems` 条；源条目更多时显式报 gap（`changeCoverage: sampled`），不声称覆盖全史。
 - 失败分类：401/403 → `auth-required`；429 → `rate-limited`（按 `Retry-After` 退避）；5xx → `unavailable`；其余 → `degraded`。健康快照含连续失败数、下次重试时间与条目滞后秒数。
 - 不发送任何凭据；需要鉴权的源请用可公开访问的地址或后续版本。
+- **首轮语义（`firstSync: current-window-events`）**：首次轮询会把当前页面里没见过的条目立即入库——不是「从现在起才可见」，安装前后可能一次补入若干条历史条目。
 
 ## Config
 

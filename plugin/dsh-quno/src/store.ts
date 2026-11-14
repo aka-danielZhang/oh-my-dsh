@@ -60,7 +60,7 @@ import type {
 import { newId, safeJsonParse } from './util.ts'
 
 /** Current schema version; bump with a migration entry when the shape changes. */
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 3
 
 /** One process's write ownership over a Quno data directory. */
 const LOCK_FILE = 'quno.lock'
@@ -258,6 +258,17 @@ export class QunoStore {
     return this.db
   }
 
+  /**
+   * The raw connection, for the domain repository only.
+   *
+   * The repository is the only consumer that speaks SQL against the domain
+   * tables; everything else keeps using the typed methods above. Exposing the
+   * handle keeps the Engine and its port free of `node:sqlite` types.
+   */
+  handle(): DatabaseSync {
+    return this.requireDb()
+  }
+
   /** Run `work` inside one immediate transaction (nested calls join the outer transaction). */
   transaction<T>(work: () => T): T {
     const db = this.requireDb()
@@ -280,6 +291,479 @@ export class QunoStore {
     }
   }
 
+  /** Schema v2: per-entry checkpoint storage for `checkpoint-entries/v1`. */
+  private createV2(_now: number): void {
+    this.requireDb().exec(`
+      CREATE TABLE sense_checkpoint_entries (
+        instance_id TEXT NOT NULL,
+        entry_key TEXT NOT NULL,
+        value_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (instance_id, entry_key)
+      )
+    `)
+  }
+
+  /**
+   * Schema v3: the Super-agent core tables.
+   *
+   * `events` becomes the Trigger store (a Trigger is a Source event, nothing
+   * else); `threads`, `evals`, `decisions`, `tickets`, `assignments`,
+   * `worker_runs`, `ticket_inputs`, `input_attempts`, `exchanges`,
+   * `exchange_messages`, `effects` and `attention_links` are new. The legacy
+   * `subscriptions` table (source filters) is renamed to `source_subscriptions`
+   * so the domain name `subscriptions` means Ticket↔Thread subscriptions.
+   *
+   * The migration is idempotent-by-identity and runs once inside the schema
+   * transaction. Historical evidence keeps its ids: events keep their ids and
+   * ingest order, tasks keep their `task_` ids as Ticket ids, and the analysis
+   * runs become read-only `legacy-analysis` rows.
+   */
+  private createV3(now: number): void {
+    const db = this.requireDb()
+    const legacySubscriptions = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'subscriptions'")
+      .get() as { name?: string } | undefined
+    if (legacySubscriptions !== undefined) db.exec('ALTER TABLE subscriptions RENAME TO source_subscriptions')
+
+    db.exec(`
+      ALTER TABLE events ADD COLUMN quno_id TEXT;
+      ALTER TABLE events ADD COLUMN actor_json TEXT;
+      ALTER TABLE events ADD COLUMN human INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE events ADD COLUMN addressed TEXT;
+      ALTER TABLE events ADD COLUMN channel_json TEXT;
+      ALTER TABLE events ADD COLUMN content_ref_json TEXT;
+      ALTER TABLE events ADD COLUMN threads_json TEXT;
+
+      UPDATE events SET quno_id = (
+        SELECT s.quno_id FROM sources s WHERE s.id = events.source_id
+      ) WHERE quno_id IS NULL;
+      UPDATE events SET quno_id = 'quno' WHERE quno_id IS NULL;
+      UPDATE events SET actor_json = '{"source":"unknown","id":""}' WHERE actor_json IS NULL;
+
+      CREATE TABLE threads (
+        id TEXT PRIMARY KEY,
+        quno_id TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        thread_key TEXT NOT NULL,
+        label TEXT,
+        last_at INTEGER,
+        correlated_json TEXT NOT NULL DEFAULT '[]',
+        active_eval_id TEXT,
+        expired_count INTEGER NOT NULL DEFAULT 0,
+        meta_json TEXT NOT NULL DEFAULT '{}',
+        closed_at INTEGER,
+        closed_outcome TEXT,
+        created_at INTEGER NOT NULL,
+        UNIQUE (quno_id, source_id, thread_key)
+      );
+      CREATE INDEX threads_active ON threads(quno_id, last_at);
+
+      CREATE TABLE trigger_threads (
+        trigger_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        ordinal INTEGER NOT NULL,
+        at INTEGER NOT NULL,
+        PRIMARY KEY (trigger_id, thread_id)
+      );
+      CREATE INDEX trigger_threads_thread ON trigger_threads(thread_id, at, trigger_id);
+
+      CREATE TABLE thread_pending (
+        thread_id TEXT NOT NULL,
+        trigger_id TEXT NOT NULL,
+        at INTEGER NOT NULL,
+        PRIMARY KEY (thread_id, trigger_id)
+      );
+      CREATE INDEX thread_pending_order ON thread_pending(thread_id, at);
+
+      CREATE TABLE trigger_dispositions (
+        trigger_id TEXT PRIMARY KEY,
+        filtered_json TEXT,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE evals (
+        id TEXT PRIMARY KEY,
+        quno_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        trigger_ids_json TEXT NOT NULL,
+        primary_trigger_id TEXT NOT NULL,
+        strength TEXT NOT NULL,
+        basis_json TEXT NOT NULL,
+        policy_version TEXT NOT NULL,
+        status TEXT NOT NULL,
+        candidate_message_id TEXT,
+        started_at INTEGER NOT NULL,
+        delivered_at INTEGER,
+        deadline INTEGER NOT NULL,
+        paused_at INTEGER,
+        expiry_count INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX evals_thread_status ON evals(thread_id, status);
+      CREATE INDEX evals_timeout ON evals(status, delivered_at, deadline);
+      CREATE INDEX evals_candidate ON evals(candidate_message_id);
+
+      CREATE TABLE decisions (
+        id TEXT PRIMARY KEY,
+        quno_id TEXT NOT NULL,
+        eval_id TEXT,
+        thread_id TEXT,
+        trigger_ids_json TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        strength TEXT NOT NULL,
+        reason TEXT,
+        policy_version TEXT NOT NULL,
+        ticket_id TEXT,
+        mandate_json TEXT,
+        audit_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX decisions_eval ON decisions(eval_id);
+      CREATE INDEX decisions_ticket ON decisions(ticket_id);
+
+      CREATE TABLE tickets (
+        id TEXT PRIMARY KEY,
+        quno_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        goal TEXT NOT NULL,
+        decision_id TEXT,
+        mandate_json TEXT NOT NULL,
+        origin_json TEXT NOT NULL,
+        channels_json TEXT NOT NULL DEFAULT '[]',
+        mode TEXT NOT NULL DEFAULT 'once',
+        ended_at INTEGER,
+        ended_by TEXT,
+        ended_outcome TEXT,
+        ended_reason TEXT,
+        question_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX tickets_open ON tickets(quno_id, ended_at);
+      CREATE INDEX tickets_created ON tickets(quno_id, created_at);
+
+      CREATE TABLE subscriptions (
+        id TEXT PRIMARY KEY,
+        quno_id TEXT NOT NULL,
+        ticket_id TEXT NOT NULL,
+        thread_id TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        origin TEXT NOT NULL,
+        start_ingest_seq INTEGER NOT NULL DEFAULT 0,
+        revision INTEGER NOT NULL DEFAULT 1,
+        cancelled_at INTEGER,
+        created_at INTEGER NOT NULL,
+        UNIQUE (ticket_id, thread_id)
+      );
+      CREATE INDEX subscriptions_thread ON subscriptions(thread_id, mode);
+
+      CREATE TABLE assignments (
+        id TEXT PRIMARY KEY,
+        ticket_id TEXT NOT NULL,
+        state TEXT NOT NULL,
+        executor_session_id TEXT NOT NULL,
+        directory TEXT NOT NULL,
+        report_json TEXT,
+        delivered_at INTEGER,
+        idle_at INTEGER,
+        ended_reason TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX assignments_ticket ON assignments(ticket_id, created_at);
+      CREATE INDEX assignments_state ON assignments(state);
+
+      CREATE TABLE worker_runs (
+        id TEXT PRIMARY KEY,
+        quno_id TEXT NOT NULL,
+        ticket_id TEXT NOT NULL,
+        assignment_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        input_ids_json TEXT NOT NULL DEFAULT '[]',
+        fence INTEGER NOT NULL DEFAULT 0,
+        lease_until INTEGER,
+        turn_id TEXT,
+        result_json TEXT,
+        error_json TEXT,
+        cost_json TEXT,
+        started_at INTEGER NOT NULL,
+        finished_at INTEGER
+      );
+      CREATE INDEX worker_runs_assignment ON worker_runs(assignment_id, started_at);
+      CREATE INDEX worker_runs_status ON worker_runs(status);
+
+      CREATE TABLE ticket_inputs (
+        id TEXT PRIMARY KEY,
+        quno_id TEXT NOT NULL,
+        ticket_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        trigger_id TEXT,
+        exchange_id TEXT,
+        human INTEGER NOT NULL DEFAULT 0,
+        context INTEGER NOT NULL DEFAULT 0,
+        text TEXT,
+        created_at INTEGER NOT NULL,
+        delivered_to TEXT,
+        delivered_at INTEGER,
+        read_at INTEGER,
+        acknowledged_at INTEGER,
+        handed_back_at INTEGER
+      );
+      CREATE INDEX ticket_inputs_ticket ON ticket_inputs(ticket_id, read_at, delivered_at);
+      CREATE INDEX ticket_inputs_trigger ON ticket_inputs(ticket_id, trigger_id);
+
+      CREATE TABLE input_attempts (
+        id TEXT PRIMARY KEY,
+        input_id TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        message_id TEXT,
+        mode TEXT NOT NULL,
+        status TEXT NOT NULL,
+        reason TEXT,
+        created_at INTEGER NOT NULL,
+        finished_at INTEGER,
+        UNIQUE (input_id, attempt)
+      );
+      CREATE INDEX input_attempts_message ON input_attempts(message_id);
+
+      CREATE TABLE exchanges (
+        id TEXT PRIMARY KEY,
+        quno_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        requester TEXT NOT NULL,
+        responder TEXT NOT NULL,
+        status TEXT NOT NULL,
+        deadline INTEGER NOT NULL,
+        request_message_id TEXT NOT NULL,
+        response_message_id TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE INDEX exchanges_status_deadline ON exchanges(status, deadline);
+      CREATE INDEX exchanges_requester ON exchanges(requester);
+
+      CREATE TABLE exchange_messages (
+        id TEXT PRIMARY KEY,
+        exchange_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        producer_endpoint TEXT NOT NULL,
+        payload_json TEXT,
+        content_ref_json TEXT,
+        content_hash TEXT NOT NULL,
+        response_to TEXT,
+        created_at INTEGER NOT NULL,
+        UNIQUE (exchange_id, kind, content_hash)
+      );
+      CREATE INDEX exchange_messages_exchange ON exchange_messages(exchange_id, created_at);
+
+      CREATE TABLE effects (
+        kind TEXT NOT NULL,
+        key TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        seq INTEGER NOT NULL,
+        generation INTEGER NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        due_at INTEGER NOT NULL,
+        since INTEGER NOT NULL,
+        last_error TEXT,
+        PRIMARY KEY (kind, key)
+      );
+      CREATE INDEX effects_due ON effects(due_at, seq);
+
+      CREATE TABLE attention_links (
+        quno_id TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        PRIMARY KEY (item_id, target_type, target_id)
+      );
+      CREATE INDEX attention_links_target ON attention_links(target_type, target_id);
+    `)
+
+    this.backfillDomainV3(now)
+  }
+
+  /**
+    * Backfill the v3 domain tables from legacy rows.
+    *
+    * Public because it is the same idempotent step a downgraded/upgraded
+    * profile may run again after a partial migration, and because the
+    * migration test seeds legacy rows and exercises exactly this function.
+    * Every insert is `OR IGNORE`/`ON CONFLICT DO NOTHING`: re-running never
+    * duplicates a Ticket, Assignment, Thread, pending Trigger or Effect.
+    */
+  backfillDomainV3(now = Date.now()): void {
+    const db = this.requireDb()
+    db.exec(`
+      INSERT OR IGNORE INTO threads (id, quno_id, source_id, thread_key, label, last_at,
+        correlated_json, active_eval_id, expired_count, meta_json, closed_at, closed_outcome, created_at)
+      SELECT 'thr_' || e.source_id || '_' || COALESCE(NULLIF(e.subject_key, ''), 'object:' || e.event_key),
+             COALESCE(MAX(s.quno_id), 'quno'),
+             e.source_id,
+             COALESCE(NULLIF(e.subject_key, ''), 'object:' || e.event_key),
+             NULL,
+             MAX(e.observed_at),
+             '[]', NULL, 0, '{}', NULL, NULL,
+             MIN(e.received_at)
+      FROM events e LEFT JOIN sources s ON s.id = e.source_id
+      GROUP BY e.source_id, COALESCE(NULLIF(e.subject_key, ''), 'object:' || e.event_key);
+
+      INSERT OR IGNORE INTO trigger_threads (trigger_id, thread_id, ordinal, at)
+      SELECT e.id, t.id, 0, e.received_at
+      FROM events e
+      JOIN threads t
+        ON t.source_id = e.source_id
+       AND t.thread_key = COALESCE(NULLIF(e.subject_key, ''), 'object:' || e.event_key);
+
+      INSERT OR IGNORE INTO thread_pending (thread_id, trigger_id, at)
+      SELECT tt.thread_id, tt.trigger_id, tt.at
+      FROM trigger_threads tt
+      JOIN deliveries d ON d.event_id = tt.trigger_id
+      WHERE d.status IN ('pending', 'deferred')
+        AND tt.ordinal = 0;
+    `)
+
+    // ---- backfill: legacy tasks keep their ids as Tickets + one Assignment
+    db.exec(`
+      INSERT OR IGNORE INTO tickets (id, quno_id, title, goal, decision_id, mandate_json,
+        origin_json, channels_json, mode, ended_at, ended_by, ended_outcome, ended_reason,
+        question_json, created_at, updated_at)
+      SELECT t.id,
+             t.quno_id,
+             t.title,
+             t.prompt,
+             NULL,
+             '{"strength":"explicit","policyVersion":"legacy","scope":"ticket","actor":{"source":"desktop","id":""},"basis":{"via":"direct","sourceId":null,"scope":{},"matchedRuleIds":[]},"permissionPreset":"quno-task"}',
+             '{"triggerId":null,"triggerIds":[]}',
+             '[]',
+             'once',
+             CASE WHEN t.status = 'done' THEN COALESCE(t.settled_at, t.updated_at) END,
+             CASE WHEN t.status = 'done' THEN 'executor' WHEN t.status = 'failed' THEN 'executor'
+                  WHEN t.status = 'cancelled' THEN 'human' END,
+             CASE WHEN t.status = 'done' THEN 'completed' WHEN t.status = 'failed' THEN 'failed'
+                  WHEN t.status = 'cancelled' THEN 'stopped' END,
+             CASE WHEN t.status = 'failed' THEN json_extract(t.error_json, '$.message')
+                  WHEN t.status = 'cancelled' THEN json_extract(t.error_json, '$.message') END,
+             NULL,
+             t.created_at,
+             t.updated_at
+      FROM tasks t;
+
+      INSERT OR IGNORE INTO assignments (id, ticket_id, state, executor_session_id, directory,
+        report_json, delivered_at, idle_at, ended_reason, created_at)
+      SELECT 'assign_' || t.id || '_1',
+             t.id,
+             CASE WHEN t.status = 'running' THEN 'running'
+                  WHEN t.status = 'interrupted' THEN 'pending'
+                  ELSE 'ended' END,
+             COALESCE(t.child_session_id, 'quno-exec-' || t.id),
+             '',
+             CASE WHEN t.status = 'done' THEN json_object(
+                    'state', 'ready',
+                    'summary', substr(COALESCE(t.result, ''), 1, 8000),
+                    'at', COALESCE(t.settled_at, t.updated_at),
+                    'artifacts', json(t.artifacts_json))
+                  WHEN t.status = 'failed' THEN json_object(
+                    'state', 'failed',
+                    'summary', substr(COALESCE(json_extract(t.error_json, '$.message'), '任务失败'), 1, 8000),
+                    'at', COALESCE(t.settled_at, t.updated_at),
+                    'artifacts', json('[]'))
+                  WHEN t.status = 'interrupted' THEN json_object(
+                    'state', 'blocked',
+                    'summary', '桌面退出时任务尚未完成；可以续跑或放弃',
+                    'at', t.updated_at,
+                    'artifacts', json('[]'))
+             END,
+             t.created_at,
+             CASE WHEN t.status <> 'running' THEN COALESCE(t.settled_at, t.updated_at) END,
+             CASE WHEN t.status = 'done' THEN 'completed'
+                  WHEN t.status = 'failed' THEN 'failed'
+                  WHEN t.status = 'cancelled' THEN 'stopped' END,
+             t.created_at
+      FROM tasks t;
+
+      INSERT OR IGNORE INTO effects (kind, key, payload_json, seq, generation, attempts, due_at, since, last_error)
+      SELECT 'assignment-launch',
+             a.id,
+             json_object('assignmentId', a.id, 'ticketId', a.ticket_id, 'legacy', 1),
+             1, 1, 0, ${String(now)}, ${String(now)}, NULL
+      FROM assignments a
+      JOIN tickets tk ON tk.id = a.ticket_id
+      WHERE tk.ended_at IS NULL AND a.state IN ('pending', 'running');
+
+      UPDATE runs SET kind = 'legacy-analysis' WHERE kind = 'think';
+        `)
+  }
+
+  /** Storage target for one instance's keyed checkpoint entries. */
+  static readonly CHECKPOINT_ENTRIES_CAPACITY = 10_000
+
+  /** Count one instance's keyed checkpoint entries. */
+  countCheckpointEntries(instanceId: string): number {
+    const row = this.requireDb()
+      .prepare('SELECT COUNT(*) AS n FROM sense_checkpoint_entries WHERE instance_id = ?')
+      .get(instanceId) as { n?: number } | undefined
+    return row?.n ?? 0
+  }
+
+  /**
+   * Page through one instance's keyed checkpoint entries in stable key order.
+   * `afterKey` resumes the page strictly after that key (key > afterKey).
+   */
+  listCheckpointEntries(instanceId: string, request: { readonly limit?: number; readonly afterKey?: string } = {}): { key: string; value: string }[] {
+    const limit = Math.min(500, Math.max(1, Math.trunc(request.limit ?? 200)))
+    const rows = request.afterKey !== undefined
+      ? this.requireDb()
+        .prepare('SELECT entry_key AS key, value_json AS value FROM sense_checkpoint_entries WHERE instance_id = ? AND entry_key > ? ORDER BY entry_key LIMIT ?')
+        .all(instanceId, request.afterKey, limit) as { key: string; value: string }[]
+      : this.requireDb()
+        .prepare('SELECT entry_key AS key, value_json AS value FROM sense_checkpoint_entries WHERE instance_id = ? ORDER BY entry_key LIMIT ?')
+        .all(instanceId, limit) as { key: string; value: string }[]
+    return rows
+  }
+
+  /** Read one entry, or undefined. */
+  getCheckpointEntry(instanceId: string, key: string): { key: string; value: string } | undefined {
+    const row = this.requireDb()
+      .prepare('SELECT entry_key AS key, value_json AS value FROM sense_checkpoint_entries WHERE instance_id = ? AND entry_key = ?')
+      .get(instanceId, key) as { key: string; value: string } | undefined
+    return row
+  }
+
+  /**
+   * Apply one entries patch. Caller owns the surrounding transaction (the
+   * ingress keeps events, root checkpoint, patch and receipt in one write).
+   * New keys that would push the instance past its storage target are a loud
+   * quota failure — never a silent trim.
+   */
+  applyCheckpointPatch(instanceId: string, patch: {
+    readonly upserts?: readonly { readonly key: string; readonly value: string }[]
+    readonly deletes?: readonly string[]
+  }, now: number, capacity: number): { applied: number; deleted: number } {
+    const db = this.requireDb()
+    const put = db.prepare('INSERT OR REPLACE INTO sense_checkpoint_entries (instance_id, entry_key, value_json, updated_at) VALUES (?, ?, ?, ?)')
+    const del = db.prepare('DELETE FROM sense_checkpoint_entries WHERE instance_id = ? AND entry_key = ?')
+    let applied = 0
+    let deleted = 0
+    if (patch.deletes !== undefined) {
+      for (const key of patch.deletes) {
+        deleted += Number(del.run(instanceId, key).changes)
+      }
+    }
+    if (patch.upserts !== undefined && patch.upserts.length > 0) {
+      const count = this.countCheckpointEntries(instanceId)
+      const known = patch.upserts.filter(entry => this.getCheckpointEntry(instanceId, entry.key) !== undefined).length
+      if (count - known + patch.upserts.length > capacity) {
+        throw new Error(`checkpoint entries would exceed the storage target (${String(capacity)})`)
+      }
+      for (const entry of patch.upserts) {
+        put.run(instanceId, entry.key, entry.value, now)
+        applied += 1
+      }
+    }
+    return { applied, deleted }
+  }
+
   private migrate(now: number): void {
     const db = this.requireDb()
     const row = db.prepare('PRAGMA user_version').get() as { user_version?: number } | undefined
@@ -288,6 +772,8 @@ export class QunoStore {
     db.exec('BEGIN IMMEDIATE')
     try {
       if (version < 1) this.createV1(now)
+      if (version < 2) this.createV2(now)
+      if (version < 3) this.createV3(now)
       db.exec(`PRAGMA user_version = ${String(SCHEMA_VERSION)}`)
       db.exec('COMMIT')
     } catch (error) {
@@ -412,7 +898,7 @@ export class QunoStore {
       CREATE INDEX events_type ON events(type, ingest_seq);
       CREATE INDEX events_source ON events(source_id, ingest_seq);
 
-      CREATE TABLE subscriptions (
+      CREATE TABLE source_subscriptions (
         id TEXT PRIMARY KEY,
         quno_id TEXT NOT NULL,
         source_id TEXT NOT NULL,
@@ -968,9 +1454,28 @@ export class QunoStore {
   pruneExpiredEvents(now: number, bodyDays: number): number {
     const cutoff = now - bodyDays * 24 * 60 * 60 * 1000
     const db = this.requireDb()
+    // Unsettled domain evidence never expires by age: a body is pruned only
+    // when no pending Trigger reference, active Eval, open Ticket input or open
+    // attention evidence still points at it. Legacy deliveries stay protected
+    // for upgraded profiles that still show historical runs.
     const candidates = db.prepare(`SELECT e.id FROM events e
       WHERE e.received_at < ? AND e.pruned_at IS NULL
         AND e.id NOT IN (SELECT event_id FROM deliveries WHERE status IN ('pending','claimed','deferred'))
+        AND e.id NOT IN (SELECT trigger_id FROM thread_pending)
+        AND e.id NOT IN (
+          SELECT json_each.value FROM evals, json_each(evals.trigger_ids_json)
+          WHERE evals.status IN ('delivering','waiting-decision')
+        )
+        AND e.id NOT IN (
+          SELECT ti.trigger_id FROM ticket_inputs ti JOIN tickets t ON t.id = ti.ticket_id
+          WHERE t.ended_at IS NULL AND ti.trigger_id IS NOT NULL
+        )
+        AND e.id NOT IN (
+          SELECT json_extract(evidence.value, '$.eventId')
+          FROM attention_items ai, json_each(ai.evidence_json) evidence
+          WHERE ai.status IN ('open','waiting','snoozed')
+            AND json_extract(evidence.value, '$.eventId') IS NOT NULL
+        )
       LIMIT 500`).all(cutoff) as { id?: string }[]
     if (candidates.length === 0) return 0
     const mark = db.prepare('UPDATE events SET data_json = NULL, pruned_at = ? WHERE id = ?')
@@ -996,7 +1501,7 @@ export class QunoStore {
 
   /** Subscriptions for one Quno. */
   listSubscriptions(qunoId: QunoId): SubscriptionRecord[] {
-    const rows = this.requireDb().prepare('SELECT * FROM subscriptions WHERE quno_id = ?').all(qunoId) as Record<string, unknown>[]
+    const rows = this.requireDb().prepare('SELECT * FROM source_subscriptions WHERE quno_id = ?').all(qunoId) as Record<string, unknown>[]
     return rows.map((row) => ({
       id: String(row['id']),
       qunoId: String(row['quno_id']),
@@ -1012,7 +1517,7 @@ export class QunoStore {
   ensureSubscriptions(qunoId: QunoId, sources: readonly SourceRecord[], now: number): void {
     this.transaction(() => {
       const db = this.requireDb()
-      const insert = db.prepare(`INSERT INTO subscriptions (id, quno_id, source_id, filter_json,
+      const insert = db.prepare(`INSERT INTO source_subscriptions (id, quno_id, source_id, filter_json,
         start_ingest_seq, revision, created_at) VALUES (?, ?, ?, '{}', ?, 1, ?)
         ON CONFLICT(quno_id, source_id) DO NOTHING`)
       const current = this.maxIngestSeq()
@@ -1422,13 +1927,16 @@ export class QunoStore {
     readonly jobId: string | null
     readonly title: string
     readonly prompt: string
+    /** Optional recorded plan (displayed as static text, never as live steps). */
+    readonly plan?: string
     readonly status: TaskStatus
     readonly now: number
   }): TaskRecord {
     this.requireDb().prepare(`INSERT INTO tasks (id, quno_id, child_session_id, parent_session_id, job_id,
-      title, prompt, status, artifacts_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?)`).run(
+      title, prompt, plan, status, artifacts_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?, ?)`).run(
       input.id, input.qunoId, input.childSessionId, input.parentSessionId, input.jobId,
-      input.title, input.prompt, input.status, input.now, input.now,
+      input.title, input.prompt, input.plan ?? null, input.status, input.now, input.now,
     )
     return this.getTask(input.id)
   }
@@ -1506,6 +2014,14 @@ export class QunoStore {
       json(input.payload), input.eligibleAt, input.expiresAt, input.now, input.now,
     )
     return Number(result.changes) === 0 ? null : this.getNotice(id)
+  }
+
+  /** Read one notice without throwing when it does not exist. */
+  findNotice(id: string): NoticeRecord | undefined {
+    const row = this.requireDb().prepare(
+      `SELECT ${NOTICE_COLUMNS} FROM notification_outbox WHERE id = ?`,
+    ).get(id) as Record<string, unknown> | undefined
+    return row === undefined ? undefined : mapNotice(row)
   }
 
   /** Read one notice. */

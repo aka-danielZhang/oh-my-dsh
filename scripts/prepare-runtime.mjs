@@ -113,7 +113,8 @@ const skipped = []
 // zw.4 added `dsh-client-ui-sidebar`: its `sidebar.header.action` seat is what
 // carries the updater at the sidebar's top edge.
 // zw.9 added `dsh-client-ui-slots`: slot-declared registration options ride the
-// stored entry's options bag, allowing a sidebar row to represent a Conversation.
+// stored entry's options bag, which is what lets a sidebar row stand for a
+// Conversation preset (Quno's row keeps its selected state after the hand-off).
 const FORK_MODIFIED = new Set([
   '@deepseek-ai/dsh',
   '@deepseek-ai/dsh-agent-default-model',

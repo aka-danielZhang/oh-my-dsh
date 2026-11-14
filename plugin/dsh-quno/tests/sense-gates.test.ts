@@ -117,8 +117,10 @@ test('S02 a Sense starts with no chat and no model, receiving only its runtime',
     const runtime = control.runtimes[0]!
     assert.deepEqual(
       Object.keys(runtime).sort(),
-      ['checkpoint', 'config', 'generation', 'ingress', 'instanceId', 'limits', 'logger', 'signal', 'sourceId', 'type'].sort(),
+      ['capabilities', 'checkpoint', 'checkpointEntries', 'config', 'generation', 'ingress', 'instanceId', 'limits', 'logger', 'signal', 'sourceId', 'type'].sort(),
     )
+    assert.equal(runtime.capabilities?.checkpointEntries, true, 'checkpoint-entries/v1 is declared')
+    assert.equal(typeof runtime.checkpointEntries?.list, 'function')
     assert.equal(typeof runtime.ingress.ingestBatch, 'function')
     assert.equal('schedule' in runtime, false)
     assert.equal('notify' in runtime, false)

@@ -16,6 +16,7 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { QunoLocaleKey } from './locales.ts'
 import type { QunoClientStore } from './store.ts'
 import { mainPresence } from './view-model.ts'
+import { QunoMark } from './quno-mark.tsx'
 
 /** Injected face of the header identity. */
 export interface QunoHeaderIdentityInjected {
@@ -47,7 +48,7 @@ export function QunoHeaderIdentity(props: PropsRuntime<'conversation.header.lead
       : 'var(--dsw-alias-state-error-primary)'
   return (
     <span style={styles.root}>
-      <span style={styles.avatar} aria-hidden="true">Q</span>
+      <QunoMark size={20} />
       <span style={styles.name}>{state.quno.name}</span>
       <span style={{ ...styles.dot, background: dotColor }} aria-hidden="true" />
     </span>
@@ -59,10 +60,6 @@ const styles = {
     display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0 4px',
     color: 'var(--dsw-alias-label-primary)',
   },
-  avatar: {
-    width: 20, height: 20, borderRadius: 999, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: 11, fontWeight: 700, background: 'var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-bg-base)',
-  },
-  name: { fontSize: 13, fontWeight: 600, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  name: { fontSize: 14, fontWeight: 600, maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   dot: { width: 7, height: 7, borderRadius: 999 },
 } as const

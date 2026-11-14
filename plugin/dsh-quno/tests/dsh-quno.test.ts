@@ -13,16 +13,29 @@ test('host entry declares the real dependency seam and a loadable apply', () => 
   assert.equal(typeof Config, 'function')
 })
 
-test('the quno preset carries the Quno tool row and aggressive compaction', () => {
+test('the quno preset routes work without exposing direct execution tools', () => {
   const rows = qunoPresetRows()
-  assert.equal(rows.some(row => row.name === 'dsh-quno/preset'), true)
+  const names = rows.map(row => row.name)
+  for (const forbidden of [
+    '@deepseek-ai/dsh-tool-bash', '@deepseek-ai/dsh-tool-pwsh', '@deepseek-ai/dsh-tool-fs',
+    '@deepseek-ai/dsh-tool-fs-search', '@deepseek-ai/dsh-tool-web', '@deepseek-ai/dsh-tool-skill',
+    '@deepseek-ai/dsh-skill-filesystem', '@deepseek-ai/dsh-tool-jobs', '@deepseek-ai/dsh-tool-goal',
+    '@deepseek-ai/dsh-command-goal', '@deepseek-ai/dsh-tool-todo',
+  ]) {
+    assert.equal(names.includes(forbidden), false, `${forbidden} must stay out of the main preset`)
+  }
+  for (const allowed of [
+    '@deepseek-ai/dsh-tool-schedule', '@deepseek-ai/dsh-tool-ask-user',
+    '@deepseek-ai/dsh-tool-present', 'dsh-quno/preset',
+  ]) {
+    assert.equal(names.includes(allowed), true, `missing ${allowed}`)
+  }
   const compaction = rows.find(row => row.id === 'compaction')
   assert.ok(compaction !== undefined)
   assert.deepEqual(compaction.isolate, { compaction: true, toolResultPruner: true })
   const basic = (compaction.config as { id: string; config?: Record<string, unknown> }[]).find(row => row.id === 'compaction-basic')
   assert.equal(basic?.config?.['thresholdRatio'], 0.5)
   assert.equal(basic?.config?.['retainRatio'], 0.08)
-  assert.equal(rows.some(row => row.name === 'dsh-quno/preset' && row.id === 'quno-tools'), true)
 })
 
 test('the task preset enforces the read-only boundary and keeps no shell', () => {

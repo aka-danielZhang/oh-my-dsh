@@ -11,16 +11,41 @@
  */
 
 import type { RemoteResult, TypertRemoteContribution } from '@deepseek-ai/dsh-typert-protocol'
-import type { CheckNowResult, EnsureMainResult, EventWire, QunoWireState } from './api-types.ts'
+import type {
+  CheckNowResult,
+  EnsureMainResult,
+  EvalDetailWire,
+  EventDetailWire,
+  EventWire,
+  ExchangeDetailWire,
+  NoticeDetailWire,
+  QunoWireState,
+  SenseOptionsPageWire,
+  SenseProbeWire,
+  TaskActivityWire,
+  ThreadDetailWire,
+  TicketDetailWire,
+  TriggerDetailWire,
+} from './api-types.ts'
 import {
   actAttentionInput,
   createSenseInput,
   ensureMainInput,
+  evalDetailInput,
+  eventDetailInput,
   eventsRecentInput,
+  exchangeDetailInput,
   muteInput,
+  noticeDetailInput,
   passthroughSchema,
+  probeSenseInput,
   senseCommandInput,
+  senseOptionsInput,
+  taskActivityInput,
   taskCommandInput,
+  threadDetailInput,
+  ticketDetailInput,
+  triggerDetailInput,
   updateConfigInput,
   updateProfileInput,
 } from './api-types.ts'
@@ -28,7 +53,7 @@ import {
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertRemoteNamespace$71756e6f {
     state: () => Promise<RemoteResult<QunoWireState>>
-    ensureMain: (request: { cwd: string }) => Promise<RemoteResult<EnsureMainResult>>
+    ensureMain: (request: { cwd: string; workspaceId?: string }) => Promise<RemoteResult<EnsureMainResult>>
     updateConfig: (request: { patch: Record<string, unknown> }) => Promise<RemoteResult<QunoWireState>>
     updateProfile: (request: {
       name?: string
@@ -60,10 +85,27 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     }) => Promise<RemoteResult<QunoWireState>>
     taskCommand: (request: {
       taskId: string
-      action: 'resume' | 'abandon'
+      action: 'resume' | 'abandon' | 'cancel' | 'answer'
+      text?: string
     }) => Promise<RemoteResult<QunoWireState>>
+    taskActivity: (request: { taskId: string; cursor?: number; limit?: number }) => Promise<RemoteResult<TaskActivityWire>>
     mute: (request: { minutes?: number; until?: string; cancel?: boolean }) => Promise<RemoteResult<QunoWireState>>
     eventsRecent: (request: { limit?: number }) => Promise<RemoteResult<{ events: EventWire[] }>>
+    probeSense: (request: { instanceId: string }) => Promise<RemoteResult<SenseProbeWire>>
+    senseOptions: (request: {
+      type: string
+      field: string
+      config?: Record<string, unknown>
+      page?: number
+      limit?: number
+    }) => Promise<RemoteResult<SenseOptionsPageWire>>
+    noticeDetail: (request: { notificationId: string }) => Promise<RemoteResult<NoticeDetailWire | null>>
+    eventDetail: (request: { eventId: string }) => Promise<RemoteResult<EventDetailWire | null>>
+    triggerDetail: (request: { triggerId: string }) => Promise<RemoteResult<TriggerDetailWire | null>>
+    threadDetail: (request: { threadId: string }) => Promise<RemoteResult<ThreadDetailWire | null>>
+    ticketDetail: (request: { ticketId: string }) => Promise<RemoteResult<TicketDetailWire | null>>
+    evalDetail: (request: { evalId: string }) => Promise<RemoteResult<EvalDetailWire | null>>
+    exchangeDetail: (request: { exchangeId: string }) => Promise<RemoteResult<ExchangeDetailWire | null>>
   }
 
   interface TypertRemoteMap {
@@ -100,10 +142,27 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     }) => Promise<RemoteResult<QunoWireState>>
     'quno/taskCommand': (request: {
       taskId: string
-      action: 'resume' | 'abandon'
+      action: 'resume' | 'abandon' | 'cancel' | 'answer'
+      text?: string
     }) => Promise<RemoteResult<QunoWireState>>
+    'quno/taskActivity': (request: { taskId: string; cursor?: number; limit?: number }) => Promise<RemoteResult<TaskActivityWire>>
     'quno/mute': (request: { minutes?: number; until?: string; cancel?: boolean }) => Promise<RemoteResult<QunoWireState>>
     'quno/eventsRecent': (request: { limit?: number }) => Promise<RemoteResult<{ events: EventWire[] }>>
+    'quno/probeSense': (request: { instanceId: string }) => Promise<RemoteResult<SenseProbeWire>>
+    'quno/senseOptions': (request: {
+      type: string
+      field: string
+      config?: Record<string, unknown>
+      page?: number
+      limit?: number
+    }) => Promise<RemoteResult<SenseOptionsPageWire>>
+    'quno/noticeDetail': (request: { notificationId: string }) => Promise<RemoteResult<NoticeDetailWire | null>>
+    'quno/eventDetail': (request: { eventId: string }) => Promise<RemoteResult<EventDetailWire | null>>
+    'quno/triggerDetail': (request: { triggerId: string }) => Promise<RemoteResult<TriggerDetailWire | null>>
+    'quno/threadDetail': (request: { threadId: string }) => Promise<RemoteResult<ThreadDetailWire | null>>
+    'quno/ticketDetail': (request: { ticketId: string }) => Promise<RemoteResult<TicketDetailWire | null>>
+    'quno/evalDetail': (request: { evalId: string }) => Promise<RemoteResult<EvalDetailWire | null>>
+    'quno/exchangeDetail': (request: { exchangeId: string }) => Promise<RemoteResult<ExchangeDetailWire | null>>
   }
 
   interface TypertRemoteNamespaceMap {
@@ -189,9 +248,81 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
     },
     {
       id: 'dsh-quno#quno/taskCommand', service: 'quno', namespace: 'quno', method: 'taskCommand',
+      implementation: 'taskCommandForClient',
       invocation: direct,
       parameters: parameter('request', taskCommandInput, 'dsh-quno/api-types#TaskCommandInput'),
       result: STATE,
+      sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
+    },
+    {
+      id: 'dsh-quno#quno/taskActivity', service: 'quno', namespace: 'quno', method: 'taskActivity',
+      implementation: 'taskActivityForClient',
+      invocation: direct,
+      parameters: parameter('request', taskActivityInput, 'dsh-quno/api-types#TaskActivityInput'),
+      result: resultCodec('dsh-quno/api-types#TaskActivityWire'),
+      sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
+    },
+    {
+      id: 'dsh-quno#quno/probeSense', service: 'quno', namespace: 'quno', method: 'probeSense',
+      invocation: direct,
+      parameters: parameter('request', probeSenseInput, 'dsh-quno/api-types#ProbeSenseInput'),
+      result: resultCodec('dsh-quno/api-types#SenseProbeWire'),
+      sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
+    },
+    {
+      id: 'dsh-quno#quno/senseOptions', service: 'quno', namespace: 'quno', method: 'senseOptions',
+      invocation: direct,
+      parameters: parameter('request', senseOptionsInput, 'dsh-quno/api-types#SenseOptionsInput'),
+      result: resultCodec('dsh-quno/api-types#SenseOptionsPageWire'),
+      sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
+    },
+    {
+      id: 'dsh-quno#quno/noticeDetail', service: 'quno', namespace: 'quno', method: 'noticeDetail',
+      invocation: direct,
+      parameters: parameter('request', noticeDetailInput, 'dsh-quno/api-types#NoticeDetailInput'),
+      result: resultCodec('dsh-quno/api-types#NoticeDetailWire'),
+      sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
+    },
+    {
+      id: 'dsh-quno#quno/eventDetail', service: 'quno', namespace: 'quno', method: 'eventDetail',
+      invocation: direct,
+      parameters: parameter('request', eventDetailInput, 'dsh-quno/api-types#EventDetailInput'),
+      result: resultCodec('dsh-quno/api-types#EventDetailWire'),
+      sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
+    },
+    {
+      id: 'dsh-quno#quno/triggerDetail', service: 'quno', namespace: 'quno', method: 'triggerDetail',
+      invocation: direct,
+      parameters: parameter('request', triggerDetailInput, 'dsh-quno/api-types#TriggerDetailInput'),
+      result: resultCodec('dsh-quno/api-types#TriggerDetailWire'),
+      sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
+    },
+    {
+      id: 'dsh-quno#quno/threadDetail', service: 'quno', namespace: 'quno', method: 'threadDetail',
+      invocation: direct,
+      parameters: parameter('request', threadDetailInput, 'dsh-quno/api-types#ThreadDetailInput'),
+      result: resultCodec('dsh-quno/api-types#ThreadDetailWire'),
+      sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
+    },
+    {
+      id: 'dsh-quno#quno/ticketDetail', service: 'quno', namespace: 'quno', method: 'ticketDetail',
+      invocation: direct,
+      parameters: parameter('request', ticketDetailInput, 'dsh-quno/api-types#TicketDetailInput'),
+      result: resultCodec('dsh-quno/api-types#TicketDetailWire'),
+      sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
+    },
+    {
+      id: 'dsh-quno#quno/evalDetail', service: 'quno', namespace: 'quno', method: 'evalDetail',
+      invocation: direct,
+      parameters: parameter('request', evalDetailInput, 'dsh-quno/api-types#EvalDetailInput'),
+      result: resultCodec('dsh-quno/api-types#EvalDetailWire'),
+      sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
+    },
+    {
+      id: 'dsh-quno#quno/exchangeDetail', service: 'quno', namespace: 'quno', method: 'exchangeDetail',
+      invocation: direct,
+      parameters: parameter('request', exchangeDetailInput, 'dsh-quno/api-types#ExchangeDetailInput'),
+      result: resultCodec('dsh-quno/api-types#ExchangeDetailWire'),
       sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
     },
     {

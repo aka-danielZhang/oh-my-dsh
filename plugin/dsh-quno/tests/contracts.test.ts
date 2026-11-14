@@ -149,3 +149,40 @@ test('run output: invalid shapes are refused, valid ones parse', () => {
   }, DEFAULT_QUNO_CONFIG.budget)
   assert.equal(valid.ok, true)
 })
+
+test('sense declarations: first-sync semantics and field metadata are validated', () => {
+  const withFirstSync = parseSenseDefinition({ ...validSense, firstSync: 'snapshot-events' })
+  assert.equal(withFirstSync.ok, true)
+  const badFirstSync = parseSenseDefinition({ ...validSense, firstSync: 'guess' })
+  assert.equal(badFirstSync.ok, false)
+
+  const bounded = parseSenseDefinition({
+    ...validSense,
+    configFields: [
+      { key: 'intervalSec', label: 'Interval', type: 'number', min: 30, max: 600, step: 30 },
+      { key: 'groups', label: 'Groups', type: 'string', multiple: true, discover: true, advanced: true },
+      { key: 'mode', label: 'Mode', type: 'string', options: [{ value: 'a', label: 'A' }] },
+    ],
+  })
+  assert.equal(bounded.ok, true)
+
+  const invertedBounds = parseSenseDefinition({
+    ...validSense,
+    configFields: [{ key: 'n', label: 'N', type: 'number', min: 10, max: 1 }],
+  })
+  assert.equal(invertedBounds.ok, false)
+
+  const ambiguous = parseSenseDefinition({
+    ...validSense,
+    configFields: [
+      { key: 'g', label: 'G', type: 'string', discover: true, options: [{ value: 'a', label: 'A' }] },
+    ],
+  })
+  assert.equal(ambiguous.ok, false)
+
+  const numericDiscovery = parseSenseDefinition({
+    ...validSense,
+    configFields: [{ key: 'n', label: 'N', type: 'number', discover: true }],
+  })
+  assert.equal(numericDiscovery.ok, false)
+})

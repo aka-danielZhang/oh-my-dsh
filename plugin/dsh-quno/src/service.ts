@@ -1,45 +1,100 @@
 /**
- * The Quno Host service: one process-wide orchestrator that ties the durable
- * store, Sense lifecycle, routing, due queue, analysis runner, notification
- * outbox and delegated tasks together, and exposes the operations the preset
- * tools and the browser half call.
+ * The Quno Host service: the process-wide composition root.
+ *
+ * It owns exactly one SQLite store, one domain Engine, one Effect outbox, one
+ * pass loop, one executor and one notification outbox, wires the Sense layer's
+ * ingress into `Engine.receive` (same transaction), registers the agent presets
+ * and exposes the narrow ops the preset tools and the browser half call.
  *
  * @module dsh-quno/service
  */
 
 import { existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import type { Context } from '@deepseek-ai/cordis'
-import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol'
+import { join } from 'node:path'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import { bindTypertRemote } from '@deepseek-ai/dsh-typert-protocol'
 import { DEFAULT_QUNO_CONFIG, mergeQunoConfig, parseQunoConfig } from './contracts.ts'
 import { applyUserAction } from './attention.ts'
-import { AgentAnalyzer } from './analyzer.ts'
-import { buildQunoState, buildRecentEvents } from './api.ts'
-import { Router } from './routing.ts'
-import { Runner } from './runner.ts'
+import {
+  buildEventDetail,
+  buildEvalDetail,
+  buildExchangeDetail,
+  buildNoticeDetail,
+  buildQunoState,
+  buildRecentEvents,
+  buildTaskActivity,
+  buildThreadDetail,
+  buildTicketDetail,
+  buildTriggerDetail,
+} from './api.ts'
+import { QunoStore } from './store.ts'
+import { SqliteRepository } from './app/store.ts'
+import { Engine } from './core/engine.ts'
+import type { EnginePolicyState } from './core/engine.ts'
+import { buildPolicy } from './core/policy.ts'
+import type { PolicyRule } from './core/policy.ts'
+import { QunoStateError as QunoDomainError, routerEndpoint } from './core/model.ts'
+import type { EffectKind, EffectRecord, ExchangeKind, ThreadRef, TriggerDraft } from './core/model.ts'
+import type { OrganEndpointView, SenseDefinition, SenseInstanceRecord } from './types.ts'
+import { SessionTransport } from './app/transport.ts'
+import { EffectRetryError, EffectsRuntime } from './app/effects.ts'
+import type { EffectHandler } from './app/effects.ts'
+import { Executor } from './app/executor.ts'
+import { Assessor } from './app/assessor.ts'
+import { CliCapabilityBroker } from './cli-broker.ts'
+import { Watchdog } from './app/watchdog.ts'
+import { computeMetrics } from './app/metrics.ts'
+import type { EngineMetrics } from './app/metrics.ts'
+import { latestHumanMessageId, currentEvalId } from './app/turn-kind.ts'
 import { Scheduler } from './scheduler.ts'
 import { QunoSensesService } from './senses.ts'
 import { Outbox, type HistoryReader, type MainConversationFace } from './outbox.ts'
-import { TaskOrchestrator } from './tasks.ts'
 import { registerQunoPresets } from './presets.ts'
-import { QunoStore } from './store.ts'
 import { recall, type RecallRequest, type RecallResult } from './recall.ts'
+import { presentTask } from './presentation.ts'
+import { projectTaskActivity } from './activity.ts'
 import type { AttentionAct } from './contracts.ts'
-import type { QunoStatusSummary } from './host-face.ts'
-import type { CheckNowResult, EnsureMainResult, EventWire, QunoWireState } from './api-types.ts'
+import type {
+  EvalCandidateView,
+  EvalDecideView,
+  QunoServiceFace,
+  QunoStatusSummary,
+  RouteItem,
+  RouteOutcome,
+  TicketView,
+} from './host-face.ts'
+import type {
+  CheckNowResult,
+  EnsureMainResult,
+  EventDetailWire,
+  EventWire,
+  EvalDetailWire,
+  ExchangeDetailWire,
+  NoticeDetailWire,
+  QunoWireState,
+  SenseOptionsPageWire,
+  SenseProbeWire,
+  TaskActivityWire,
+  ThreadDetailWire,
+  TicketDetailWire,
+  TriggerDetailWire,
+} from './api-types.ts'
 import type {
   AttentionItemRecord,
   AttentionStatus,
+  EventEnvelope,
+  NoticePayload,
   QunoConfig,
   QunoRecord,
-  TaskRecord,
 } from './types.ts'
+import { sha256, stableStringify, toMillis } from './util.ts'
 
 /** Structural face of the API session controller (create + cold resolve). */
 interface SessionControllerFace {
-  create(request: { readonly cwd?: string; readonly agentPreset?: string; readonly sessionId?: string }): Promise<{ readonly sessionId: string; readonly agentPreset?: string }>
+  create(request: { readonly cwd?: string; readonly workspaceId?: string; readonly agentPreset?: string; readonly sessionId?: string }): Promise<{ readonly sessionId: string; readonly agentPreset?: string }>
   resolveAgent(id: SessionId): Promise<{ readonly agent: Agent } | { readonly error: unknown }>
 }
 
@@ -60,6 +115,54 @@ export interface QunoPluginConfig {
   readonly dryRun?: boolean
 }
 
+/** Constructor-only options; production callers use the defaults. */
+export interface QunoHostOptions {
+  /** Injectable clock (eval harness virtual time); default wall clock. */
+  readonly now?: () => number
+}
+
+/**
+ * The organ gate (plan note 2026-11-08 F3): an endpoint is answerable only
+ * when its instance is mounted AND its type declares the handler this kind
+ * needs. A gate that fails refuses at the tool layer, so the misleading
+ * "accepted, then capability-unavailable" two-stage path cannot happen.
+ */
+export function organGateAdvertises(
+  organ: SenseDefinition['organ'] | undefined,
+  kind: 'request' | 'command',
+): boolean {
+  const handler = kind === 'command' ? organ?.handleCommand : organ?.handleRequest
+  return handler !== undefined
+}
+
+/**
+ * Project mounted instances into the discovery view. Only exchange-facing
+ * instances (at least one declared handler) are listed — an endpoint on this
+ * list is one the gate will let through, so the model can act on it without
+ * guessing.
+ */
+export function organEndpointsOf(
+  instances: readonly SenseInstanceRecord[],
+  organFor: (instanceId: string) => SenseDefinition['organ'] | undefined,
+): readonly OrganEndpointView[] {
+  const organs: OrganEndpointView[] = []
+  for (const instance of instances) {
+    const organ = organFor(instance.id)
+    if (organ?.handleRequest === undefined && organ?.handleCommand === undefined) continue
+    organs.push({
+      endpoint: `organ:${instance.id}`,
+      label: instance.label,
+      type: instance.type,
+      capabilities: {
+        request: organ.handleRequest !== undefined,
+        command: organ.handleCommand !== undefined,
+      },
+      health: instance.health,
+    })
+  }
+  return organs
+}
+
 /** Quno's default data directory under the active DSH home. */
 export function defaultQunoRoot(env: NodeJS.ProcessEnv = process.env): string {
   const home = env['DSH_HOME'] ?? joinHome()
@@ -70,18 +173,24 @@ function joinHome(): string {
   return `${homedir().replace(/\/+$/, '')}/.dsh`
 }
 
-/** One process-wide Quno orchestrator. */
-export class QunoHost {
+/** One process-wide Quno composition. */
+export class QunoHost implements QunoServiceFace {
   /** Explicit Typert binding: the gateway resolves `ctx.quno` and dispatches strict descriptors through it. */
   readonly typertRemote = bindTypertRemote(this, 'quno')
   readonly qunoId = 'quno'
   readonly store: QunoStore
+  readonly repo: SqliteRepository
+  readonly engine: Engine
+  /** The structured read-only CLI surface every Worker call goes through. */
+  readonly cli: CliCapabilityBroker
+  readonly transport: SessionTransport
+  readonly assessor: Assessor
+  readonly executor: Executor
+  readonly effects: EffectsRuntime
+  readonly watchdog: Watchdog
   readonly senses: QunoSensesService
-  private readonly router: Router
-  private readonly runner: Runner
   private readonly scheduler: Scheduler
   private readonly outbox: Outbox
-  private readonly tasks: TaskOrchestrator
   private readonly history: HistoryReader
   private readonly main: MainConversationFace
   private readonly now: () => number
@@ -95,12 +204,37 @@ export class QunoHost {
     private readonly ctx: Context,
     private readonly config: QunoPluginConfig,
     private readonly logger: { info(message: string): void; warn(message: string): void },
+    options: QunoHostOptions = {},
   ) {
-    this.now = () => Date.now()
+    this.now = options.now ?? (() => Date.now())
     this.store = new QunoStore({
       root: config.root === undefined || config.root === '' ? defaultQunoRoot() : config.root,
       logger: { warn: message => logger.warn(message) },
     })
+    this.repo = new SqliteRepository(this.store)
+    // The capability table exists before the Engine because every Ticket's
+    // Mandate snapshots the read grants that currently have a configured
+    // target.
+    this.cli = new CliCapabilityBroker({
+      listInstances: () => this.store.listSenseInstances(this.qunoId),
+    })
+    this.engine = new Engine({
+      repo: this.repo,
+      qunoId: this.qunoId,
+      policy: () => this.policyState(),
+      policySnapshot: (state) => buildPolicy({
+        version: `v${String(state.configRevision)}`,
+        paused: state.paused,
+        acceptMode: state.acceptMode,
+        evalTimeoutMs: state.evalTimeoutMs,
+        rules: state.rules,
+      }),
+      nextId: prefix => `${prefix}_${String(this.now())}_${Math.random().toString(36).slice(2, 8)}`,
+      defaultCwd: homedir(),
+      cliGrant: () => this.cli.grantSnapshot(),
+      logger,
+    })
+
     const readHistory = async (sessionId: string): Promise<{ readonly events: readonly { seq: number; type: string; data: unknown }[] }> => {
       const sessionQuery = this.ctx.get('sessionQuery')
       if (sessionQuery === undefined) throw new Error('sessionQuery is not mounted')
@@ -108,7 +242,6 @@ export class QunoHost {
       return { events: snapshot.events }
     }
     this.history = { readSession: readHistory }
-
     this.main = {
       sessionId: () => this.mainSessionId(),
       state: () => this.store.getQuno(this.qunoId)?.mainSessionState ?? 'unbound',
@@ -133,23 +266,52 @@ export class QunoHost {
       now: this.now,
       onChange: () => {},
     })
-    this.router = new Router(this.store, this.qunoId, logger)
-    const analyzer = new AgentAnalyzer({
-      ctx,
+    this.transport = new SessionTransport({ ctx, logger })
+    this.assessor = new Assessor({
+      engine: this.engine,
+      repo: this.repo,
+      transport: this.transport,
+      resolveRouter: () => this.resolveMainAgent(),
       logger,
-      readEvents: ids => this.store.getEvents(ids),
-      listAttention: () => this.store.listAttention(this.qunoId, undefined, 100),
-      readSourceEvents: (sourceId, subjectKey, limit) => subjectKey === null
-        ? this.store.listEventsAfter(-1, limit * 20).filter(event => event.sourceId === sourceId).slice(0, limit)
-        : this.store.listEventsBySubject(sourceId, subjectKey, limit),
-      listSources: () => this.store.listSources(this.qunoId).map(source => ({ id: source.id, type: source.type })),
+      now: this.now,
     })
-    this.runner = new Runner({ store: this.store, qunoId: this.qunoId, analyzer, logger })
+    this.executor = new Executor({
+      ctx,
+      engine: this.engine,
+      repo: this.repo,
+      qunoId: this.qunoId,
+      logger,
+      now: this.now,
+      transport: this.transport,
+      resolveRouter: () => this.resolveMainAgent(),
+      modelSelection: () => this.executorModel(),
+      maxTokens: () => this.store.getQuno(this.qunoId, { required: false })?.config.budget.maxOutputTokens ?? 8192,
+      defaultCwd: homedir(),
+      maxWorkers: 4,
+      resolveExchangeResponder: (endpoint, kind) => this.organAdvertises(endpoint, kind),
+      listOrgans: () => this.organEndpoints(),
+      cli: this.cli,
+      onChange: () => {},
+    })
+    this.effects = new EffectsRuntime({
+      repo: this.repo,
+      handlers: this.effectHandlers(),
+      logger,
+      now: this.now,
+    })
+    this.watchdog = new Watchdog({
+      repo: this.repo,
+      qunoId: this.qunoId,
+      config: () => this.requireQuno().config,
+      now: this.now,
+    })
     this.scheduler = new Scheduler({
       store: this.store,
       qunoId: this.qunoId,
-      router: this.router,
-      runner: this.runner,
+      engine: this.engine,
+      effects: this.effects,
+      executor: this.executor,
+      outbox: this.outbox,
       timer: {
         setTimeout: (callback, delayMs) => {
           const timer = ctx.get('timer')
@@ -161,34 +323,16 @@ export class QunoHost {
       },
       logger,
       now: this.now,
-      onTick: (result) => {
-        if (result.kind === 'ran') void this.outbox.kick()
+      onTick: () => {
+        void this.outbox.kick()
       },
-    })
-    this.tasks = new TaskOrchestrator({
-      store: this.store,
-      qunoId: this.qunoId,
-      subagents: ctx.get('subagents') as never,
-      jobs: ctx.get('jobs') as never,
-      history: this.history,
-      logger,
-      defaultCwd: homedir(),
-      now: this.now,
-      onChange: () => {},
-      onNotice: () => { void this.outbox.kick() },
     })
     this.senses = new QunoSensesService({
       store: this.store,
       qunoId: this.qunoId,
       logger,
-      onIngest: () => {
-        try {
-          this.router.route(this.now())
-        } catch (error) {
-          logger.warn(`dsh-quno: routing after ingest failed: ${(error as Error).message}`)
-        }
-        void this.scheduler.checkNow('event')
-      },
+      triggerSink: { receive: input => this.receiveTrigger(input) },
+      onIngest: () => this.scheduler.scheduleAutoAnalysis(),
       setTimer: (callback, delayMs) => {
         const timer = ctx.get('timer')
         if (timer !== undefined) return timer.timeout(callback, delayMs)
@@ -200,7 +344,7 @@ export class QunoHost {
     })
   }
 
-  /** Open the store, recover persisted state, register presets and arm the queue. */
+  /** Open the store, recover persisted state, register presets and arm the loop. */
   async start(): Promise<void> {
     if (this.started) return
     this.started = true
@@ -208,7 +352,6 @@ export class QunoHost {
     this.store.open(now)
     const quno = this.provision(now)
     void this.verifyMainSession()
-    this.store.ensureSubscriptions(this.qunoId, this.store.listSources(this.qunoId), now)
 
     try {
       this.disposePresets = await registerQunoPresets(this.ctx)
@@ -218,17 +361,12 @@ export class QunoHost {
     }
 
     try {
-      this.store.expireStaleRuns(now)
-      this.router.route(now)
+      await this.executor.reconcile(now)
+      await this.effects.kick()
     } catch (error) {
-      this.logger.warn(`dsh-quno: recovery failed: ${(error as Error).message}`)
+      this.logger.warn(`dsh-quno: domain recovery failed: ${(error as Error).message}`)
     }
     this.senses.startAll()
-    try {
-      await this.tasks.reconcile()
-    } catch (error) {
-      this.logger.warn(`dsh-quno: task reconciliation failed: ${(error as Error).message}`)
-    }
     try {
       await this.outbox.reconcile()
     } catch (error) {
@@ -248,7 +386,8 @@ export class QunoHost {
     this.disposed = true
     this.maintenanceDispose?.()
     this.scheduler.stop()
-    this.tasks.stop()
+    this.effects.stop()
+    this.executor.stop()
     await this.senses.stopAll().catch(() => {})
     await this.disposePresets?.().catch(() => {})
     this.store.close()
@@ -258,9 +397,7 @@ export class QunoHost {
     const base = this.store.getQuno(this.qunoId, { required: false })
     if (base !== undefined) {
       const patched = this.configPatch(base.config)
-      if (patched !== null) {
-        return this.store.updateQunoConfig(this.qunoId, patched, now)
-      }
+      if (patched !== null) return this.store.updateQunoConfig(this.qunoId, patched, now)
       return base
     }
     const config = parseQunoConfig(this.configPatch(DEFAULT_QUNO_CONFIG) ?? DEFAULT_QUNO_CONFIG)
@@ -274,7 +411,6 @@ export class QunoHost {
     })
   }
 
-  /** Apply plugin-row defaults over the persisted config (row config wins only on provision). */
   private configPatch(current: QunoConfig): QunoConfig | null {
     const patch: Record<string, unknown> = {}
     if (this.config.timeZone !== undefined) patch['timeZone'] = this.config.timeZone
@@ -339,13 +475,13 @@ export class QunoHost {
    * Create or adopt the permanent conversation. A missing bound session is a
    * loud error, never a silent replacement.
    */
-  async ensureMain(cwd: string): Promise<EnsureMainResult> {
+  async ensureMain(cwd: string, workspaceId?: string): Promise<EnsureMainResult> {
     const quno = this.requireQuno()
     if (quno.mainSessionId !== null) {
       const exists = await this.sessionExists(quno.mainSessionId)
       if (!exists) {
         this.store.setMainSession(this.qunoId, quno.mainSessionId, 'missing', this.now())
-        throw new QunoStateError('main-session-missing', '主对话会话已丢失；请先在设置里重新绑定或新建，Quno 不会悄悄换一个。')
+        throw new QunoStateError('main-session-missing', '主对话会话已丢失；请先恢复原会话，Quno 不会悄悄换一个。')
       }
       if (quno.mainSessionState !== 'ok') {
         this.store.setMainSession(this.qunoId, quno.mainSessionId, 'ok', this.now())
@@ -357,10 +493,19 @@ export class QunoHost {
       throw new QunoStateError('no-session-controller', '当前组合没有会话控制器，无法创建主对话')
     }
     const directory = resolveDirectory(cwd)
-    const created = await controller.create({ cwd: directory, agentPreset: 'quno' })
+    const registry = this.ctx.get('workspaceRegistry') as {
+      list?: () => readonly { readonly id: string }[]
+    } | undefined
+    let target = workspaceId
+    if ((target === undefined || target === '') && registry?.list !== undefined) {
+      try { target = registry.list()[0]?.id } catch { /* optional service */ }
+    }
+    const created = target !== undefined && target !== ''
+      ? await controller.create({ workspaceId: target, agentPreset: 'quno' })
+        .catch(async () => await controller.create({ cwd: directory, agentPreset: 'quno' }))
+      : await controller.create({ cwd: directory, agentPreset: 'quno' })
     const sessionId = String(created.sessionId)
     this.store.setMainSession(this.qunoId, sessionId, 'ok', this.now())
-    this.store.ensureSubscriptions(this.qunoId, this.store.listSources(this.qunoId), this.now())
     return { sessionId, state: 'ok', created: true }
   }
 
@@ -384,29 +529,622 @@ export class QunoHost {
     }
   }
 
-  /** Forward one durable session event to the delivery reconciler. */
+  /** Forward one durable session event to the delivery reconciler and executor. */
   observeSession(sessionId: string, event: { readonly seq: number; readonly type: string; readonly data: unknown }): void {
     this.outbox.observe(sessionId, event)
+    this.executor.observe(sessionId, event)
+  }
+
+  // -------------------------------------------------------------- domain sink
+
+  /**
+   * The Sense ingress sink. Runs INSIDE the batch transaction (T1): the
+   * Trigger, its Threads, the fan-out inputs and the pending Eval slot commit
+   * together with the event row and the checkpoint.
+   */
+  private receiveTrigger(input: {
+    readonly envelope: EventEnvelope
+    readonly eventId: string
+    readonly sourceId: string
+    readonly receivedAt: number
+    readonly configRevision: number
+    readonly contentHash: string
+  }): { readonly triggerId: string } {
+    const envelope = input.envelope
+    const threads = this.threadsFor(envelope, input.sourceId)
+    const provenance = envelope.provenance ?? { kind: 'observed' as const }
+    const draft: TriggerDraft = {
+      id: input.eventId,
+      qunoId: this.qunoId,
+      sourceId: input.sourceId,
+      eventKey: envelope.eventKey,
+      type: envelope.type,
+      schema: envelope.schema ?? 'quno.event/v1',
+      threads,
+      actor: envelope.actor ?? { source: input.sourceId, id: '' },
+      human: envelope.human === true,
+      addressed: envelope.addressed ?? null,
+      occurredAt: toMillis(envelope.occurredAt),
+      observedAt: toMillis(envelope.observedAt) ?? input.receivedAt,
+      receivedAt: input.receivedAt,
+      summary: envelope.summary ?? null,
+      data: envelope.data ?? null,
+      contentRef: envelope.contentRef ?? null,
+      channel: envelope.channel ?? null,
+      operation: envelope.operation ?? 'upsert',
+      priority: envelope.priority ?? 'p2',
+      deadline: toMillis(envelope.deadline),
+      correlationKeys: envelope.correlationKeys ?? [],
+      supersedesTriggerIds: envelope.supersedesEventIds ?? [],
+      parentTriggerIds: envelope.parentEventIds ?? [],
+      provenance: provenance as never,
+      contentHash: input.contentHash,
+      configRevision: input.configRevision,
+      expiresAt: toMillis(envelope.expiresAt),
+    }
+    const outcome = this.engine.receive(draft, input.receivedAt)
+    return { triggerId: outcome.triggerId }
+  }
+
+  /** Resolve the Threads of one envelope without guessing identities. */
+  private threadsFor(envelope: EventEnvelope, sourceId: string): readonly ThreadRef[] {
+    const organ = this.senses.capabilitiesForSource(sourceId)
+    if (organ?.resolveThreads !== undefined) {
+      try {
+        const resolution = organ.resolveThreads(envelope)
+        if (resolution.status === 'resolved' && resolution.threads.length > 0) {
+          return resolution.threads.map(thread => ({ source: thread.source, id: thread.id }))
+        }
+      } catch (error) {
+        this.logger.warn(`dsh-quno: thread resolution failed: ${(error as Error).message}`)
+      }
+    }
+    if (envelope.subject !== undefined && envelope.subject.key !== '') {
+      return [{ source: sourceId, id: envelope.subject.key }]
+    }
+    return [{ source: sourceId, id: `object:${envelope.eventKey}` }]
+  }
+
+  private policyState(): EnginePolicyState {
+    const quno = this.store.getQuno(this.qunoId, { required: false })
+    const config = quno?.config ?? DEFAULT_QUNO_CONFIG
+    const rules: PolicyRule[] = (config.autoSourceIds ?? []).map(sourceId => ({ id: `source:${sourceId}`, sourceId }))
+    return {
+      configRevision: quno?.configRevision ?? 1,
+      paused: !config.enabled,
+      acceptMode: config.acceptMode ?? 'observe',
+      evalTimeoutMs: Math.max(30, config.budget.runTimeoutSec) * 1000,
+      rules,
+    }
+  }
+
+  private pausedNow(): boolean {
+    const quno = this.store.getQuno(this.qunoId, { required: false })
+    return quno !== undefined && !quno.config.enabled
+  }
+
+  private organAdvertises(endpoint: string, kind: 'request' | 'command'): boolean {
+    if (!endpoint.startsWith('organ:')) return false
+    const instanceId = endpoint.slice('organ:'.length)
+    return organGateAdvertises(this.senses.organCapabilitiesForInstance(instanceId), kind)
+  }
+
+  /**
+   * The exchange-facing instances, as the discovery surface advertises them.
+   * Membership is the truth the gate enforces: everything listed here passes
+   * `organAdvertises`, so the model can act on this list without guessing.
+   */
+  organEndpoints(): readonly OrganEndpointView[] {
+    return organEndpointsOf(
+      this.store.listSenseInstances(this.qunoId),
+      instanceId => this.senses.organCapabilitiesForInstance(instanceId),
+    )
+  }
+
+  /** One-line organ directory for refusal messages; empty says so explicitly. */
+  private organDirectoryText(): string {
+    const organs = this.organEndpoints()
+    if (organs.length === 0) return '当前没有任何可应答的 organ。'
+    return `当前可用：${organs.map(organ => `${organ.endpoint}（${organ.label}）`).join('、')}。`
+  }
+
+  // ------------------------------------------------------------- effect plan
+
+  private effectHandlers(): Partial<Record<EffectKind, EffectHandler>> {
+    return {
+      'eval-delivery': async (effect, signal) => {
+        if (this.pausedNow()) throw new EffectRetryError('quno is paused', 30_000)
+        const payload = effect.payload as { readonly evalId?: string; readonly threadId?: string }
+        if (payload.evalId !== undefined) {
+          const evalRecord = this.repo.getEval(payload.evalId)
+          if (evalRecord === undefined) return
+          if (evalRecord.status !== 'delivering' && evalRecord.status !== 'waiting-decision') return
+          await this.assessor.deliverEval(evalRecord.id, signal)
+          return
+        }
+        if (payload.threadId === undefined) return
+        const opened = this.engine.openEval(payload.threadId, this.now())
+        if (opened !== null && opened.status === 'delivering') {
+          await this.assessor.deliverEval(opened.id, signal)
+        }
+      },
+      'assignment-launch': async (effect, signal) => {
+        const payload = effect.payload as { readonly assignmentId?: string }
+        if (payload.assignmentId === undefined) return
+        await this.executor.launch(payload.assignmentId, signal)
+      },
+      'input-delivery': async (effect, signal) => {
+        const payload = effect.payload as { readonly ticketId?: string }
+        if (payload.ticketId === undefined) return
+        await this.executor.deliverInputs(payload.ticketId, signal)
+      },
+      'router-relay': async (effect, signal) => {
+        if (this.pausedNow()) throw new EffectRetryError('quno is paused', 30_000)
+        const payload = effect.payload as {
+          readonly ticketId?: string
+          readonly assignmentId?: string
+          readonly exchangeId?: string
+        }
+        if (payload.exchangeId !== undefined) {
+          await this.assessor.relayExchange(payload.exchangeId, signal)
+          return
+        }
+        if (payload.ticketId === undefined) return
+        await this.assessor.relayReport(payload.ticketId, payload.assignmentId ?? null, signal)
+      },
+      'notice': async () => {
+        await this.outbox.kick()
+      },
+      'exchange-delivery': async (effect, signal) => {
+        await this.deliverExchange(effect, signal)
+      },
+      'channel-reply': async () => {
+        // External writes are deliberately disabled in this version.
+      },
+    }
+  }
+
+  /** Dispatch one durable Exchange to its responding Organ. */
+  private async deliverExchange(effect: EffectRecord, signal: AbortSignal): Promise<void> {
+    const payload = effect.payload as { readonly exchangeId?: string; readonly responder?: string }
+    if (payload.exchangeId === undefined || payload.responder === undefined) return
+    const exchange = this.repo.getExchange(payload.exchangeId)
+    if (exchange === undefined || (exchange.status !== 'pending' && exchange.status !== 'delivered')) return
+    const endpoint = exchange.responder
+    const instanceId = endpoint.startsWith('organ:') ? endpoint.slice('organ:'.length) : ''
+    const organ = instanceId === '' ? undefined : this.senses.organCapabilitiesForInstance(instanceId)
+    const requestMessage = this.repo.getExchangeMessages(exchange.id).find(message => message.kind === 'request')
+    const handler = exchange.kind === 'command' ? organ?.handleCommand : organ?.handleRequest
+    if (handler === undefined || requestMessage === undefined) {
+      this.engine.failExchange({
+        exchangeId: exchange.id,
+        responder: endpoint,
+        reason: 'capability-unavailable',
+        retryable: false,
+        now: this.now(),
+      })
+      return
+    }
+    this.engine.exchangeDelivered(exchange.id, this.now())
+    const timeout = Math.max(1000, exchange.deadline - this.now())
+    const dispatchSignal = AbortSignal.any([signal, AbortSignal.timeout(timeout)])
+    try {
+      await handler.call(organ, {
+        exchangeId: exchange.id,
+        endpoint,
+        payload: requestMessage.payload,
+        signal: dispatchSignal,
+        completeExchange: async (result: unknown) => {
+          this.engine.completeExchange({ exchangeId: exchange.id, responder: endpoint, result, now: this.now() })
+        },
+        failExchange: async (reason: string, retryable: boolean) => {
+          this.engine.failExchange({ exchangeId: exchange.id, responder: endpoint, reason, retryable, now: this.now() })
+        },
+      })
+    } catch (error) {
+      const message = (error as Error).message
+      try {
+        this.engine.failExchange({ exchangeId: exchange.id, responder: endpoint, reason: message, retryable: true, now: this.now() })
+      } catch {
+        // A missing exchange after a concurrent cancellation is a no-op.
+      }
+    }
   }
 
   // ------------------------------------------------------------ model tools
 
-  /** Start a delegated read-only task (the model-facing tool path). */
-  async startTask(input: { readonly title: string; readonly prompt: string; readonly cwd?: string }, parent: Agent): Promise<TaskRecord> {
+  /** Start one delegated read-only Task from a Human Turn. */
+  async startTask(
+    input: { readonly title: string; readonly prompt: string; readonly plan?: string; readonly cwd?: string },
+    parent: Agent,
+    toolCallId?: string,
+  ): Promise<TicketView> {
     const quno = this.requireQuno()
-    if (quno.mainSessionId === null) {
-      throw new QunoStateError('main-unbound', '主对话尚未绑定，无法委派任务')
-    }
-    return await this.tasks.start({ ...input, parent })
+    if (quno.mainSessionId === null) throw new QunoStateError('main-unbound', '主对话尚未绑定，无法委派任务')
+    const messageId = latestHumanMessageId(parent) ?? `session:${String(parent.session.id)}`
+    const ticket = this.engine.directAccept({
+      sessionId: String(parent.session.id),
+      messageId,
+      toolCallId: toolCallId ?? `${messageId}:quno_task`,
+      title: input.title,
+      goal: input.prompt,
+      ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+      now: this.now(),
+    })
+    this.scheduler.scheduleAutoAnalysis()
+    return this.ticketView(ticket.id)
   }
 
-  /** Search the permanent conversation and its background sessions. */
+  /** Read one delegated Ticket's durable status and result. */
+  getTask(taskId: string): TicketView {
+    const ticket = this.repo.getTicket(taskId)
+    if (ticket === undefined) throw new QunoStateError('unknown-task', `任务 ${taskId} 不存在`)
+    return this.ticketView(ticket.id)
+  }
+
+  /** The Eval candidate the Router is currently asked to judge. */
+  evalCandidate(evalId?: string): EvalCandidateView | null {
+    const id = evalId ?? this.latestEvalIdForMain()
+    if (id === null) return null
+    const view = this.engine.candidateView(id)
+    if (view === null) return null
+    const policy = this.engine.policySnapshot()
+    return {
+      evalId: view.eval.id,
+      threadId: view.eval.threadId,
+      threadLabel: view.thread?.label ?? view.thread?.threadKey ?? null,
+      strength: view.eval.strength,
+      policyVersion: view.eval.policyVersion,
+      acceptMode: policy.acceptMode,
+      status: view.eval.status,
+      triggers: view.admissible.map(entry => ({
+        triggerId: entry.triggerId,
+        type: entry.type,
+        human: entry.human,
+        addressed: entry.addressed,
+        summary: entry.summary,
+        occurredAt: entry.occurredAt,
+        actor: view.triggers.find(trigger => trigger.id === entry.triggerId)?.actor ?? { source: 'unknown', id: '' },
+        channel: entry.channel === null ? null : { source: entry.channel.source, thread: entry.channel.thread },
+      })),
+      tickets: view.tickets.map(ticket => ({ id: ticket.id, title: ticket.title, mode: ticket.mode })),
+    }
+  }
+
+  /** Bounded object-graph read for a Human Turn. */
+  readObjects(request: {
+    readonly triggerId?: string
+    readonly threadId?: string
+    readonly ticketId?: string
+    readonly limit?: number
+  }): Record<string, unknown> {
+    if (request.triggerId !== undefined) {
+      const trigger = this.repo.getTrigger(request.triggerId)
+      if (trigger === undefined) return { found: false, message: 'trigger 不存在或已过期' }
+      const threads = trigger.threads.flatMap((ref) => {
+        const thread = this.repo.getThreadByKey(this.qunoId, ref.source, ref.id)
+        return thread === undefined ? [] : [{ id: thread.id, sourceId: thread.sourceId, threadKey: thread.threadKey, label: thread.label }]
+      })
+      return {
+        found: true,
+        trigger: {
+          id: trigger.id,
+          sourceId: trigger.sourceId,
+          type: trigger.type,
+          operation: trigger.operation,
+          summary: trigger.summary,
+          occurredAt: trigger.occurredAt,
+          human: trigger.human,
+          addressed: trigger.addressed,
+          actor: trigger.actor,
+          data: bounded(trigger.data),
+        },
+        threads,
+      }
+    }
+    if (request.threadId !== undefined) {
+      return { found: true, thread: bounded(buildThreadDetail(this, request.threadId)) }
+    }
+    if (request.ticketId !== undefined) {
+      return { found: true, ticket: bounded(buildTicketDetail(this, request.ticketId)) }
+    }
+    const limit = Math.min(20, Math.max(1, request.limit ?? 10))
+    const threads = this.repo.listThreads(this.qunoId, { limit: 10 }).map(thread => ({
+      id: thread.id,
+      sourceId: thread.sourceId,
+      threadKey: thread.threadKey,
+      label: thread.label,
+      pending: thread.pendingTriggerIds.length,
+      lastAt: thread.lastAt,
+    }))
+    const triggerIds = [...new Set(threads.flatMap(thread => this.repo.listTriggerIdsByThread(thread.id, limit)))].slice(-limit)
+    const triggers = triggerIds.flatMap((id) => {
+      const trigger = this.repo.getTrigger(id)
+      return trigger === undefined ? [] : [{
+        id: trigger.id,
+        type: trigger.type,
+        summary: trigger.summary,
+        occurredAt: trigger.occurredAt,
+        human: trigger.human,
+        addressed: trigger.addressed,
+        threadIds: trigger.threads.map(ref => ref.id),
+      }]
+    })
+    const tickets = this.repo.listTickets(this.qunoId, { limit: 20 }).map(ticket => ({
+      id: ticket.id,
+      title: ticket.title,
+      status: ticket.ended === null ? 'open' : ticket.ended.outcome,
+      mode: ticket.mode,
+      question: ticket.question,
+    }))
+    return { found: true, threads, triggers, tickets, organs: this.organEndpoints() }
+  }
+
+  /** Bounded object-graph read for the current Eval. */
+  evalRead(request: {
+    readonly evalId?: string
+    readonly triggerId?: string
+    readonly threadId?: string
+    readonly ticketId?: string
+  }): Record<string, unknown> | null {
+    const evalId = request.evalId ?? this.latestEvalIdForMain()
+    if (evalId === null) return null
+    const view = this.engine.candidateView(evalId)
+    if (view === null) return null
+    const result: Record<string, unknown> = {
+      eval: {
+        id: view.eval.id,
+        status: view.eval.status,
+        strength: view.eval.strength,
+        policyVersion: view.eval.policyVersion,
+        threadId: view.eval.threadId,
+        triggerIds: view.eval.triggerIds,
+      },
+      triggers: view.triggers.map(trigger => ({
+        id: trigger.id,
+        type: trigger.type,
+        human: trigger.human,
+        addressed: trigger.addressed,
+        actor: trigger.actor,
+        summary: trigger.summary,
+        occurredAt: trigger.occurredAt,
+        contentRef: trigger.contentRef,
+        channel: trigger.channel,
+        data: bounded(trigger.data),
+      })),
+      thread: view.thread === undefined
+        ? null
+        : {
+          id: view.thread.id,
+          sourceId: view.thread.sourceId,
+          threadKey: view.thread.threadKey,
+          label: view.thread.label,
+          lastAt: view.thread.lastAt,
+          closed: view.thread.closed,
+        },
+      tickets: view.tickets.map(ticket => ({ id: ticket.id, title: ticket.title, mode: ticket.mode, ended: ticket.ended })),
+    }
+    if (request.triggerId !== undefined && !view.eval.triggerIds.includes(request.triggerId)) return null
+    if (request.threadId !== undefined && request.threadId !== view.eval.threadId) return null
+    if (request.ticketId !== undefined && !view.tickets.some(ticket => ticket.id === request.ticketId)) return null
+    return result
+  }
+
+  /** Submit the Router's Eval decision. */
+  async evalDecide(input: {
+    readonly evalId: string
+    readonly kind: 'accept' | 'stop' | 'ignore' | 'unavailable'
+    readonly reason?: string
+    readonly title?: string
+    readonly goal?: string
+    readonly mode?: 'once' | 'persistent'
+    readonly cwd?: string
+  }): Promise<EvalDecideView> {
+    const outcome = this.engine.decide({
+      evalId: input.evalId,
+      kind: input.kind,
+      reason: input.reason ?? null,
+      ...(input.title === undefined ? {} : { title: input.title }),
+      ...(input.goal === undefined ? {} : { goal: input.goal }),
+      ...(input.mode === undefined ? {} : { mode: input.mode }),
+      ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+      now: this.now(),
+    })
+    this.scheduler.scheduleAutoAnalysis()
+    return {
+      evalId: input.evalId,
+      kind: outcome.decision.kind,
+      downgraded: outcome.downgraded,
+      ticketId: outcome.ticket?.id ?? null,
+      message: outcome.ticket !== null
+        ? `已受理，任务「${outcome.ticket.title}」已在后台开始。`
+        : outcome.downgraded
+          ? '当前为 observe 模式：只记录 would_accept，未创建任务。'
+          : `已记录决定：${outcome.decision.kind}。`,
+    }
+  }
+
+  /** Apply 1–20 explicit routing instructions from a Human Turn. */
+  async routeCandidates(
+    input: { readonly items: readonly RouteItem[] },
+    parent: Agent,
+    toolCallId: string,
+  ): Promise<RouteOutcome> {
+    const messageId = latestHumanMessageId(parent) ?? `session:${String(parent.session.id)}`
+    const accepted: string[] = []
+    const attached: string[] = []
+    const stopped: string[] = []
+    const ignored: string[] = []
+    const errors: { index: number; message: string }[] = []
+    for (const [index, item] of input.items.entries()) {
+      try {
+        switch (item.action) {
+          case 'accept': {
+            const ticket = this.engine.directAccept({
+              sessionId: String(parent.session.id),
+              messageId,
+              toolCallId: `${messageId}:route:${item.triggerId}`,
+              title: item.title ?? '处理来源事件',
+              goal: item.goal ?? `处理 Trigger ${item.triggerId}`,
+              ...(item.mode === undefined ? {} : { mode: item.mode }),
+              now: this.now(),
+            })
+            accepted.push(ticket.id)
+            break
+          }
+          case 'attach': {
+            if (item.ticketId === undefined) throw new QunoDomainError('invalid-route', 'attach needs a ticketId')
+            const trigger = this.repo.getTrigger(item.triggerId)
+            if (trigger === undefined) throw new QunoDomainError('unknown-trigger', 'unknown trigger')
+            const threads = trigger.threads.flatMap((ref) => {
+              const thread = this.repo.getThreadByKey(this.qunoId, ref.source, ref.id)
+              return thread === undefined ? [] : [thread.id]
+            })
+            this.engine.attach({
+              ticketId: item.ticketId,
+              threadIds: threads,
+              mode: 'context',
+              origin: 'source',
+              now: this.now(),
+            })
+            attached.push(item.ticketId)
+            break
+          }
+          case 'stop': {
+            if (item.ticketId === undefined) throw new QunoDomainError('invalid-route', 'stop needs a ticketId')
+            this.engine.stopTicket({ ticketId: item.ticketId, by: 'human', reason: 'stopped from the conversation', now: this.now() })
+            stopped.push(item.ticketId)
+            break
+          }
+          case 'ignore':
+            ignored.push(item.triggerId)
+            break
+        }
+      } catch (error) {
+        errors.push({ index, message: (error as Error).message })
+      }
+    }
+    this.scheduler.scheduleAutoAnalysis()
+    return { accepted, attached, stopped, ignored, errors }
+  }
+
+  /** Attach Threads to a Ticket. */
+  attachThreads(input: { readonly ticketId: string; readonly threadIds: readonly string[]; readonly mode?: 'owned' | 'context' }): { readonly attached: readonly string[] } {
+    const subscriptions = this.engine.attach({
+      ticketId: input.ticketId,
+      threadIds: input.threadIds,
+      mode: input.mode ?? 'context',
+      origin: 'source',
+      now: this.now(),
+    })
+    return { attached: subscriptions.map(subscription => subscription.threadId) }
+  }
+
+  /** Stop a Ticket from the conversation. */
+  stopTicket(ticketId: string): TicketView {
+    this.engine.stopTicket({ ticketId, by: 'human', reason: 'stopped from the conversation', now: this.now() })
+    return this.ticketView(ticketId)
+  }
+
+  /** Retry a Ticket's executor work under the same Mandate. */
+  retryTicket(ticketId: string): TicketView {
+    this.engine.retryTicket({ ticketId, now: this.now() })
+    this.scheduler.scheduleAutoAnalysis()
+    return this.ticketView(ticketId)
+  }
+
+  /** Write one note into a live Ticket. */
+  noteTicket(ticketId: string, text: string): TicketView {
+    this.engine.note({ ticketId, text, human: true, now: this.now() })
+    this.scheduler.scheduleAutoAnalysis()
+    return this.ticketView(ticketId)
+  }
+
+  /** Start one asynchronous read owned by the Router. */
+  requestExchange(input: {
+    readonly responder: string
+    readonly kind?: 'request' | 'command'
+    readonly payload: unknown
+    readonly timeoutMs?: number
+  }): { readonly requestId: string; readonly deadline: number; readonly message: string } {
+    if (!this.organAdvertises(input.responder, input.kind ?? 'request')) {
+      throw new QunoStateError('unknown-responder', `没有挂载可响应 ${input.responder} 的器官。${this.organDirectoryText()} 端点先用 quno_read 的 organs 列表查询，不要猜。`)
+    }
+    const exchange = this.engine.requestExchange({
+      kind: input.kind ?? 'request',
+      requester: routerEndpoint(this.qunoId),
+      responder: input.responder,
+      payload: input.payload,
+      deadlineMs: Math.min(600_000, Math.max(1000, input.timeoutMs ?? 60_000)),
+      now: this.now(),
+    })
+    this.scheduler.scheduleAutoAnalysis()
+    return {
+      requestId: exchange.id,
+      deadline: exchange.deadline,
+      message: `已发起异步读取 ${exchange.id}；结果稍后作为评估/汇报输入回来。`,
+    }
+  }
+
+  /** Enqueue one proactive notification candidate produced by the Router. */
+  notify(input: {
+    readonly title: string
+    readonly summary: string
+    readonly body: string
+    readonly why: string
+    readonly topicKey?: string
+    readonly itemIds?: readonly string[]
+    readonly urgent?: boolean
+  }): { readonly notificationId: string | null; readonly message: string } {
+    const quno = this.requireQuno()
+    const now = this.now()
+    if (quno.mutedUntil !== null && quno.mutedUntil > now) {
+      return { notificationId: null, message: '当前处于静默期，这条通知不会主动推送。' }
+    }
+    const payload: NoticePayload = {
+      title: input.title.slice(0, 120),
+      body: input.body.slice(0, 8000),
+      summary: input.summary.slice(0, 200),
+      why: input.why.slice(0, 500),
+      ...(input.itemIds === undefined ? {} : { itemIds: input.itemIds }),
+      ...(input.urgent === true ? { urgent: true } : {}),
+    }
+    const notice = this.store.enqueueNotice({
+      qunoId: this.qunoId,
+      topicKey: input.topicKey ?? `router:${sha256(stableStringify(payload)).slice(0, 16)}`,
+      materialRevision: 1,
+      reminderStage: 0,
+      kind: 'report',
+      payload,
+      eligibleAt: now,
+      expiresAt: null,
+      now,
+    })
+    if (notice === null) return { notificationId: null, message: '已有相同主题的待发通知，已合并。' }
+    this.repo.enqueueEffect({ kind: 'notice', key: notice.id, payload: { notificationId: notice.id }, now })
+    this.scheduler.scheduleAutoAnalysis()
+    return { notificationId: notice.id, message: '已进入通知队列，合适的时机再展示给用户。' }
+  }
+
+  /** Search the permanent conversation and its executor sessions. */
   async recall(request: RecallRequest): Promise<RecallResult> {
     return await recall({
       ctx: this.ctx,
       store: this.store,
       qunoId: this.qunoId,
       mainSessionId: () => this.mainSessionId(),
+      backgroundSessions: () => {
+        const seen = new Set<string>()
+        const sessions: { sessionId: string; kind: 'task' }[] = []
+        for (const ticket of this.repo.listTickets(this.qunoId, { limit: 50 })) {
+          for (const assignment of this.repo.listAssignmentsByTicket(ticket.id)) {
+            if (assignment.executorSessionId === '' || seen.has(assignment.executorSessionId)) continue
+            seen.add(assignment.executorSessionId)
+            sessions.push({ sessionId: assignment.executorSessionId, kind: 'task' })
+          }
+        }
+        return sessions
+      },
       logger: this.logger,
     }, request)
   }
@@ -452,9 +1190,11 @@ export class QunoHost {
   statusSummary(): QunoStatusSummary {
     const quno = this.requireQuno()
     const attention = this.store.listAttention(this.qunoId, ['open', 'waiting', 'snoozed'], 500)
-    const deliveries = this.store.countDeliveries(this.qunoId)
-    const tasks = this.store.listTasks(this.qunoId, undefined, 200)
+    const tickets = this.repo.listTickets(this.qunoId, { open: true, limit: 200 })
     const notices = this.store.listNotices(this.qunoId, 200)
+    const effects = this.repo.listDueEffects(this.now(), 200)
+    const waitingEvals = this.repo.listEvals(this.qunoId, { status: ['delivering', 'waiting-decision'], limit: 200 })
+    const watchdog = this.watchdog.inspect()
     const senses = this.senses.healthSnapshot().types.flatMap(view => view.instances.map(instance => ({
       label: instance.label,
       type: instance.type,
@@ -472,19 +1212,28 @@ export class QunoHost {
         snoozed: attention.filter(item => item.status === 'snoozed').length,
       },
       deliveries: {
-        pending: deliveries['pending'] ?? 0,
-        deferred: deliveries['deferred'] ?? 0,
-        deadLetter: deliveries['dead-letter'] ?? 0,
+        pending: effects.filter(effect => effect.kind === 'input-delivery').length,
+        deferred: waitingEvals.length,
+        deadLetter: effects.filter(effect => effect.attempts >= 3).length,
       },
       tasks: {
-        running: tasks.filter(task => task.status === 'running').length,
-        interrupted: tasks.filter(task => task.status === 'interrupted').length,
+        running: tickets.filter(ticket => ticket.question === null).length,
+        interrupted: tickets.filter(ticket => ticket.question !== null).length,
       },
       senses,
       notices: {
         pending: notices.filter(notice => notice.status === 'pending').length,
         inboxDurable: notices.filter(notice => notice.status === 'inbox-durable').length,
         blocked: notices.filter(notice => notice.status === 'delivery-blocked').length,
+      },
+      watchdog: {
+        healthy: watchdog.healthy,
+        findings: watchdog.findings.map(finding => ({
+          code: finding.code,
+          severity: finding.severity,
+          detail: finding.detail,
+          count: finding.count,
+        })),
       },
     }
   }
@@ -497,8 +1246,8 @@ export class QunoHost {
   }
 
   /** Bind or create the main conversation from the browser. */
-  async ensureMainForClient(request: { readonly cwd: string }): Promise<EnsureMainResult> {
-    return await this.ensureMain(request.cwd)
+  async ensureMainForClient(request: { readonly cwd: string; readonly workspaceId?: string }): Promise<EnsureMainResult> {
+    return await this.ensureMain(request.cwd, request.workspaceId)
   }
 
   /** Bounded recent-events summary for the panel's 动态 view (called by the gateway). */
@@ -512,6 +1261,12 @@ export class QunoHost {
     const merged = mergeQunoConfig(quno.config, request.patch)
     if (!merged.ok) throw new QunoStateError(merged.error.code, merged.error.message)
     this.store.updateQunoConfig(this.qunoId, merged.value, this.now())
+    const before = quno.config
+    const policyRelevant = before.enabled !== merged.value.enabled
+      || before.acceptMode !== merged.value.acceptMode
+      || before.autoSourceIds.join('\u0000') !== merged.value.autoSourceIds.join('\u0000')
+    if (policyRelevant) this.engine.policyChanged(this.now())
+    this.scheduler.scheduleAutoAnalysis()
     return await this.state()
   }
 
@@ -593,16 +1348,116 @@ export class QunoHost {
     return await this.state()
   }
 
-  /** Resume or abandon an interrupted task. */
-  async taskCommand(request: { readonly taskId: string; readonly action: 'resume' | 'abandon' }): Promise<QunoWireState> {
-    if (request.action === 'abandon') {
-      this.tasks.abandon(request.taskId)
-    } else {
-      const agent = await this.resolveMainAgent()
-      if (agent === undefined) throw new QunoStateError('main-offline', '主对话当前无法唤醒，稍后再试')
-      await this.tasks.resume(request.taskId, agent)
+  /**
+   * Probe one instance for real (no restart, no config revision bump, no
+   * checkpoint movement, and explicitly NOT reported as a successful sync).
+   */
+  async probeSense(request: { readonly instanceId: string }): Promise<SenseProbeWire> {
+    const result = await this.senses.probeInstance(request.instanceId)
+    return {
+      ok: result.ok,
+      code: result.code,
+      message: result.message,
+      at: result.at,
+      durationMs: result.durationMs,
     }
+  }
+
+  /** Field-level option discovery (cloud groups, calendars, …). */
+  async senseOptions(request: {
+    readonly type: string
+    readonly field: string
+    readonly config?: Record<string, unknown>
+    readonly page?: number
+    readonly limit?: number
+  }): Promise<SenseOptionsPageWire> {
+    const page = await this.senses.listFieldOptions({
+      type: request.type,
+      field: request.field,
+      ...(request.config === undefined ? {} : { config: request.config }),
+      ...(request.page === undefined ? {} : { page: request.page }),
+      ...(request.limit === undefined ? {} : { limit: request.limit }),
+    })
+    return {
+      ok: page.ok,
+      options: page.options.map(option => ({ ...option })),
+      more: page.more,
+      ...(page.detail === undefined ? {} : { detail: page.detail }),
+      ...(page.error === undefined ? {} : { error: { code: page.error.code, message: page.error.message } }),
+    }
+  }
+
+  /** One historical notice plus the current state of its linked items. */
+  async noticeDetail(request: { readonly notificationId: string }): Promise<NoticeDetailWire | null> {
+    return await buildNoticeDetail(this, request.notificationId)
+  }
+
+  /** One bounded event payload for an evidence drill-down. */
+  async eventDetail(request: { readonly eventId: string }): Promise<EventDetailWire | null> {
+    return await buildEventDetail(this, request.eventId)
+  }
+
+  /** One Trigger body, loaded on demand (never part of the polling snapshot). */
+  async triggerDetail(request: { readonly triggerId: string }): Promise<TriggerDetailWire | null> {
+    return buildTriggerDetail(this, request.triggerId)
+  }
+
+  /** One Thread with subscriptions and recent Triggers. */
+  async threadDetail(request: { readonly threadId: string }): Promise<ThreadDetailWire | null> {
+    return buildThreadDetail(this, request.threadId)
+  }
+
+  /** One Ticket with assignments, inputs and report. */
+  async ticketDetail(request: { readonly ticketId: string }): Promise<TicketDetailWire | null> {
+    return buildTicketDetail(this, request.ticketId)
+  }
+
+  /** One Eval with its decision audit. */
+  async evalDetail(request: { readonly evalId: string }): Promise<EvalDetailWire | null> {
+    return buildEvalDetail(this, request.evalId)
+  }
+
+  /** One Exchange with its durable messages. */
+  async exchangeDetail(request: { readonly exchangeId: string }): Promise<ExchangeDetailWire | null> {
+    return buildExchangeDetail(this, request.exchangeId)
+  }
+
+  /** Resume, abandon or cancel an open Ticket; `answer` forwards the user's reply into the same Ticket. */
+  async taskCommandForClient(request: {
+    readonly taskId: string
+    readonly action: 'resume' | 'abandon' | 'cancel' | 'answer'
+    readonly text?: string
+  }): Promise<QunoWireState> {
+    if (request.action === 'cancel' || request.action === 'abandon') {
+      this.engine.stopTicket({ ticketId: request.taskId, by: 'human', reason: `user ${request.action}`, now: this.now() })
+    } else if (request.action === 'answer') {
+      const text = request.text?.trim() ?? ''
+      if (text === '') throw new QunoDomainError('answer-required', '回答内容不能为空')
+      this.noteTicket(request.taskId, text)
+    } else {
+      this.engine.retryTicket({ ticketId: request.taskId, now: this.now() })
+    }
+    this.scheduler.scheduleAutoAnalysis()
     return await this.state()
+  }
+
+  /** Resume, answer or abandon an open Ticket. */
+  async taskCommand(request: { readonly taskId: string; readonly action: 'resume' | 'abandon' | 'cancel' | 'answer'; readonly text?: string }): Promise<QunoWireState> {
+    return await this.taskCommandForClient(request)
+  }
+
+  /**
+   * One page of a task's read-only execution record (design §9.3). The
+   * executor session is resolved from the ticket's latest assignment — never
+   * from a caller-supplied session id — and the projection happens on the
+   * Host: whitelist event types, redacted arguments, bounded text.
+   */
+  async taskActivityForClient(request: {
+    readonly taskId: string
+    readonly cursor?: number
+    readonly limit?: number
+  }): Promise<TaskActivityWire> {
+    return await buildTaskActivity(this, request)
   }
 
   /** Short-term mute from the UI. */
@@ -611,9 +1466,90 @@ export class QunoHost {
     return await this.state()
   }
 
+  /** Bounded operational metrics for support and acceptance tables. */
+  metrics(): EngineMetrics {
+    return computeMetrics(this.repo, this.qunoId, this.now())
+  }
+
   /** Diagnostics for tests and support: preset registration failure, if any. */
   get presetFailure(): string | null {
     return this.presetError
+  }
+
+  /** The executor model selection (Quno profile first, harness default second). */
+  private executorModel(): { provider: string; model: string; reasoningEffort?: string } | undefined {
+    const quno = this.store.getQuno(this.qunoId, { required: false })
+    const fallback = this.ctx.get('agentDefaultModel')?.currentSelection()
+    const provider = quno !== undefined && quno.modelProvider !== '' ? quno.modelProvider : fallback?.provider
+    const model = quno !== undefined && quno.model !== '' ? quno.model : fallback?.model
+    if (provider === undefined || model === undefined) return undefined
+    const reasoningEffort = quno?.reasoningEffort ?? (quno?.model === '' ? fallback?.reasoningEffort : undefined)
+    return {
+      provider,
+      model,
+      ...(reasoningEffort === undefined || reasoningEffort === '' ? {} : { reasoningEffort }),
+    }
+  }
+
+  /** The Eval id carried by the latest Quno-originated main message. */
+  private latestEvalIdForMain(): string | null {
+    return currentEvalId(this.mainAgent())
+  }
+
+  /**
+   * The session-history reader for on-demand read-only projections (the
+   * execution record). Optional in composed runtimes; callers degrade to an
+   * explicit "unavailable" note instead of guessing.
+   */
+  sessionReader(): {
+    readSession(sessionId: string): Promise<{ events: readonly { readonly type: string; readonly seq: number; readonly time: number; readonly data: unknown }[] }>
+  } | undefined {
+    return this.ctx.get('sessionQuery') as
+      | { readSession(sessionId: string): Promise<{ events: readonly { readonly type: string; readonly seq: number; readonly time: number; readonly data: unknown }[] }> }
+      | undefined
+  }
+
+  private ticketView(ticketId: string): TicketView {
+    const ticket = this.repo.getTicket(ticketId)
+    if (ticket === undefined) throw new QunoStateError('unknown-task', `任务 ${ticketId} 不存在`)
+    const assignment = this.repo.findActiveAssignment(ticket.id) ?? this.repo.listAssignmentsByTicket(ticket.id).at(-1)
+    const report = assignment?.report ?? null
+    const ended = ticket.ended
+    const presentation = presentTask({
+      ticket,
+      ...(assignment === undefined ? { assignment: null } : { assignment }),
+      latestRun: assignment === undefined ? null : this.repo.listWorkerRunsByAssignment(assignment.id).at(-1) ?? null,
+    })
+    const status: TicketView['status'] = ended !== null
+      ? ended.outcome === 'completed' ? 'done'
+        : ended.outcome === 'failed' ? 'failed'
+          : ended.outcome === 'stopped' ? 'cancelled'
+            : 'done'
+      : ticket.question !== null
+        ? 'interrupted'
+        : assignment?.state === 'running' ? 'running' : 'waiting'
+    const result = report === null ? null : report.summary
+    const error = report !== null && report.state === 'failed'
+      ? { code: 'task-failed', message: report.summary }
+      : ended !== null && ended.outcome === 'failed'
+        ? { code: 'task-failed', message: ended.reason ?? '任务失败' }
+        : null
+    return {
+      id: ticket.id,
+      title: ticket.title,
+      goal: ticket.goal,
+      status,
+      presentationStatus: presentation.status,
+      mode: ticket.mode,
+      executorSessionId: assignment?.executorSessionId ?? null,
+      result,
+      artifacts: (report?.artifacts ?? []).map(artifact => ({ kind: artifact.kind, label: artifact.label, uri: artifact.uri })),
+      error,
+      question: ticket.question === null ? null : { id: ticket.question.id, question: ticket.question.question, triggerId: ticket.question.triggerId },
+      createdAt: ticket.createdAt,
+      settledAt: ended?.at ?? null,
+      endedBy: ended?.by ?? null,
+    }
   }
 
   private requireQuno(): QunoRecord {
@@ -631,3 +1567,24 @@ function resolveDirectory(cwd: string): string {
   }
   return homedir()
 }
+
+/** Re-exported for the UI's "why" rendering. */
+export { currentEvalId }
+
+/** The exchange kinds a Router request may use. */
+export type { ExchangeKind }
+
+/** Bounded JSON used by detail views. */
+function bounded(value: unknown): unknown {
+  if (value === null || value === undefined) return null
+  try {
+    const text = JSON.stringify(value)
+    if (text === undefined) return null
+    return text.length > 4000 ? `${text.slice(0, 4000)}…` : JSON.parse(text) as unknown
+  } catch {
+    return '（无法序列化）'
+  }
+}
+
+/** Bridge for the old task status tool shape. */
+export type { TicketView }

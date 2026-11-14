@@ -35,10 +35,10 @@ export const definition: SenseDefinition = {
   eventTypes: [{ type: 'feed/item', summary: '订阅源条目新增或更新' }],
   configFields: [
     { key: 'url', label: '订阅源地址', type: 'url', required: true, placeholder: 'https://example.com/feed.xml' },
-    { key: 'intervalSec', label: '轮询间隔（秒）', type: 'number', defaultValue: 300, help: '最小 60 秒' },
-    { key: 'maxItems', label: '每次最多条目', type: 'number', defaultValue: 50 },
     { key: 'label', label: '显示名', type: 'string', placeholder: '团队动态' },
-    { key: 'freshnessThresholdSec', label: '陈旧阈值（秒）', type: 'number', defaultValue: 900 },
+    { key: 'intervalSec', label: '轮询间隔（秒）', type: 'number', min: 60, step: 60, defaultValue: 300, help: '最小 60 秒' },
+    { key: 'maxItems', label: '每次最多条目', type: 'number', min: 1, max: 200, step: 1, defaultValue: 50, advanced: true },
+    { key: 'freshnessThresholdSec', label: '陈旧阈值（秒）', type: 'number', min: 60, step: 60, defaultValue: 900, advanced: true },
   ],
   permissions: {
     reads: ['the configured HTTP(S) feed URL'],
@@ -60,6 +60,9 @@ export const definition: SenseDefinition = {
     gapDetection: 'partial',
     readOriginal: true,
   },
+  // The first poll emits everything currently visible in the page that was
+  // never seen before; it is not "only what appears from now on".
+  firstSync: 'current-window-events',
   defaults: { intervalSec: 300, maxItems: 50, freshnessThresholdSec: 900 },
 }
 

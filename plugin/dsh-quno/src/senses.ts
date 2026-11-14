@@ -12,6 +12,7 @@
 
 import { parseHealthReport, parseSenseDefinition, SENSE_CONTRACT_VERSION } from './contracts.ts'
 import { QunoIngress, QunoIngressError, readGapReport } from './ingress.ts'
+import type { IngressTriggerSink } from './ingress.ts'
 import { backoffMs } from './util.ts'
 import type { QunoStore } from './store.ts'
 import type {
@@ -27,9 +28,43 @@ import type {
   SenseDesiredState,
   SenseHealthDetail,
   SenseInstanceRecord,
+  SenseOption,
   SenseTypeView,
   SourceRecord,
 } from './types.ts'
+
+/** One field-option discovery request handed to a Sense implementation. */
+export interface SenseOptionsRequest<Config = Record<string, unknown>> {
+  readonly instanceId: string
+  readonly type: string
+  /** The config field that declared `discover: true`. */
+  readonly field: string
+  /**
+   * The draft configuration. Partial on purpose: discovery runs before the
+   * full instance configuration is valid (a profile, say, but no groups yet).
+   */
+  readonly config: Config
+  /** 1-based page. */
+  readonly page: number
+  /** Page size the Host will honour; the implementation may return fewer. */
+  readonly limit: number
+  readonly signal: AbortSignal
+}
+
+/** What one discovery call returns; failures are classified by the Host. */
+export interface SenseOptionsResult {
+  readonly options: readonly SenseOption[]
+  /** Whether another page exists. */
+  readonly more?: boolean
+  /** Optional human-readable note (login hint, quota note, …). */
+  readonly detail?: string
+}
+
+/** A classified discovery failure, safe to show in the UI. */
+export interface SenseOptionsFailure {
+  readonly code: string
+  readonly message: string
+}
 
 /** What the Host gives one running Sense generation. */
 export interface SenseRuntime<Config = Record<string, unknown>> {
@@ -40,6 +75,21 @@ export interface SenseRuntime<Config = Record<string, unknown>> {
   readonly generation: number
   readonly checkpoint: SenseCheckpoint
   readonly signal: AbortSignal
+  /**
+   * `checkpoint-entries/v1` (redesign §5): keyed per-entity checkpoint state
+   * with paginated reads; writes ride `ingestBatch`'s `checkpointPatch` and
+   * commit in the same SQLite transaction. Absent on Hosts without the
+   * capability — Senses must fall back to the single-blob checkpoint.
+   */
+  readonly checkpointEntries?: {
+    readonly list: (request: { readonly limit?: number; readonly afterKey?: string }) => {
+      readonly entries: readonly { readonly key: string; readonly value: string }[]
+      readonly count: number
+      readonly revision: number
+    }
+    readonly get: (key: string) => { readonly key: string; readonly value: string } | undefined
+  }
+  readonly capabilities?: { readonly checkpointEntries: boolean }
   readonly limits: {
     readonly maxEventsPerCheck: number
     readonly maxBytesPerCheck: number
@@ -62,8 +112,41 @@ export interface SenseFactory<Config = Record<string, unknown>> {
   validateConfig?(raw: unknown): { readonly ok: true; readonly value: Config } | { readonly ok: false; readonly message: string }
   /** Optional one-shot availability check before a run starts. */
   probe?(config: Config, runtime: Omit<SenseRuntime<Config>, 'ingress'>): Promise<{ readonly ok: boolean; readonly detail?: string }>
+  /**
+   * Optional field-level option discovery (recent groups, calendars, …).
+   * Only called for fields whose declaration sets `discover: true`; must be
+   * side-effect free and must not require a valid complete configuration.
+   */
+  listOptions?(request: SenseOptionsRequest<Config>): Promise<SenseOptionsResult>
   /** Begin observing. Throw to report an unavailable source. */
   start(runtime: SenseRuntime<Config>): Promise<SenseHandle> | SenseHandle
+}
+
+/** Result of one explicit probe (never a lifecycle transition). */
+export interface SenseProbeResult {
+  readonly ok: boolean
+  /** Machine code: `ok`, `unsupported`, `probe-failed`, `timeout`. */
+  readonly code: string
+  readonly message: string
+  readonly at: number
+  readonly durationMs: number
+}
+
+/** A classified discovery failure raised by a Sense implementation. */
+export class SenseOptionsError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message)
+    this.name = 'SenseOptionsError'
+  }
+}
+
+/** One discovery response after Host-side bounding and validation. */
+export interface SenseOptionsPage {
+  readonly ok: boolean
+  readonly options: readonly SenseOption[]
+  readonly more: boolean
+  readonly detail?: string
+  readonly error?: SenseOptionsFailure
 }
 
 /** Result of an instance command. */
@@ -79,8 +162,10 @@ export interface SenseServiceDeps {
   readonly logger: { info(message: string): void; warn(message: string): void }
   /** Called after instances change (UI refresh). */
   readonly onChange?: () => void
-  /** Called after a batch commits (routing / scheduler wake). */
+  /** Called after a batch commits (scheduler wake). */
   readonly onIngest?: (ack: IngestAck, sourceId: string) => void
+  /** The domain receive seam invoked inside the same transaction as the batch. */
+  readonly triggerSink?: IngressTriggerSink
   readonly setTimer?: (callback: () => void, delayMs: number) => () => void
   readonly now?: () => number
 }
@@ -237,7 +322,16 @@ export class QunoSensesService {
     }
     let config = current.config
     if (patch.config !== undefined) {
-      const validated = this.validateConfig(registered, patch.config)
+      // A `null` value on a declared secret field means "keep the stored one":
+      // the browser never receives secret values, so it cannot echo them back.
+      const draft = { ...(patch.config as Record<string, unknown>) }
+      for (const field of registered.definition.configFields ?? []) {
+        if (field.secret !== true || draft[field.key] !== null) continue
+        const stored = current.config[field.key]
+        if (stored === undefined) delete draft[field.key]
+        else draft[field.key] = stored
+      }
+      const validated = this.validateConfig(registered, draft)
       if (!validated.ok) return validated
       config = validated.value
     }
@@ -282,6 +376,146 @@ export class QunoSensesService {
     return { ok: true }
   }
 
+  /**
+   * Run the Sense's own availability check without touching lifecycle,
+   * configuration revisions or the checkpoint. Probe success is NOT a sync
+   * success and must never be reported as one.
+   */
+  async probeInstance(instanceId: string): Promise<SenseProbeResult> {
+    const at = this.now()
+    const instance = this.deps.store.getSenseInstance(instanceId)
+    const registered = this.types.get(instance.type)
+    if (registered === undefined) {
+      return { ok: false, code: 'unsupported', message: '感知器类型当前未加载，无法探测', at, durationMs: 0 }
+    }
+    if (registered.factory.probe === undefined) {
+      return { ok: false, code: 'unsupported', message: '该感知器没有提供探测能力', at, durationMs: 0 }
+    }
+    const source = this.deps.store.listSources(this.deps.qunoId).find(candidate => candidate.instanceId === instanceId)
+    const controller = new AbortController()
+    const runtime: Omit<SenseRuntime, 'ingress'> = {
+      instanceId,
+      sourceId: source?.id ?? `probe-${instanceId}`,
+      type: instance.type,
+      config: instance.config,
+      generation: instance.generation,
+      checkpoint: instance.checkpoint,
+      signal: controller.signal,
+      checkpointEntries: {
+        list: (request: { readonly limit?: number; readonly afterKey?: string }) => {
+          const entries = this.deps.store.listCheckpointEntries(instanceId, request)
+          return {
+            entries,
+            count: this.deps.store.countCheckpointEntries(instanceId),
+            revision: this.deps.store.getSenseInstance(instanceId).checkpoint.revision,
+          }
+        },
+        get: (key: string) => this.deps.store.getCheckpointEntry(instanceId, key),
+      },
+      capabilities: { checkpointEntries: true },
+      limits: {
+        maxEventsPerCheck: registered.definition.runtime.quotas?.maxEventsPerCheck ?? 100,
+        maxBytesPerCheck: registered.definition.runtime.quotas?.maxBytesPerCheck ?? 1024 * 1024,
+      },
+      logger: {
+        info: message => this.deps.logger.info(`[sense:${instance.type}] ${message}`),
+        warn: message => this.deps.logger.warn(`[sense:${instance.type}] ${message}`),
+      },
+    }
+    const startedAt = Date.now()
+    try {
+      const result = await withTimeout(
+        registered.factory.probe(instance.config as never, runtime as never),
+        registered.definition.runtime.timeoutMs,
+      )
+      const durationMs = Date.now() - startedAt
+      return result.ok
+        ? { ok: true, code: 'ok', message: result.detail ?? '探测成功', at, durationMs }
+        : { ok: false, code: 'probe-failed', message: result.detail ?? '探测失败', at, durationMs }
+    } catch (error) {
+      const durationMs = Date.now() - startedAt
+      const message = (error as Error).message
+      const timeout = message.includes('timed out')
+      return {
+        ok: false,
+        code: timeout ? 'timeout' : 'probe-failed',
+        message: timeout ? `探测超时（${String(registered.definition.runtime.timeoutMs)}ms）` : message,
+        at,
+        durationMs,
+      }
+    }
+  }
+
+  /**
+   * Discover one field's options through the Sense implementation. Works for a
+   * type plus a DRAFT configuration, so the onboarding wizard can offer real
+   * choices before an instance exists. The Host only allows fields that
+   * declared `discover: true`, bounds the page, and sanitizes every option.
+   */
+  async listFieldOptions(input: {
+    readonly type: string
+    readonly field: string
+    readonly config?: unknown
+    readonly page?: number
+    readonly limit?: number
+  }): Promise<SenseOptionsPage> {
+    const registered = this.types.get(input.type)
+    if (registered === undefined) {
+      return { ok: false, options: [], more: false, error: { code: 'unsupported', message: '感知器类型当前未加载' } }
+    }
+    const field = (registered.definition.configFields ?? []).find(candidate => candidate.key === input.field)
+    if (field === undefined) {
+      return { ok: false, options: [], more: false, error: { code: 'unknown-field', message: `未声明的配置字段：${input.field}` } }
+    }
+    if (field.discover !== true) {
+      return { ok: false, options: [], more: false, error: { code: 'not-discoverable', message: `字段 ${input.field} 不支持远程选项发现` } }
+    }
+    if (registered.factory.listOptions === undefined) {
+      return { ok: false, options: [], more: false, error: { code: 'unsupported', message: '该感知器没有实现选项发现' } }
+    }
+    const page = Math.min(200, Math.max(1, Math.trunc(input.page ?? 1)))
+    const limit = Math.min(50, Math.max(1, Math.trunc(input.limit ?? 20)))
+    const controller = new AbortController()
+    const config = input.config ?? registered.definition.defaults ?? {}
+    try {
+      const result = await withTimeout(
+        registered.factory.listOptions({
+          instanceId: '',
+          type: input.type,
+          field: input.field,
+          config: config as never,
+          page,
+          limit,
+          signal: controller.signal,
+        }),
+        registered.definition.runtime.timeoutMs,
+      )
+      const options = sanitizeOptions(result.options, limit)
+      return {
+        ok: true,
+        options,
+        more: result.more === true,
+        ...(result.detail === undefined ? {} : { detail: result.detail }),
+      }
+    } catch (error) {
+      if (error instanceof SenseOptionsError) {
+        return { ok: false, options: [], more: false, error: { code: error.code, message: error.message } }
+      }
+      const message = (error as Error).message
+      return {
+        ok: false,
+        options: [],
+        more: false,
+        error: { code: message.includes('timed out') ? 'timeout' : 'discovery-failed', message },
+      }
+    }
+  }
+
+  /** Whether the registered implementation offers a real probe. */
+  supportsProbe(type: string): boolean {
+    return this.types.get(type)?.factory.probe !== undefined
+  }
+
   private async setDesiredState(instanceId: string, desired: SenseDesiredState): Promise<InstanceResult> {
     const current = this.deps.store.getSenseInstance(instanceId)
     if (desired !== 'enabled') {
@@ -312,6 +546,25 @@ export class QunoSensesService {
     const result = registered.factory.validateConfig(input)
     if (!result.ok) return { ok: false, error: { code: 'validation', message: result.message } }
     return { ok: true, value: result.value as Record<string, unknown> }
+  }
+
+  /**
+   * The optional Organ capabilities declared by the Sense type that owns one
+   * source. Used by the domain sink to resolve Threads and read originals.
+   */
+  capabilitiesForSource(sourceId: string): SenseDefinition['organ'] | undefined {
+    const source = this.deps.store.listSources(this.deps.qunoId).find(candidate => candidate.id === sourceId)
+    if (source === undefined) return undefined
+    const instance = this.deps.store.listSenseInstances(this.deps.qunoId).find(candidate => candidate.id === source.instanceId)
+    if (instance === undefined) return undefined
+    return this.types.get(instance.type)?.definition.organ
+  }
+
+  /** The Organ capabilities of one Sense instance (by instance id). */
+  organCapabilitiesForInstance(instanceId: string): SenseDefinition['organ'] | undefined {
+    const instance = this.deps.store.listSenseInstances(this.deps.qunoId).find(candidate => candidate.id === instanceId)
+    if (instance === undefined) return undefined
+    return this.types.get(instance.type)?.definition.organ
   }
 
   /** Fire-and-forget start that never leaks an unhandled rejection (unload/close races). */
@@ -365,7 +618,7 @@ export class QunoSensesService {
           now: this.now(),
         })
       },
-    })
+    }, this.deps.triggerSink)
     live.ingress = ingress
     const runtime: SenseRuntime = {
       instanceId,
@@ -375,6 +628,18 @@ export class QunoSensesService {
       generation,
       checkpoint: instance.checkpoint,
       signal: controller.signal,
+      checkpointEntries: {
+        list: (request: { readonly limit?: number; readonly afterKey?: string }) => {
+          const entries = this.deps.store.listCheckpointEntries(instanceId, request)
+          return {
+            entries,
+            count: this.deps.store.countCheckpointEntries(instanceId),
+            revision: this.deps.store.getSenseInstance(instanceId).checkpoint.revision,
+          }
+        },
+        get: (key: string) => this.deps.store.getCheckpointEntry(instanceId, key),
+      },
+      capabilities: { checkpointEntries: true },
       limits: {
         maxEventsPerCheck: registered.definition.runtime.quotas?.maxEventsPerCheck ?? 100,
         maxBytesPerCheck: registered.definition.runtime.quotas?.maxBytesPerCheck ?? 1024 * 1024,
@@ -511,6 +776,8 @@ export class QunoSensesService {
       nextRetryAt: parsed.value.nextRetryAt ?? null,
       coveredThrough: parsed.value.coveredThrough ?? null,
       sourceLagSec: parsed.value.sourceLagSec ?? null,
+      ...(parsed.value.progress === undefined ? {} : { progress: parsed.value.progress }),
+      ...(parsed.value.issues === undefined ? {} : { issues: parsed.value.issues }),
     }
     this.deps.store.updateSenseInstance(instanceId, {
       health: parsed.value.state,
@@ -608,6 +875,34 @@ function withStaleness(
     : definition.runtime.defaultIntervalSec * 3
   const last = instance.lastSuccessAt
   return { ...instance, stale: last === null ? true : now - last > thresholdSec * 1000 }
+}
+
+/** Bound and sanitize discovered options; duplicate values keep their first entry. */
+function sanitizeOptions(options: readonly SenseOption[], limit: number): SenseOption[] {
+  const seen = new Set<string>()
+  const out: SenseOption[] = []
+  for (const option of options) {
+    if (out.length >= limit) break
+    if (typeof option.value !== 'string') continue
+    const value = option.value.trim()
+    if (value === '' || value.length > 400 || seen.has(value)) continue
+    const label = typeof option.label === 'string' && option.label.trim() !== ''
+      ? option.label.trim().slice(0, 300)
+      : value
+    seen.add(value)
+    out.push({
+      value,
+      label,
+      ...(typeof option.description === 'string' && option.description.trim() !== ''
+        ? { description: option.description.trim().slice(0, 400) }
+        : {}),
+      ...(option.disabled === true ? { disabled: true } : {}),
+      ...(typeof option.disabledReason === 'string' && option.disabledReason.trim() !== ''
+        ? { disabledReason: option.disabledReason.trim().slice(0, 300) }
+        : {}),
+    })
+  }
+  return out
 }
 
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

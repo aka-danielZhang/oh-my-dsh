@@ -11,10 +11,10 @@
  * - the collapsed-state capsule (`shell.overlay`) and the task-card linkage;
  * - the settings section (always mounted: it owns the master switch).
  *
- * Everything except settings, the task card and the turn-tail actions is
- * gated on the master switch (`config.enabled`): turning it off disposes the
- * gated registrations so the stock WorkspaceBrowser and header chrome return
- * unchanged.
+ * Everything except settings, the task card, turn-tail actions and Workspace
+ * session visibility is gated on the master switch (`config.enabled`): turning
+ * it off disposes the gated registrations without leaking Quno's durable main
+ * conversation back into ordinary work browsing.
  *
  * @module dsh-quno/client
  */
@@ -23,6 +23,7 @@ import React from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-gateway/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type { QueueAction } from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -36,6 +37,8 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import type { QunoLocaleKey } from './locales.ts'
 import type { QunoRemoteFace } from './store.ts'
 import type { SidebarRightFace } from './capsule.tsx'
+import type { QunoConversationFace } from './report-actions.tsx'
+import type { QunoQueueDockInjected } from './queue-dock.tsx'
 import TYPERT_REMOTE from '../typert.remote-client.ts'
 import { QunoClientStore } from './store.ts'
 import { en, zh } from './locales.ts'
@@ -48,7 +51,11 @@ import { QunoHeroWelcome } from './hero-welcome.tsx'
 import { QunoTaskCard } from './task-card.tsx'
 import { QunoReportActions } from './report-actions.tsx'
 import { QunoEntryPanel, QunoEntryGlyph } from './entry-panel.tsx'
-import { surfaceEnabled } from './view-model.ts'
+import { QunoOnboardingHost, onboarding } from './sense-onboarding.tsx'
+import { qunoNoticeDefinition } from './report-turn.ts'
+import { registerInternalQueueKinds } from './queue-internal.ts'
+import { QunoQueueDock, QUNO_QUEUE_CSS } from './queue-dock.tsx'
+import { qunoWorkspaceSessionVisible, surfaceEnabled } from './view-model.ts'
 import { QUNO_PANEL_ID, QUNO_PANEL_KIND } from './right-tab.ts'
 import { QUNO_CSS } from './ui.tsx'
 
@@ -63,7 +70,12 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /** Required client services (the two sidebar services are optional: duck-checked). */
-export const inject = ['slots', 'locale', 'remote', 'sessions']
+// `layout` and `uiWorkspace` are load-bearing, not optional: the entry row's
+// hand-off reads both during apply. Declaring them here makes the fiber wait
+// for the services instead of racing their providers (a boot-order loss left
+// `ctx.get('uiWorkspace')` undefined for the whole session, so opening Quno
+// silently did nothing and the visibility filter never registered).
+export const inject = ['slots', 'locale', 'remote', 'sessions', 'layout', 'uiWorkspace']
 
 /** Structural face of the sessions list store (projection carrier). */
 interface SessionsListSnapshot {
@@ -104,14 +116,78 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   }
   const store = new QunoClientStore(remote)
   const sessions = ctx.get('sessions') as SessionsFace | undefined
+  /** Workspace list (optional): Quno's main session joins the first workspace
+   * so the stock composer is live without a manual choice. */
+  /** Live provider/model routes for the settings model selector. Resolved
+   * lazily and defensively: the llm namespace is optional in composed
+   * runtimes, and a missing remote must not fail this plugin's apply. */
+  const listModelChoices = async (): Promise<{ provider: string; model: string; name: string }[]> => {
+    let llm: {
+      listProviders?: () => Promise<{ readonly ok: boolean; readonly value?: readonly { readonly id: string; readonly name: string }[] }>
+      listModels?: (provider: string) => Promise<{ readonly ok: boolean; readonly value?: readonly { readonly provider: string; readonly id: string; readonly name: string }[] }>
+    } | undefined
+    // The Session controller's catalog is mounted with the core conversation
+    // surface and carries the same routes the composer offers.
+    try {
+      const sessionRemote = ctx.get('remote.session') as {
+        modelCatalog?: () => Promise<{
+          readonly ok: boolean
+          readonly value?: {
+            readonly groups?: readonly {
+              readonly id: string
+              readonly models?: readonly { readonly id: string; readonly name: string }[]
+            }[]
+          }
+        }>
+      } | undefined
+      const catalog = await sessionRemote?.modelCatalog?.()
+      if (catalog?.ok === true) {
+        const out: { provider: string; model: string; name: string }[] = []
+        for (const group of catalog.value?.groups ?? []) {
+          for (const model of group.models ?? []) out.push({ provider: group.id, model: model.id, name: model.name })
+        }
+        if (out.length > 0) return out
+      }
+    } catch { /* fall through to the llm registry */ }
+    try {
+      llm = ((ctx.remote as unknown as { llm?: unknown }).llm ?? ctx.get('remote.llm')) as typeof llm
+    } catch {
+      return []
+    }
+    if (llm?.listProviders === undefined || llm.listModels === undefined) return []
+    try {
+      const providers = await llm.listProviders()
+      if (!providers.ok) return []
+      const out: { provider: string; model: string; name: string }[] = []
+      for (const provider of providers.value ?? []) {
+        const models = await llm.listModels(provider.id)
+        if (!models.ok) continue
+        for (const model of models.value ?? []) out.push({ provider: provider.id, model: model.id, name: model.name })
+      }
+      return out
+    } catch {
+      return []
+    }
+  }
+  const workspaces = ctx.get('workspaces') as {
+    list?: { getSnapshot?: () => { items?: readonly { workspaceId?: string }[] } }
+  } | undefined
+  const defaultWorkspaceId = (): string | undefined => {
+    try { return workspaces?.list?.getSnapshot?.().items?.[0]?.workspaceId } catch { return undefined }
+  }
   const sidebarRight = hasMethod(ctx.get('sidebarRight'), 'openTab')
     ? (ctx.get('sidebarRight') as unknown as SidebarRightFace)
     : undefined
   const sidebarRightTabs = hasMethod(ctx.get('sidebarRightTabs'), 'register')
     ? (ctx.get('sidebarRightTabs') as unknown as SidebarRightTabsFace)
     : undefined
+  const workspace = ctx.get('uiWorkspace') as {
+    openSession(sessionId: SessionId): void
+    registerSessionVisibilityFilter?: (filter: (session: {
+      readonly projectionValues?: { readonly agentPreset?: string | null }
+    }) => boolean) => () => void
+  } | undefined
   const openSession = (sessionId: string): void => {
-    const workspace = ctx.get('uiWorkspace') as { openSession(sessionId: SessionId): void } | undefined
     workspace?.openSession(sessionId as SessionId)
   }
   // The entry panel's hand-off target: from a selected panel back to the
@@ -120,6 +196,33 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
   const backToConversation = (): void => {
     const layout = ctx.get('layout') as { selectPanel(panelId: null): void } | undefined
     layout?.selectPanel(null)
+  }
+  // Queue-dock operations, resolved per session exactly like the stock dock's
+  // inject (the conversation service is session-scoped; image URLs come from
+  // uiConversation). Structural faces — no harness value imports.
+  const queueDockFace = (sessionId: SessionId): QunoQueueDockInjected => {
+    const sessionsRoot = ctx.get('sessions') as unknown as {
+      scope?(id: string): { get(name: string): unknown } | undefined
+    } | undefined
+    const actx = sessionsRoot?.scope?.(sessionId)
+    if (actx === undefined) throw new Error(`queue dock: session "${String(sessionId)}" resolved no scope`)
+    const conversation = actx.get('conversation') as
+      | {
+        updateQueue(itemId: string, action: QueueAction): Promise<void>
+        input: { for(scope: unknown): { notify(level: 'info' | 'error', text: string): void } }
+      }
+      | undefined
+    if (conversation === undefined) throw new Error('queue dock: conversation service unavailable')
+    const imageFace = uiConversation as unknown as
+      | { imageUrl?(id: string, attachment: { attachmentId: string }): Promise<string> }
+      | undefined
+    return {
+      updateQueue: (itemId, action) => conversation.updateQueue(itemId, action),
+      notify: (level, text) => { conversation.input.for(actx).notify(level, text) },
+      loadImage: attachment => imageFace?.imageUrl !== undefined
+        ? imageFace.imageUrl(sessionId, attachment)
+        : Promise.reject(new Error('queue dock: image URL service unavailable')),
+    }
   }
   // The panel linkage degrades to the child-session jump while the gated
   // surface is disposed or the service is missing (an unregistered kind throws).
@@ -133,6 +236,13 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       return
     }
     sidebarRight.openTab(QUNO_PANEL_KIND, { params: { taskId, view: 'task' } })
+  }
+  // The Conversation assembly service is optional in a composed runtime; the
+  // turn-bound report card simply renders nothing without it.
+  const uiConversation = ctx.get('uiConversation') as unknown as QunoConversationFace | undefined
+  const openSensePanel = (instanceId: string): void => {
+    if (!panelReady || sidebarRight === undefined) return
+    sidebarRight.openTab(QUNO_PANEL_KIND, { params: { senseId: instanceId, view: 'sense' } })
   }
   const locale = (): 'zh' | 'en' => ctx.locale.getLocale().active.toLowerCase().startsWith('zh') ? 'zh' : 'en'
   // Registrations held while the master switch is on (see the gated surface
@@ -151,13 +261,32 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
 
     ctx.effect(() => store.start(), 'dsh-quno: polling')
 
-    // The settings section is Quno's home for configuration AND operational state.
+    // Workspace visibility filter (§13.2): RESTORED (2026-10-30 晚) together
+    // with the entry fix — the hand-off was ordered wrong (openSession ran
+    // while this hand-off panel owned the main region, so uiWorkspace could
+    // not land the switch); swapping backToConversation before openSession
+    // makes the entry navigate. On runtime zw.7 the filter method itself is
+    // absent (contributed visibility landed at fork 450ef07f, after the
+    // zw.7 tag) so this degrades to a no-op there until the next fork layer;
+    // the duck-check keeps that safe. See
+    // docs/notes/2026-10-30-quno-entry-navigation-fix.md.
+    const registerVisibility = workspace?.registerSessionVisibilityFilter
+    if (registerVisibility !== undefined) {
+      ctx.effect(
+        () => registerVisibility.call(workspace, qunoWorkspaceSessionVisible),
+        'dsh-quno: Workspace main-session visibility',
+      )
+    }
+    if (registerVisibility === undefined) void qunoWorkspaceSessionVisible
+
+    // The settings section is Quno's home for configuration; operational state
+    // and the main-conversation entry live outside the settings dialog.
     ctx.slots.inject('settings.section', () => ctx.slots.register({
       name: 'settings.section',
       id: 'quno',
       order: 12,
       label: () => t('nav'),
-      inject: () => ({ store, t, openSession, locale }),
+      inject: () => ({ store, t, listModelChoices }),
     }, QunoSettingsSection))
 
     // Inline task card for quno_task calls (registered ungated: historic cards
@@ -165,16 +294,59 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
       name: 'tool.call.toolview',
       key: 'quno_task',
-      inject: () => ({ store, t, openSession, openPanel }),
+      inject: () => ({ store, t, openPanel }),
     }, QunoTaskCard))
+
+    // Queue display filter (design §7.1): program-injected inputs never
+    // surface as queued rows above the composer. Two signals cooperate — the
+    // forward `presentation: 'internal'` flag on new sources and this legacy
+    // kind registry for durable records that cannot be rewritten. Ungated:
+    // queued program rows from before a master-switch flip must still hide.
+    ctx.effect(() => registerInternalQueueKinds(['quno-eval', 'quno-report', 'quno-notify', 'quno-task']), 'dsh-quno: internal queue kinds')
+
+    // The internal-aware queue strip shadows the stock dock entry (same entry
+    // id `queue`, lower priority renders): identical UI, plus the display
+    // filter. Human rows keep edit/remove/steer; the filter only affects
+    // display and the model still receives every queued message.
+    ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+      name: 'conversation.input.dock',
+      id: 'queue',
+      priority: -1,
+      locale: 'conversation',
+      inject: (sessionId: SessionId) => queueDockFace(sessionId),
+    }, QunoQueueDock))
+
+    // A durable program input becomes one hidden Chat node bound to its own
+    // Turn; the tail card below reads notices back by notification id.
+    const noticeRegistry = uiConversation as unknown as {
+      events?: { register(definition: unknown): () => void }
+    } | undefined
+    if (noticeRegistry?.events !== undefined) {
+      ctx.effect(() => noticeRegistry.events!.register(qunoNoticeDefinition), 'dsh-quno: notice-to-turn binding')
+    }
+    // Support marker (same spirit as `data-quno-main`): whether the Turn
+    // binding could reach the Conversation assembly at all.
+    if (typeof document !== 'undefined') {
+      document.documentElement.dataset.qunoNoticeBinding = noticeRegistry?.events === undefined ? 'off' : 'on'
+    }
 
     // Deterministic report actions at the turn tail of the Quno conversation.
     ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({
       name: 'conversation.chat.turnTail',
       id: 'quno-report-actions',
       order: 30,
-      inject: () => ({ store, t }),
+      inject: () => ({ store, t, ...(uiConversation === undefined ? {} : { conversation: uiConversation }) }),
     }, QunoReportActions))
+
+    // The onboarding wizard floats over the whole app (a 300+form+240 layout
+    // cannot fit the 800px settings dialog). Ungated like settings: a user may
+    // connect a source while the master switch is off.
+    ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+      name: 'shell.overlay',
+      id: 'quno-onboarding',
+      order: 40,
+      inject: () => ({ store, t, onOpenDetail: openSensePanel }),
+    }, QunoOnboardingHost))
 
     // Claimed stylesheet (see the 2026-09-08 cross-plugin style incident): a
     // plugin-tagged, dedupe-guarded sheet is never deleted by another plugin's
@@ -186,6 +358,18 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       style.dataset.plugin = 'dsh-quno'
       style.dataset.pluginCss = tagId
       style.textContent = QUNO_CSS
+      document.head.appendChild(style)
+      return () => { style.remove() }
+    })
+
+    // The queue strip's stylesheet (same claim discipline as the skin CSS).
+    ctx.effect(() => {
+      const tagId = 'dsh-quno/queue-css'
+      if (document.querySelector(`style[data-plugin-css="${tagId}"]`) !== null) return () => {}
+      const style = document.createElement('style')
+      style.dataset.plugin = 'dsh-quno'
+      style.dataset.pluginCss = tagId
+      style.textContent = QUNO_QUEUE_CSS
       document.head.appendChild(style)
       return () => { style.remove() }
     })
@@ -203,13 +387,20 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         name: 'main',
         key: 'quno-entry',
         locale: NS,
-        inject: () => ({ store, t, openSession, backToConversation }),
+        inject: () => ({ store, t, openSession, backToConversation, defaultWorkspaceId }),
       }, QunoEntryPanel)))
       held.push(ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({
         name: 'sidebar.panellist',
         id: 'quno-entry',
         order: 30,
         label: () => t('nav'),
+        // The row stands for the Quno Conversation, not only for this hand-off
+        // panel: once the hand-off clears the layout's active panel, the shell
+        // keeps the row selected from the main Session's `agentPreset`
+        // projection (ui-sidebar fork capability, runtime zw.9). The id is the
+        // preset `presets.ts` registers; an older runtime ignores this option
+        // and keeps the panel-only selection, never crashing.
+        conversationAgentPreset: 'quno',
       }, QunoEntryGlyph)))
 
       // Right column: two-stage panel registration (§13.4).
@@ -224,7 +415,13 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         held.push(ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
           name: 'sidebar.right.pane.tab',
           key: QUNO_PANEL_ID,
-          inject: () => ({ store, t, openSession }),
+          inject: () => ({
+            store,
+            t,
+            openSession,
+            onEditSense: (instanceId: string, type: string) => { onboarding.open({ kind: 'edit', instanceId, type }) },
+            onAddSense: () => { onboarding.open({ kind: 'create' }) },
+          }),
         }, QunoPanelTab)))
         held.push(ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
           name: 'sidebar.right.pane.tab.title',
@@ -234,9 +431,10 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         panelReady = true
       }
 
-      // In-conversation capsule (§13.5, header utilities seat — top-right):
-      // yields to the expanded panel and collapses when there is nothing to
-      // report. A click opens the right panel.
+      // In-conversation capsule (§13.5): the slot only provides session
+      // context — the visible pill is portaled into this session's
+      // [data-conversation-content] corner, never the header button row.
+      // It yields to the open panel and disappears when nothing is pending.
       if (sidebarRight !== undefined) {
         held.push(ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
           name: 'conversation.session.header.utilities',
