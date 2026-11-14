@@ -73,5 +73,5 @@ pnpm install && pnpm run typecheck && pnpm run test && pnpm run build
 - Quno 设计：`docs/quno-bot-design.md` §6.11。
 - 按需只读查询方案与落地：`docs/notes/2026-11-08-quno-organ-on-demand-read-plan.md` 与 `docs/notes/2026-11-08-quno-organ-on-demand-read-impl.md`。
 - 聚焦模式设计（登录态核验版）：`docs/notes/2026-10-29-quno-collector-yzj-mentions-direct-design-v2.md`。
-- 采集调度改造设计与实施记录：`docs/notes/2026-10-30-quno-collector-yzj-collection-scheduling-redesign.md` 与 `docs/notes/2026-10-30-quno-collector-yzj-collection-redesign-impl.md`。
+- 采集调度改造设计与实施记录：`docs/notes/2026-10-30-quno-sense-yzj-collection-scheduling-redesign.md` 与 `docs/notes/2026-10-30-quno-sense-yzj-collection-redesign-impl.md`。
 - v1 落地决策：`docs/notes/2026-10-23-quno-collector-yzj-impl.md`。

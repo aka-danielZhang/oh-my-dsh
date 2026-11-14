@@ -1,9 +1,9 @@
 # Quno 链路评测器（evals/）
 
-按 [Quno 链路评测集与本地回放设计](../../docs/notes/2026-11-06-quno-link-evaluation-design.md) 与 [真实模型端到端能力验收设计](../../docs/notes/2026-11-07-quno-live-end-to-end-evaluation.md) 实现的两层评测：
+按 [Quno 链路评测集与本地回放设计](../../../docs/notes/2026-11-06-quno-link-evaluation-design.md) 与 [真实模型端到端能力验收设计](../../../docs/notes/2026-11-07-quno-live-end-to-end-evaluation.md) 实现的两层评测：
 
 - **Scripted 链路**（`pnpm run eval`）：真实组合跑预设剧本，基础设施回归，每次修改必跑；
-- **Live E2E**（`pnpm run eval:live -- --suite live-p0`）：真实模型独立决策，隐藏 fixture + 行为 oracle 验收真实能力，发布门前必须连续三次全绿。行为契约以 [`docs/quno-bot-design.md`](../../docs/quno-bot-design.md) §15 为准。
+- **Live E2E**（`pnpm run eval:live -- --suite live-p0`）：真实模型独立决策，隐藏 fixture + 行为 oracle 验收真实能力，发布门前必须连续三次全绿。行为契约以 [`docs/quno-bot-design.md`](../../../docs/quno-bot-design.md) §15 为准。
 
 ## 命令
 

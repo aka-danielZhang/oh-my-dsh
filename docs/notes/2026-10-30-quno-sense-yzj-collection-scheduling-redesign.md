@@ -27,10 +27,10 @@
 
 对应实现入口：
 
-- [index.ts](../../plugin/dsh-quno-sense-yzj/src/index.ts)：成功整轮结束后 `intervalSec` 计时，默认 300 秒。
-- [checkpoint.ts](../../plugin/dsh-quno-sense-yzj/src/checkpoint.ts)：`MAX_SESSIONS=200`、160 KiB 序列化限制；Host 单值上限另为 200,000 字符。
-- [round.ts](../../plugin/dsh-quno-sense-yzj/src/round.ts)：20 会话选择、初始化、目录扫描、逐批 ingest；全部 gap 拼成一条 degraded 文案。
-- [messages.ts](../../plugin/dsh-quno-sense-yzj/src/messages.ts)：`lastMsgId` 被解析，但当前 round 没有使用它判断消息水位变化。
+- [index.ts](../../plugin/dsh-quno-collector-yzj/src/index.ts)：成功整轮结束后 `intervalSec` 计时，默认 300 秒。
+- [checkpoint.ts](../../plugin/dsh-quno-collector-yzj/src/checkpoint.ts)：`MAX_SESSIONS=200`、160 KiB 序列化限制；Host 单值上限另为 200,000 字符。
+- [round.ts](../../plugin/dsh-quno-collector-yzj/src/round.ts)：20 会话选择、初始化、目录扫描、逐批 ingest；全部 gap 拼成一条 degraded 文案。
+- [messages.ts](../../plugin/dsh-quno-collector-yzj/src/messages.ts)：`lastMsgId` 被解析，但当前 round 没有使用它判断消息水位变化。
 - [service.ts](../../plugin/dsh-quno/src/service.ts) 与 [scheduler.ts](../../plugin/dsh-quno/src/scheduler.ts)：事件入库后调用 `checkNow('event')`；单飞与每日预算已有，但事件入口没有按检查间隔做硬节流，运行结束的积压还会走约 1.5 秒 drain。
 
 还存在几个与扩大额度有关的实现缺口，必须一起处理：

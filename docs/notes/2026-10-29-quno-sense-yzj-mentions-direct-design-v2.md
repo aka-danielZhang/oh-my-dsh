@@ -2,7 +2,7 @@
 
 > 状态：**设计评审稿，待实现**。2026-10-29 使用已登录的 `yzj-cli 0.1.8` 完成只读抽样验证；不是实现完成或全场景认证。
 >
-> 本文修订并取代 [v1 设计稿](2026-10-29-quno-sense-yzj-mentions-direct-design.md) 的后续实施方案；旧稿保留为决策历史，不回写。当前已实现行为仍以 [Quno 开发说明](../quno-bot-design.md) §6.11 与 [插件 README](../../plugin/dsh-quno-sense-yzj/README.md) 为准。实施后把已验证行为收敛回权威文档。
+> 本文修订并取代 [v1 设计稿](2026-10-29-quno-sense-yzj-mentions-direct-design.md) 的后续实施方案；旧稿保留为决策历史，不回写。当前已实现行为仍以 [Quno 开发说明](../quno-bot-design.md) §6.11 与 [插件 README](../../plugin/dsh-quno-collector-yzj/README.md) 为准。实施后把已验证行为收敛回权威文档。
 
 ## 1. 结论与修订范围
 
