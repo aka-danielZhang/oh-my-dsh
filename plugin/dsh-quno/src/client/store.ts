@@ -25,6 +25,7 @@ import type {
   QunoWireState,
   CollectorOptionsPageWire,
   CollectorProbeWire,
+  TaskActivityWire,
 } from '../api-types.ts'
 
 /**
@@ -86,7 +87,8 @@ export interface QunoRemoteFace {
   }): Promise<RemoteResult<CollectorOptionsPageWire>>
   noticeDetail(request: { notificationId: string }): Promise<RemoteResult<NoticeDetailWire | null>>
   eventDetail(request: { eventId: string }): Promise<RemoteResult<EventDetailWire | null>>
-  taskCommand(request: { taskId: string; action: 'resume' | 'abandon' | 'cancel' }): Promise<RemoteResult<QunoWireState>>
+  taskCommand(request: { taskId: string; action: 'resume' | 'abandon' | 'cancel' | 'answer'; text?: string }): Promise<RemoteResult<QunoWireState>>
+  taskActivity(request: { taskId: string; cursor?: number; limit?: number }): Promise<RemoteResult<TaskActivityWire>>
   mute(request: { minutes?: number; until?: string; cancel?: boolean }): Promise<RemoteResult<QunoWireState>>
   eventsRecent(request: { limit?: number }): Promise<RemoteResult<{ events: EventWire[] }>>
 }
@@ -106,6 +108,8 @@ export interface QunoSnapshot {
   readonly noticeDetails: Readonly<Record<string, AsyncValue<NoticeDetailWire>>>
   /** Evidence payloads fetched on demand, keyed by event id. */
   readonly eventDetails: Readonly<Record<string, AsyncValue<EventDetailWire>>>
+  /** Read-only execution-record pages, keyed by `${taskId}@${cursor ?? 'head'}`. */
+  readonly taskActivities: Readonly<Record<string, AsyncValue<TaskActivityWire>>>
   readonly error: string | null
   readonly busy: boolean
 }
@@ -119,6 +123,7 @@ const INITIAL: QunoSnapshot = {
   probes: {},
   noticeDetails: {},
   eventDetails: {},
+  taskActivities: {},
   error: null,
   busy: false,
 }
@@ -135,6 +140,7 @@ export class QunoClientStore {
   /** Per-record request order: a slow answer must never overwrite a newer one. */
   private readonly noticeSeq = new Map<string, number>()
   private readonly eventSeq = new Map<string, number>()
+  private readonly activitySeq = new Map<string, number>()
 
   constructor(private readonly remote: QunoRemoteFace) {}
 
@@ -326,9 +332,43 @@ export class QunoClientStore {
     return next
   }
 
-  /** Resume, abandon or cancel one task. */
-  async taskCommand(taskId: string, action: 'resume' | 'abandon' | 'cancel'): Promise<void> {
-    await this.run(() => this.remote.taskCommand({ taskId, action }))
+  /** Resume, abandon, cancel one task — or forward the user's answer into it. */
+  async taskCommand(taskId: string, action: 'resume' | 'abandon' | 'cancel' | 'answer', text?: string): Promise<void> {
+    await this.run(() => this.remote.taskCommand({ taskId, action, ...(text === undefined ? {} : { text }) }))
+  }
+
+  /**
+   * Read one page of a task's read-only execution record. Same `AsyncValue`
+   * discipline as the other on-demand reads; pages are keyed by cursor so an
+   * appended tail never invalidates an already-served page.
+   */
+  async loadTaskActivity(taskId: string, cursor?: number): Promise<AsyncValue<TaskActivityWire>> {
+    const key = `${taskId}@${cursor === undefined ? 'head' : String(cursor)}`
+    const cached = this.snapshot.taskActivities[key]
+    if (cached !== undefined && cached.status !== 'error') return cached
+
+    const seq = this.nextSeq(this.activitySeq, key)
+    this.patchActivity(key, { status: 'loading' })
+
+    let next: AsyncValue<TaskActivityWire>
+    try {
+      const result = await this.remote.taskActivity({
+        taskId,
+        ...(cursor === undefined ? {} : { cursor }),
+        limit: 50,
+      })
+      next = !result.ok
+        ? { status: 'error', message: `${result.error.code}: ${result.error.message}` }
+        : { status: 'ready', data: result.value }
+    } catch (error) {
+      next = { status: 'error', message: (error as Error).message }
+    }
+
+    if (this.activitySeq.get(key) !== seq) {
+      return this.snapshot.taskActivities[key] ?? { status: 'loading' }
+    }
+    this.patchActivity(key, next)
+    return next
   }
 
   /** Short-term mute state. */
@@ -413,6 +453,13 @@ export class QunoClientStore {
     this.set({
       ...this.snapshot,
       eventDetails: bounded({ ...this.snapshot.eventDetails, [eventId]: value }),
+    })
+  }
+
+  private patchActivity(key: string, value: AsyncValue<TaskActivityWire>): void {
+    this.set({
+      ...this.snapshot,
+      taskActivities: bounded({ ...this.snapshot.taskActivities, [key]: value }),
     })
   }
 

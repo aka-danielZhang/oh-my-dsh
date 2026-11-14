@@ -25,6 +25,8 @@ declare module '@deepseek-ai/dsh-llm' {
     'quno-notify': {
       readonly kind: 'quno-notify'
       readonly form: 'notice'
+      /** Program input: queue display and the chat flow hide it (design §7). */
+      readonly presentation: 'internal'
       readonly summary: string
       readonly notificationId: string
       readonly topicKey: string
@@ -33,6 +35,8 @@ declare module '@deepseek-ai/dsh-llm' {
     'quno-task': {
       readonly kind: 'quno-task'
       readonly form: 'notice'
+      /** Program input: queue display and the chat flow hide it (design §7). */
+      readonly presentation: 'internal'
       readonly summary: string
       readonly notificationId: string
       readonly topicKey: string
@@ -233,6 +237,7 @@ export class Outbox {
     // the inbox mutation, so a crash is decidable by presence in the log.
     const baseSource = {
       form: 'notice' as const,
+      presentation: 'internal' as const,
       summary: notice.payload.summary,
       notificationId: notice.id,
       topicKey: notice.topicKey,
@@ -492,6 +497,7 @@ export function noticeMessageFor(notice: NoticeRecord): UserMessage {
     source: {
       kind: 'quno-notify',
       form: 'notice',
+      presentation: 'internal',
       summary: notice.payload.summary,
       notificationId: notice.id,
       topicKey: notice.topicKey,

@@ -94,6 +94,7 @@ export async function allCases(): Promise<readonly (EvalCase | BlockedCase)[]> {
   const { desktopCases } = await import('./cases/desktop.ts')
   const { thirdPartyCases } = await import('./cases/third-party.ts')
   const { cliCases } = await import('./cases/cli.ts')
+  const { interactionCases } = await import('./cases/interaction.ts')
   return [
     ...conversationCases,
     ...evalCases,
@@ -103,6 +104,7 @@ export async function allCases(): Promise<readonly (EvalCase | BlockedCase)[]> {
     ...desktopCases,
     ...thirdPartyCases,
     ...cliCases,
+    ...interactionCases,
   ]
 }
 

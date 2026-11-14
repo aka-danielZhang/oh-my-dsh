@@ -1,8 +1,9 @@
 /**
- * One delegated task's detail. It renders only the sections its status calls
- * for, and only when the record actually has the content: a running task with
- * no plan has no plan heading, a finished task with no artifacts has no
- * artifacts heading.
+ * One delegated task's detail (design §6.2): overview, the current activity,
+ * the "needs you" question with its answer entry, result & artifacts, the
+ * read-only execution record (reachable in EVERY state), and a collapsed
+ * diagnostics block. Sections render only when their status calls for them
+ * AND the record actually has the content.
  *
  * Shared by the right panel and the settings page.
  *
@@ -15,14 +16,16 @@ import type { QunoLocaleKey, QunoTranslate } from './locales.ts'
 import type { QunoClientStore } from './store.ts'
 import type { TaskWire } from '../api-types.ts'
 import { clip, formatClock, formatDuration } from './format.ts'
-import { taskSections, taskStatusKey, taskTone } from './panel-state.ts'
+import { taskActivityKey, taskSections, taskTone, taskUserStatus, taskUserStatusKey } from './panel-state.ts'
 import { Callout, DetailHeader, DetailSection, StatusLabel } from './panel-primitives.tsx'
 import { Empty, ErrorBanner } from './ui.tsx'
+import { TaskActivity } from './task-activity.tsx'
 
 /** Injected face of the task detail. */
 export interface TaskDetailInjected {
   readonly store: QunoClientStore
   readonly t: QunoTranslate
+  /** Diagnostics-only escape hatch into the raw executor session (§11). */
   readonly openSession: (sessionId: string) => void
 }
 
@@ -37,16 +40,28 @@ export interface TaskDetailProps extends TaskDetailInjected {
 /** Render one task's recorded detail. */
 export function TaskDetail(props: TaskDetailProps): React.ReactElement {
   const { task, t, store } = props
-  const [busy, setBusy] = React.useState<'resume' | 'cancel' | null>(null)
+  const [busy, setBusy] = React.useState<'retry' | 'stop' | 'answer' | null>(null)
   const [error, setError] = React.useState<string | null>(null)
+  const [answer, setAnswer] = React.useState('')
   const [copied, setCopied] = React.useState<string | null>(null)
+  const [recordOpen, setRecordOpen] = React.useState(false)
+  const status = taskUserStatus(task)
+  const sections = taskSections(task)
+  const open = status === 'accepted' || status === 'running' || status === 'waiting' || status === 'needs-you'
+  // Running work is exactly when the user asks "what is it doing now" — the
+  // record starts expanded there and stays opt-in everywhere else.
+  React.useEffect(() => {
+    if (status === 'running' || status === 'accepted') setRecordOpen(true)
+  }, [status, task.id])
 
-  const act = async (action: 'resume' | 'cancel'): Promise<void> => {
+  const act = async (action: 'retry' | 'stop' | 'answer', text?: string): Promise<void> => {
     if (busy !== null) return
     setBusy(action)
     setError(null)
     try {
-      await store.taskCommand(task.id, action)
+      const wire = action === 'retry' ? 'resume' : action === 'stop' ? 'cancel' : 'answer'
+      await store.taskCommand(task.id, wire, text)
+      if (action === 'answer') setAnswer('')
     } catch (reason) {
       setError((reason as Error).message)
     } finally {
@@ -64,17 +79,17 @@ export function TaskDetail(props: TaskDetailProps): React.ReactElement {
     }
   }
 
-  const sections = taskSections(task)
   const duration = task.settledAt === null ? null : Math.max(0, task.settledAt - task.createdAt)
-  const statusLabel = t(taskStatusKey(task.status))
+  const statusLabel = t(taskUserStatusKey(status))
+  const activityKey = taskActivityKey(task.activityKind)
 
   return (
     <div style={styles.stack}>
       <DetailHeader
         icon="task"
         title={task.title}
-        subtitle={`${statusLabel} · ${formatClock(task.createdAt)}${duration === null ? '' : ` · ${t('taskDuration')} ${formatDuration(duration)}`}`}
-        status={<StatusLabel tone={taskTone(task.status)}>{statusLabel}</StatusLabel>}
+        subtitle={`${statusLabel} · ${formatClock(task.createdAt)}${duration === null ? '' : ` · ${t('taskDuration')} ${formatDuration(duration)}`}${task.originLabel === 'source' ? ` · ${t('taskOriginSource')}` : ''}`}
+        status={<StatusLabel tone={taskTone(task)}>{statusLabel}</StatusLabel>}
         backLabel={t('panelBack')}
         {...(props.compact === true || props.onBack === undefined ? {} : { onBack: props.onBack })}
       />
@@ -83,9 +98,39 @@ export function TaskDetail(props: TaskDetailProps): React.ReactElement {
         <Callout tone="info" title={t('taskStatusCancelled')}>{t('taskCancelledNote')}</Callout>
       )}
 
-      {sections.plan && task.plan !== null && (
-        <DetailSection title={t('panelTaskPlan')}>
-          <p style={styles.body}>{clip(task.plan, 1600)}</p>
+      {sections.activity && activityKey !== null && (
+        <DetailSection title={t('taskActivityTitle')}>
+          <p style={styles.body}>
+            {t(activityKey)}
+            {task.lastActivityAt !== null && task.lastActivityAt !== undefined && ` · ${t('taskLastActive')} ${formatClock(task.lastActivityAt)}`}
+          </p>
+        </DetailSection>
+      )}
+
+      {sections.question && task.question !== null && (
+        <DetailSection title={t('taskQuestionTitle')}>
+          <Callout tone="warn" title={task.question.question}>
+            <div style={styles.answerRow}>
+              <input
+                style={styles.answerInput}
+                value={answer}
+                placeholder={t('taskAnswerPlaceholder')}
+                onChange={event => { setAnswer(event.target.value) }}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' && answer.trim() !== '' && busy === null) void act('answer', answer.trim())
+                }}
+              />
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={busy !== null || answer.trim() === ''}
+                onClick={() => { void act('answer', answer.trim()) }}
+              >
+                {busy === 'answer' ? t('taskAnswerSending') : t('taskAnswerSend')}
+              </Button>
+            </div>
+            <p style={styles.hint}>{t('taskAnswerHint')}</p>
+          </Callout>
         </DetailSection>
       )}
 
@@ -97,7 +142,14 @@ export function TaskDetail(props: TaskDetailProps): React.ReactElement {
 
       {sections.error && task.error !== null && (
         <Callout tone="error" title={t('taskErrorTitle')}>
-          {task.error.code}：{clip(task.error.message, 600)}
+          {clip(task.error.message, 600)}
+          {sections.retry && (
+            <div style={styles.actions}>
+              <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => { void act('retry') }}>
+                {busy === 'retry' ? t('taskRetrying') : t('taskRetry')}
+              </Button>
+            </div>
+          )}
         </Callout>
       )}
 
@@ -139,33 +191,80 @@ export function TaskDetail(props: TaskDetailProps): React.ReactElement {
         </DetailSection>
       )}
 
-      {(sections.resume || sections.cancel || sections.child) && (
+      {sections.record && task.childSessionId !== null && (
+        <DetailSection title={t('taskRecordTitle')}>
+          {recordOpen
+            ? (
+              <div style={styles.recordBox}>
+                <TaskActivity taskId={task.id} store={store} t={t} />
+              </div>
+            )
+            : (
+              <Button size="sm" variant="outline" onClick={() => { setRecordOpen(true) }}>
+                {t('taskRecordOpen')}
+              </Button>
+            )}
+          {recordOpen && (
+            <button type="button" style={styles.collapseLink} onClick={() => { setRecordOpen(false) }}>
+              {t('taskRecordClose')}
+            </button>
+          )}
+        </DetailSection>
+      )}
+
+      {(sections.stop || (!sections.error && sections.retry)) && open && (
         <div style={styles.actions}>
-          {sections.resume && (
-            <Button size="sm" variant="primary" disabled={busy !== null} onClick={() => { void act('resume') }}>
-              {t('taskResume')}
+          {sections.stop && (
+            <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => { void act('stop') }}>
+              {busy === 'stop' ? t('taskCancelling') : t('taskStop')}
             </Button>
           )}
-          {sections.cancel && (
-            <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => { void act('cancel') }}>
-              {busy === 'cancel' ? t('taskCancelling') : t('taskCancel')}
-            </Button>
-          )}
-          {sections.child && task.childSessionId !== null && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => { if (task.childSessionId !== null) props.openSession(task.childSessionId) }}
-            >
-              {t('taskChildReadonly')}
+          {!sections.error && sections.retry && (
+            <Button size="sm" variant="outline" disabled={busy !== null} onClick={() => { void act('retry') }}>
+              {busy === 'retry' ? t('taskRetrying') : t('taskRetry')}
             </Button>
           )}
         </div>
       )}
 
-      {!sections.plan && !sections.prompt && !sections.result && !sections.artifacts && !sections.error && (
+      {!sections.prompt && !sections.question && !sections.activity && !sections.result && !sections.artifacts && !sections.error && !sections.record && (
         <Empty>{t('taskNoRecordedDetail')}</Empty>
       )}
+
+      <details style={styles.diagnostics}>
+        <summary style={styles.summary}>{t('taskDiagnosticsTitle')}</summary>
+        <dl style={styles.diagList}>
+          <div style={styles.diagRow}>
+            <dt style={styles.diagKey}>{t('taskDiagSession')}</dt>
+            <dd style={styles.diagValue}>
+              <code style={styles.diagCode}>{task.childSessionId ?? '—'}</code>
+              {task.childSessionId !== null && (
+                <Button size="sm" variant="ghost" onClick={() => { if (task.childSessionId !== null) props.openSession(task.childSessionId) }}>
+                  {t('taskDiagOpenSession')}
+                </Button>
+              )}
+            </dd>
+          </div>
+          {task.resultRevision !== undefined && task.resultRevision !== null && (
+            <div style={styles.diagRow}>
+              <dt style={styles.diagKey}>{t('taskDiagRevision')}</dt>
+              <dd style={styles.diagValue}><code style={styles.diagCode}>{task.resultRevision}</code></dd>
+            </div>
+          )}
+          {task.originLabel !== undefined && (
+            <div style={styles.diagRow}>
+              <dt style={styles.diagKey}>{t('taskDiagOrigin')}</dt>
+              <dd style={styles.diagValue}>{task.originLabel === 'source' ? t('taskOriginSource') : t('taskOriginDirect')}</dd>
+            </div>
+          )}
+          {task.error !== null && (
+            <div style={styles.diagRow}>
+              <dt style={styles.diagKey}>{t('taskDiagError')}</dt>
+              <dd style={styles.diagValue}><code style={styles.diagCode}>{task.error.code}</code></dd>
+            </div>
+          )}
+        </dl>
+      </details>
 
       {error !== null && <ErrorBanner>{error}</ErrorBanner>}
     </div>
@@ -174,7 +273,7 @@ export function TaskDetail(props: TaskDetailProps): React.ReactElement {
 
 /** Localized task status; kept as a named export for the card and the list. */
 export function taskStatusLabel(status: string, t: (key: QunoLocaleKey) => string): string {
-  return t(taskStatusKey(status))
+  return t(taskUserStatusKey(taskUserStatus({ status })))
 }
 
 function artifactKindLabel(kind: string, t: QunoTranslate): string {
@@ -190,6 +289,13 @@ function artifactKindLabel(kind: string, t: QunoTranslate): string {
 const styles = {
   stack: { display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 },
   body: { margin: 0, fontSize: 12, lineHeight: 1.65, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' },
+  hint: { margin: '6px 0 0', fontSize: 11, lineHeight: 1.55, color: 'var(--dsw-alias-label-tertiary)' },
+  answerRow: { display: 'flex', gap: 6, alignItems: 'center', marginTop: 4 },
+  answerInput: {
+    flex: 1, minWidth: 0, fontSize: 12, padding: '6px 10px', borderRadius: 8,
+    border: '1px solid var(--dsw-alias-border-l2)', background: 'var(--dsw-alias-bg-base)',
+    color: 'var(--dsw-alias-label-primary)', outline: 'none',
+  },
   artifactRow: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', fontSize: 12, marginTop: 2 },
   artifactKind: {
     flex: 'none', fontSize: 10.5, fontWeight: 600, color: 'var(--dsw-alias-label-tertiary)',
@@ -200,4 +306,15 @@ const styles = {
   summary: { cursor: 'pointer', fontSize: 11, color: 'var(--dsw-alias-label-secondary)' },
   link: { color: 'var(--dsw-alias-brand-primary)', textDecoration: 'none', overflowWrap: 'anywhere' },
   actions: { display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 },
+  recordBox: { border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 10, padding: '8px 10px', background: 'var(--dsw-alias-bg-layer-1)' },
+  collapseLink: {
+    alignSelf: 'flex-start', marginTop: 4, border: 0, background: 'transparent', cursor: 'pointer', padding: 0,
+    font: 'inherit', fontSize: 11, color: 'var(--dsw-alias-label-tertiary)',
+  },
+  diagnostics: { marginTop: 8 },
+  diagList: { margin: '6px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 },
+  diagRow: { display: 'flex', gap: 8, alignItems: 'baseline' },
+  diagKey: { flex: 'none', fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', minWidth: 84 },
+  diagValue: { margin: 0, fontSize: 11, color: 'var(--dsw-alias-label-secondary)', overflowWrap: 'anywhere', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' },
+  diagCode: { fontSize: 10.5, fontFamily: 'ui-monospace, monospace', color: 'var(--dsw-alias-label-tertiary)' },
 } as const

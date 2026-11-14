@@ -42,6 +42,8 @@ export interface TicketView {
   readonly title: string
   readonly goal: string
   readonly status: 'running' | 'done' | 'failed' | 'cancelled' | 'interrupted' | 'waiting'
+  /** The unified user-facing status from the TaskPresentation projection. */
+  readonly presentationStatus: 'accepted' | 'running' | 'waiting' | 'needs-you' | 'done' | 'failed' | 'cancelled' | 'dropped'
   readonly mode: 'once' | 'persistent'
   readonly executorSessionId: string | null
   readonly result: string | null

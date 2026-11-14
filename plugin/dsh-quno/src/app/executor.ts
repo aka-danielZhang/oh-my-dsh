@@ -181,6 +181,7 @@ export class Executor {
           source: {
             kind: 'quno-worker-prompt',
             form: 'relay',
+            presentation: 'internal',
             summary: ticket.title,
             ...(run === null ? {} : { runId: run.id }),
           },
@@ -196,6 +197,7 @@ export class Executor {
           source: {
             kind: 'quno-worker-prompt',
             form: 'relay',
+            presentation: 'internal',
             summary: ticket.title,
             ...(run === null ? {} : { runId: run.id }),
           },
@@ -211,6 +213,7 @@ export class Executor {
           source: {
             kind: 'quno-input',
             form: 'notice',
+            presentation: 'internal',
             summary: '补投提醒',
             ticketId: ticket.id,
             ...(run === null ? {} : { runId: run.id }),
@@ -239,6 +242,7 @@ export class Executor {
             source: {
               kind: 'quno-input',
               form: input.context ? 'notice' : 'relay',
+              presentation: 'internal' as const,
               summary: input.text ?? 'Quno input',
               ticketId: ticket.id,
               ...(run === null ? {} : { runId: run.id }),

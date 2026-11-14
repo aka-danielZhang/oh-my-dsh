@@ -130,13 +130,13 @@ test('transport: queue/steer/inject map to followup/steer/inject', async () => {
   const agent = new FakeAgent()
   const transport = new SessionTransport({ ctx: fakeContext(agent), logger })
   await transport.send(agent as never, {
-    requestId: 'eval:1', text: 'candidate', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', summary: 's' },
+    requestId: 'eval:1', text: 'candidate', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', presentation: 'internal', summary: 's' },
   }, () => {})
   await transport.send(agent as never, {
-    requestId: 'input:2', text: 'steer', mode: 'steer', source: { kind: 'quno-input', form: 'relay', summary: 's' },
+    requestId: 'input:2', text: 'steer', mode: 'steer', source: { kind: 'quno-input', form: 'relay', presentation: 'internal', summary: 's' },
   }, () => {})
   await transport.send(agent as never, {
-    requestId: 'input:3', text: 'context', mode: 'inject', source: { kind: 'quno-input', form: 'notice', summary: 's' },
+    requestId: 'input:3', text: 'context', mode: 'inject', source: { kind: 'quno-input', form: 'notice', presentation: 'internal', summary: 's' },
   }, () => {})
   assert.deepEqual(agent.sent.map(item => item.mode), ['queue', 'steer', 'inject'])
   assert.deepEqual(agent.sent.map(item => item.id), [
@@ -153,7 +153,7 @@ test('transport: the same request id is delivered once', async () => {
     requestId: 'eval:1',
     text: 'candidate',
     mode: 'queue' as const,
-    source: { kind: 'quno-eval', form: 'relay' as const, summary: 's' },
+    source: { kind: 'quno-eval', form: 'relay' as const, presentation: 'internal' as const, summary: 's' },
   }
   await transport.send(agent as never, input, () => {})
   await transport.send(agent as never, input, () => {})
@@ -164,11 +164,11 @@ test('transport: the same request id with different content is a conflict', asyn
   const agent = new FakeAgent()
   const transport = new SessionTransport({ ctx: fakeContext(agent), logger })
   await transport.send(agent as never, {
-    requestId: 'eval:1', text: 'first', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', summary: 's' },
+    requestId: 'eval:1', text: 'first', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', presentation: 'internal', summary: 's' },
   }, () => {})
   await assert.rejects(
     transport.send(agent as never, {
-      requestId: 'eval:1', text: 'second', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', summary: 's' },
+      requestId: 'eval:1', text: 'second', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', presentation: 'internal', summary: 's' },
     }, () => {}),
     /already exists with different content/,
   )
@@ -179,7 +179,7 @@ test('transport: an unconfirmed flush fails loudly so the Effect retries', async
   const transport = new SessionTransport({ ctx: fakeContext(agent, false), logger })
   await assert.rejects(
     transport.send(agent as never, {
-      requestId: 'eval:1', text: 'candidate', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', summary: 's' },
+      requestId: 'eval:1', text: 'candidate', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', presentation: 'internal', summary: 's' },
     }, () => {}),
     /flush was not confirmed/,
   )
@@ -187,7 +187,7 @@ test('transport: an unconfirmed flush fails loudly so the Effect retries', async
   // sending a second copy.
   const retry = new SessionTransport({ ctx: fakeContext(agent, true), logger })
   await retry.send(agent as never, {
-    requestId: 'eval:1', text: 'candidate', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', summary: 's' },
+    requestId: 'eval:1', text: 'candidate', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', presentation: 'internal', summary: 's' },
   }, () => {})
   assert.equal(agent.sent.length, 1)
 })
@@ -197,10 +197,10 @@ test('transport: authorize runs only when the message is actually sent', async (
   const transport = new SessionTransport({ ctx: fakeContext(agent), logger })
   let allowed = 0
   await transport.send(agent as never, {
-    requestId: 'eval:1', text: 'candidate', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', summary: 's' },
+    requestId: 'eval:1', text: 'candidate', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', presentation: 'internal', summary: 's' },
   }, () => { allowed += 1 })
   await transport.send(agent as never, {
-    requestId: 'eval:1', text: 'candidate', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', summary: 's' },
+    requestId: 'eval:1', text: 'candidate', mode: 'queue', source: { kind: 'quno-eval', form: 'relay', presentation: 'internal', summary: 's' },
   }, () => { allowed += 1 })
   assert.equal(allowed, 1)
 })

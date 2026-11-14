@@ -17,59 +17,124 @@ export type Tone = 'ok' | 'warn' | 'error' | 'idle'
 
 // ─────────────────────────────────────────────────────────────────── tasks
 
+/** The user-visible task vocabulary (design §4.2), mirrored from the Host projection. */
+export type TaskUserStatus =
+  | 'accepted'
+  | 'running'
+  | 'waiting'
+  | 'needs-you'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+  | 'dropped'
+
 /** Minimal task slice the grouping needs. */
 export interface TaskLike {
+  /** Legacy coarse status; used only when `presentationStatus` is absent. */
   readonly status: string
+  /** The unified user-facing status; absent on stale cached snapshots. */
+  readonly presentationStatus?: string
+}
+
+/**
+ * The task's user status: the projected field when present, otherwise a
+ * conservative fallback from the legacy coarse status (design §9.4: old wire
+ * rows fall back, never crash).
+ * @param task - the wire task slice.
+ * @returns the user status.
+ */
+export function taskUserStatus(task: TaskLike): TaskUserStatus {
+  switch (task.presentationStatus) {
+    case 'accepted':
+    case 'running':
+    case 'waiting':
+    case 'needs-you':
+    case 'done':
+    case 'failed':
+    case 'cancelled':
+    case 'dropped': return task.presentationStatus
+    default: break
+  }
+  switch (task.status) {
+    case 'running': return 'running'
+    case 'done': return 'done'
+    case 'failed': return 'failed'
+    case 'cancelled': return 'cancelled'
+    case 'interrupted': return 'needs-you'
+    case 'waiting': return 'waiting'
+    default: return 'done'
+  }
 }
 
 /** The three task buckets the list renders; empty buckets are not rendered. */
 export interface TaskGroups<T extends TaskLike> {
-  readonly needsAction: readonly T[]
-  readonly running: readonly T[]
+  readonly needsYou: readonly T[]
+  readonly active: readonly T[]
   readonly settled: readonly T[]
 }
 
 /**
- * Split tasks into "needs action", "running" and "settled". `failed` and
- * `interrupted` are actionable (they can be resumed); `done` and `cancelled`
- * are settled. An unrecognised status stays visible in the tail instead of
- * silently disappearing, and its label reads 未知状态.
+ * Split tasks into "needs you", "active" (accepted/running/waiting) and
+ * "settled". An unrecognised row stays visible in the tail instead of
+ * silently disappearing.
  * @param tasks - the wire task list.
  * @returns three buckets, each in wire order.
  */
 export function groupTasks<T extends TaskLike>(tasks: readonly T[]): TaskGroups<T> {
-  return {
-    needsAction: tasks.filter(task => task.status === 'failed' || task.status === 'interrupted'),
-    running: tasks.filter(task => task.status === 'running'),
-    settled: tasks.filter(task => task.status === 'done' || task.status === 'cancelled' || !isKnownTaskStatus(task.status)),
+  const needsYou: T[] = []
+  const active: T[] = []
+  const settled: T[] = []
+  for (const task of tasks) {
+    const status = taskUserStatus(task)
+    if (status === 'needs-you') needsYou.push(task)
+    else if (status === 'accepted' || status === 'running' || status === 'waiting') active.push(task)
+    else settled.push(task)
   }
+  return { needsYou, active, settled }
 }
 
-function isKnownTaskStatus(status: string): boolean {
-  return status === 'running' || status === 'done' || status === 'failed' || status === 'cancelled' || status === 'interrupted'
-}
-
-/** Locale key of one task status. */
-export function taskStatusKey(status: string): QunoLocaleKey {
+/** Locale key of one user status. */
+export function taskUserStatusKey(status: TaskUserStatus): QunoLocaleKey {
   switch (status) {
+    case 'accepted': return 'taskStatusAccepted'
     case 'running': return 'taskStatusRunning'
+    case 'waiting': return 'taskStatusWaiting'
+    case 'needs-you': return 'taskStatusNeedsYou'
     case 'done': return 'taskStatusDone'
     case 'failed': return 'taskStatusFailed'
-    case 'interrupted': return 'taskStatusInterrupted'
     case 'cancelled': return 'taskStatusCancelled'
-    default: return 'statusUnknown'
+    case 'dropped': return 'taskStatusDropped'
   }
 }
 
-/** Row tone of one task status. */
-export function taskTone(status: string): Tone {
-  switch (status) {
+/** Row tone of one user status. */
+export function taskTone(status: TaskLike | string): Tone {
+  const user = typeof status === 'string' ? status : taskUserStatus(status)
+  switch (user) {
+    case 'accepted':
     case 'running': return 'ok'
+    case 'waiting': return 'idle'
+    case 'needs-you': return 'warn'
     case 'done': return 'idle'
-    case 'failed':
-    case 'interrupted': return 'warn'
-    case 'cancelled': return 'idle'
+    case 'failed': return 'error'
+    case 'cancelled':
+    case 'dropped': return 'idle'
     default: return 'idle'
+  }
+}
+
+/** Locale key of one coarse activity bucket. */
+export function taskActivityKey(kind: string | null | undefined): QunoLocaleKey | null {
+  switch (kind) {
+    case 'recent-groups': return 'taskActivityRecentGroups'
+    case 'read-messages': return 'taskActivityReadMessages'
+    case 'read-file': return 'taskActivityReadFile'
+    case 'read-web': return 'taskActivityReadWeb'
+    case 'summarize': return 'taskActivitySummarize'
+    case 'waiting-user': return 'taskActivityWaitingUser'
+    case 'waiting-event': return 'taskActivityWaitingEvent'
+    case 'working': return 'taskActivityWorking'
+    default: return null
   }
 }
 
@@ -77,50 +142,64 @@ export function taskTone(status: string): Tone {
 export interface TaskSectionFlags {
   readonly plan: boolean
   readonly prompt: boolean
+  readonly question: boolean
+  readonly activity: boolean
   readonly result: boolean
   readonly artifacts: boolean
   readonly error: boolean
-  readonly child: boolean
-  readonly resume: boolean
-  readonly cancel: boolean
+  readonly record: boolean
+  readonly retry: boolean
+  readonly stop: boolean
   readonly cancelledNote: boolean
 }
 
 /** Minimal task slice the section rules read. */
 export interface TaskSectionInput {
   readonly status: string
+  readonly presentationStatus?: string
+  readonly activityKind?: string | null
+  readonly lastActivityAt?: number | null
   readonly plan: string | null
   readonly prompt: string | null
   readonly result: string | null
   readonly resultDigest: string | null
+  readonly question?: { readonly question: string } | null
   readonly artifacts: readonly unknown[]
-  readonly childSessionId: string | null
+  readonly childSessionId?: string | null
   readonly error: unknown | null
+  readonly canRetry?: boolean
+  readonly canCancel?: boolean
+  readonly canViewActivity?: boolean
 }
 
 /**
  * Decide which task-detail sections exist. A section is shown only when the
  * task status calls for it AND the record actually has the content: an empty
- * heading above nothing is worse than no heading.
+ * heading above nothing is worse than no heading. The execution record is
+ * reachable in EVERY state when the session resolves — running included.
  * @param task - the wire task.
  * @returns one flag per section.
  */
 export function taskSections(task: TaskSectionInput): TaskSectionFlags {
-  const running = task.status === 'running'
-  const done = task.status === 'done'
-  const failed = task.status === 'failed'
-  const interrupted = task.status === 'interrupted'
-  const cancelled = task.status === 'cancelled'
+  const status = taskUserStatus(task)
+  const done = status === 'done'
+  const failed = status === 'failed'
+  const needsYou = status === 'needs-you'
+  const cancelled = status === 'cancelled'
+  const open = !done && !failed && !cancelled && status !== 'dropped'
   const hasResult = task.result !== null || task.resultDigest !== null
+  const canViewActivity = task.canViewActivity ?? task.childSessionId !== null
   return {
-    plan: running && task.plan !== null && task.plan !== '',
-    prompt: (running || failed || cancelled) && task.prompt !== null && task.prompt !== '',
-    result: done && hasResult,
-    artifacts: done && task.artifacts.length > 0,
-    error: (failed || interrupted) && task.error !== null,
-    child: (done || cancelled) && task.childSessionId !== null,
-    resume: failed || interrupted,
-    cancel: running || failed || interrupted,
+    plan: open && task.plan !== null && task.plan !== '',
+    prompt: task.prompt !== null && task.prompt !== '',
+    question: needsYou && task.question !== null,
+    activity: open && task.activityKind != null,
+    result: hasResult,
+    artifacts: task.artifacts.length > 0,
+    error: (failed || needsYou) && task.error !== null,
+    record: canViewActivity,
+    retry: task.canRetry ?? (failed || needsYou),
+    stop: task.canCancel ?? open,
     cancelledNote: cancelled,
   }
 }

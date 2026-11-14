@@ -17,6 +17,7 @@ import type { QunoTranslate } from './locales.ts'
 import type { QunoClientStore, QunoSnapshot } from './store.ts'
 import type { QunoPanelView } from './right-tab.ts'
 import { narrowPanelParams } from './right-tab.ts'
+import { taskUserStatus } from './panel-state.ts'
 import { CollectorDetail, collectorContext } from './collector-detail.tsx'
 import { CollectorListPage } from './collector-list.tsx'
 import { AttentionPage } from './attention-view.tsx'
@@ -47,7 +48,10 @@ type PanelTabProps = PropsRuntime<'sidebar.right.pane.tab'> & QunoPanelInjected
 /** The chip title: the Quno name, with the running-task count while any runs. */
 export function QunoPanelTitle(props: PropsRuntime<'sidebar.right.pane.tab.title'> & QunoPanelInjected): React.ReactElement {
   const snapshot = React.useSyncExternalStore(props.store.subscribe, props.store.getSnapshot, props.store.getSnapshot)
-  const running = snapshot.state?.tasks.filter(task => task.status === 'running').length ?? 0
+  const running = snapshot.state?.tasks.filter(task => {
+    const status = taskUserStatus(task)
+    return status === 'running' || status === 'accepted' || status === 'waiting'
+  }).length ?? 0
   return (
     <span style={styles.titleChip}>
       <QunoMark size={14} />

@@ -97,7 +97,7 @@ export const exchangeCases: readonly EvalCase[] = [
         toolTurn('quno_eval', {}, 'wb-eval-1'),
         toolTurn('quno_eval_decide', { kind: 'accept', title: '整理周报', goal: '整理周报；缺少信息时提问。' }, 'wb-decide-1'),
         textTurn('已受理。'),
-        textTurn('后台在整理周报，需要你确认使用哪个账号。'),
+        textTurn('周报正在整理，需要你确认使用哪个账号。'),
       ],
       worker: [
         toolTurn('quno_worker_report', { state: 'blocked', summary: '缺少账号信息。', question: { question: '用哪个账号？' } }, 'wb-worker-blocked-1'),
@@ -113,7 +113,7 @@ export const exchangeCases: readonly EvalCase[] = [
       // The answer routes through quno_task note with the REAL ticket id; all
       // three turns (note, ack, final relay) queue BEFORE the human settles.
       { kind: 'script', role: 'router', build: (_rt, drv) => toolTurn('quno_task', { action: 'note', taskId: drv.activeTicketId ?? '', note: '用账号 B。' }, 'wb-note-1') },
-      { kind: 'script', role: 'router', build: () => textTurn('已把你的回答转给后台。') },
+      { kind: 'script', role: 'router', build: () => textTurn('已把你的回答转给这个任务。') },
       { kind: 'script', role: 'router', build: () => textTurn('周报整理完成：已用账号 B 完成。') },
       { kind: 'human', text: '用账号 B。' },
       { kind: 'settle' },
@@ -157,8 +157,8 @@ export const exchangeCases: readonly EvalCase[] = [
       router: [
         toolTurn('quno_eval', {}, 'wh-eval-1'),
         toolTurn('quno_eval_decide', { kind: 'accept', title: '整理需求', goal: '整理客户需求。' }, 'wh-decide-1'),
-        textTurn('已受理。'),
-        textTurn('需求初稿完成，任务继续跟进。'),
+        textTurn('已受理，我来整理。'),
+        // NOTE: the progress report no longer relays (design §8.5).
         toolTurn('quno_eval', {}, 'wh-eval-2'),
         toolTurn('quno_eval_decide', { kind: 'ignore', reason: '超范围消息，交回后判断为无关' }, 'wh-decide-2'),
         textTurn('交回的消息重新判断过，与本任务无关，已忽略。'),
@@ -397,7 +397,7 @@ export const exchangeCases: readonly EvalCase[] = [
           title: '整理云之家会话',
           prompt: '通过只读云之家采集器查询最近会话并整理。',
         }, 'ow-delegate-1'),
-        textTurn('我已交给后台处理，好了告诉你。'),
+        textTurn('好，我来整理会话，完成后告诉你。'),
         textTurn('三条查询都被采集器以白名单理由拒绝，无法整理会话。'),
       ],
       worker: [],
@@ -450,7 +450,7 @@ export const exchangeCases: readonly EvalCase[] = [
           title: '整理云之家最近会话',
           prompt: '通过只读云之家通道查询最近 20 个会话并整理；通道不可用时明确报告，不要编造结果。',
         }, 'tu-delegate-1'),
-        textTurn('我已交给后台处理，好了告诉你。'),
+        textTurn('好，我来整理会话，完成后告诉你。'),
         textTurn('当前没有已接入的云之家按需查询通道，无法查询最近会话；需要先接入该能力或由你提供命令输出。'),
       ],
       worker: [

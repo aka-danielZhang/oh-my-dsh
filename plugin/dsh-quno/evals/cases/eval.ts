@@ -72,11 +72,11 @@ export const evalCases: readonly EvalCase[] = [
       router: [
         toolTurn('quno_eval', {}, 'ai-eval-1'),
         toolTurn('quno_eval_decide', { kind: 'accept', title: '调查 CI 失败', goal: '读取 fixture 里的 report.json，给出失败原因摘要。' }, 'ai-decide-1'),
-        textTurn('已受理，正在后台调查。'),
+        textTurn('已受理，我来调查。'),
         toolTurn('quno_notify', {
           title: 'CI 失败已查明',
           summary: 'eval-pipeline 的 deploy 步骤失败',
-          body: '后台调查完成：report.json 显示 eval-pipeline 的 deploy 步骤失败。',
+          body: '调查完成：report.json 显示 eval-pipeline 的 deploy 步骤失败。',
           why: '授权的自动调查有了结果，值得告诉你。',
         }, 'ai-notify-1'),
         textTurn('调查完成，结果已经通过通知发给你。'),
@@ -136,11 +136,11 @@ export const evalCases: readonly EvalCase[] = [
     },
     steps: [
       { kind: 'script', role: 'router', build: () => toolTurn('quno_task', { title: '读取 notes.md', prompt: '读取 notes.md 并报告截止日期与负责人。' }, 'sr-delegate-1') },
-      { kind: 'script', role: 'router', build: () => textTurn('已交给后台，好了告诉你。') },
+      { kind: 'script', role: 'router', build: () => textTurn('好，我来读取这份文件，整理好后告诉你。') },
       { kind: 'script', role: 'worker', build: () => toolTurn('read', { path: 'notes.md' }, 'sr-worker-read-1') },
       { kind: 'script', role: 'worker', build: () => toolTurn('quno_worker_report', { state: 'ready', summary: 'notes.md：截止日期 2026-11-20，负责人张伟。' }, 'sr-worker-report-1') },
       { kind: 'script', role: 'worker', build: () => textTurn('已完成。') },
-      { kind: 'script', role: 'router', build: () => textTurn('后台读完了：截止日期 2026-11-20，负责人是张伟。') },
+      { kind: 'script', role: 'router', build: () => textTurn('读好了：截止日期 2026-11-20，负责人是张伟。') },
       { kind: 'human', text: '帮我读一下 notes.md，告诉我截止日期和负责人。' },
       { kind: 'script', role: 'router', build: (_rt, drv) => toolTurn('quno_task', { action: 'status', taskId: drv.activeTicketId ?? '' }, 'sr-status-1') },
       { kind: 'script', role: 'router', build: () => textTurn('任务已完成，结果已经回流。') },

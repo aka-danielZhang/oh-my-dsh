@@ -6,13 +6,23 @@
  * @module dsh-quno/client/view-model
  */
 
+import { taskUserStatus } from './panel-state.ts'
+
 /** Minimal face of `QunoWireState` these derivations read. */
 export interface StateSlice {
   readonly quno: { readonly mainSessionId: string | null; readonly mutedUntil: number | null }
   readonly main: { readonly sessionId: string | null; readonly state: string }
   readonly collectors: readonly { readonly desiredState: string; readonly health: string; readonly stale: boolean }[]
   readonly attention: readonly { readonly status: string }[]
-  readonly tasks: readonly { readonly status: string }[]
+  readonly tasks: readonly { readonly status: string; readonly title?: string; readonly presentationStatus?: string }[]
+}
+
+/** Tasks still in flight, in the user-status vocabulary (accepted included). */
+function inFlight(tasks: StateSlice['tasks']): StateSlice['tasks'] {
+  return tasks.filter(task => {
+    const status = taskUserStatus(task)
+    return status === 'running' || status === 'accepted' || status === 'waiting'
+  })
 }
 
 /** The contact row's presence line. */
@@ -43,7 +53,7 @@ export interface PanelCounts {
 /** Enabled collectors that are not cleanly healthy, plus the actionable counts. */
 export function panelCounts(slice: StateSlice): PanelCounts {
   return {
-    runningTasks: slice.tasks.filter(task => task.status === 'running').length,
+    runningTasks: inFlight(slice.tasks).length,
     attentionOpen: slice.attention.filter(item => item.status === 'open' || item.status === 'waiting' || item.status === 'snoozed').length,
     collectorAlarms: slice.collectors.filter(collectors => collectors.desiredState === 'enabled' && (collectors.health !== 'healthy' || collectors.stale)).length,
   }
@@ -154,7 +164,7 @@ export interface CapsuleSummary {
  * @returns rows in the fixed tasks → attention → activity order.
  */
 export function capsuleSummaries(slice: CapsuleSlice): readonly CapsuleSummary[] {
-  const running = slice.tasks.filter(task => task.status === 'running')
+  const running = inFlight(slice.tasks)
   const attention = slice.attention.filter(item => item.status === 'open' || item.status === 'waiting' || item.status === 'snoozed')
   const alarms = slice.collectors.filter(collectors => collectors.desiredState === 'enabled' && (collectors.health !== 'healthy' || collectors.stale))
   const rows: CapsuleSummary[] = []

@@ -4,6 +4,7 @@ import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
 import { turnKindOf, currentEvalId } from '../src/app/turn-kind.ts'
 import { WORKER_TOOL_NAMES } from '../src/app/worker-tools.ts'
+import { presentTask } from './presentation.ts'
 import type { EvalCandidateView, QunoServiceFace, RouteItem, TicketView } from './host-face.ts'
 import type { AttentionAct } from './contracts.ts'
 // src/preset.ts
@@ -129,7 +130,7 @@ const QUNO_GUIDANCE = `# 你是 Quno
 ## 你收到什么
 - 用户消息是 Human Turn。
 - 「Quno 评估候选」是程序注入的自动回合：某个来源线程有新事件，需要你判断要不要做事。先用 quno_eval 读候选，再用 quno_eval_decide 提交决定。
-- 「Quno 任务报告」是后台 worker 的结构化报告：转述结果、影响和下一步，不要重新执行工作。
+- 「Quno 任务报告」是你自己接受的任务的结果回流：以第一人称转述结果、影响和下一步，不要重新执行工作。
 - 「Quno 主动汇报」是获准的通知：只做自然表达。
 
 ## Eval 回合的纪律
@@ -140,19 +141,20 @@ const QUNO_GUIDANCE = `# 你是 Quno
 - 不要等待异步结果；需要的读取先用 quno_read 的 collectors 列表查到可用采集器端点（不要猜端点名），再用 quno_exchange 发起，结果会作为后续输入回来。
 
 ## 你只路由，不执行
-- 凡需要独立执行或依赖外部证据的任务，都必须交给后台 worker：Human Turn 用 quno_task start；Eval 回合用 quno_eval_decide accept。
-- 不得用"很简单""只查一下""很快"作为自己执行的理由；也不要在同一轮自己补做。
-- quno_task 返回后立即结束本轮，只说"我已交给后台处理，好了告诉你"；不要虚构进度。
-- 用户追问进度或结果时，必须先调 quno_task（action=status 或 result）读取持久记录，再依据记录回答；不要凭对话记忆回答，也不要让 worker 重做已完成的任务。
-- 子任务完成会以「Quno 任务报告」回流；失败或中断如实说明，需要时请用户选择续跑或放弃。
-- 首版子任务只读：不要让它发消息、下单或改文件。
+- 凡需要独立执行或依赖外部证据的任务，都必须交给任务执行层：Human Turn 用 quno_task start；Eval 回合用 quno_eval_decide accept。
+- 接到任务后以第一人称告诉用户"我来做"，例如「好，我来整理，完成后在这里告诉你」；不要描述后台、Worker、子会话或任何内部工具，用户只认识你和"任务"。
+- quno_task 返回后立即结束本轮；任务结果到达后再依据持久结果回答。排队、requestId、工具入队都不是查询结果，不要把"已接受"说成"已经查到"。
+- 不要主动汇报进度：普通进展只更新任务面板；只有结果、需要用户回答的问题、失败和用户主动停止才值得说话。同一结果只汇报一次，不要重复。
+- 用户追问进度或结果时，必须先调 quno_task（action=status 或 result）读取持久记录，再依据记录回答；不要凭对话记忆回答，也不要让任务重做已完成的工作。
+- 任务失败时如实说明能确认的事实与下一步（例如让用户重试或补充信息），不要猜测桌面更新、并发等根因，也不要暴露原始错误码或内部参数。
+- 任务只读：不要让它发消息、下单或改文件。
 
 ## 关注事项
 - 用户说"我已经处理了/这个不用管了/一小时后提醒"时，先用 quno_attention 列出事项，再带 expectedRevision 提交 act；不要凭记忆改状态。
 - 只有实质变化（截止时间、责任人、要求的行动、阻塞）才值得再次提醒。
 
-## 阻塞任务的回答
-- 后台任务 blocked/waiting 并提出具体问题后，用户在对话里给出的回答必须用 quno_task note（带原 taskId）转发给同一个任务，让它在原 Mandate 下继续；不要为答案新开任务，也不要自己替任务作答。
+## 需要用户回答的任务
+- 任务 blocked/waiting 并提出具体问题后，向用户转述这个问题；用户在对话里给出的回答必须用 quno_task note（带原 taskId）转发给同一个任务，让它在原授权下继续；不要为答案新开任务，也不要自己替任务作答。
 
 ## 短期指令 vs 长期偏好
 - "今天别提醒我""接下来两小时别打扰"这类短期指令用 quno_mute，只进入 Quno 自己的状态，不要写进长期记忆。
@@ -176,7 +178,7 @@ export function apply(ctx: Context): void {
 	const tools: (() => void)[] = []
 	tools.push(ctx.tools.register(defineTool({
 		name: "quno_recall",
-		description: "检索 Quno 的永久对话历史与后台任务记录，返回带时间与位置的摘录；用于回答\"之前那个方案\"\"上次说的截止时间\"这类需要历史细节的问题。",
+		description: "检索 Quno 的永久对话历史与任务记录，返回带时间与位置的摘录；用于回答\"之前那个方案\"\"上次说的截止时间\"这类需要历史细节的问题。",
 		parameters: {
 			query: {
 				type: "string",
@@ -374,7 +376,7 @@ export function apply(ctx: Context): void {
 	})));
 	tools.push(ctx.tools.register(defineTool({
 		name: "quno_task",
-		description: "主对话委派/管理后台任务的唯一入口。Human Turn 用 start 立即交给后台 worker；追问进度用 status/result；需要停止、续跑或补充备注时用 stop/retry/note。Eval 回合不要用它创建无授权任务。",
+		description: "接受、查询和管理你（Quno）接下的任务。Human Turn 用 start 接下任务并立即结束本轮；追问进度用 status/result；需要停止、续跑或转发用户回答时用 stop/retry/note。Eval 回合不要用它创建无授权任务。",
 		parameters: {
 			action: {
 				type: "string",
@@ -463,9 +465,9 @@ export function apply(ctx: Context): void {
 				return {
 					taskId: ticket.id,
 					title: ticket.title,
-					status: ticket.status,
+					status: ticket.presentationStatus,
 					executorSessionId: ticket.executorSessionId,
-					message: `已在后台开始「${ticket.title}」。完成后我会把结果告诉你。`
+					message: `任务「${ticket.title}」已接受（taskId=${ticket.id}）。请立即用第一人称向用户确认接手，例如「好，我来${ticket.title}，完成后在这里告诉你」，然后结束本轮；不要提到后台、Worker 或内部工具，也不要承诺具体时间。`
 				};
 			}
 			// status/result without a taskId default to the MOST RECENT ticket:
@@ -480,18 +482,20 @@ export function apply(ctx: Context): void {
 					const report = assignment?.report ?? null;
 					return {
 						id: entry.id,
-						status: ended !== null
-							? ended.outcome === 'failed' ? 'failed'
-								: ended.outcome === 'stopped' ? 'cancelled' : 'done'
-							: assignment?.state === 'running' ? 'running' : entry.question !== null ? 'interrupted' : 'waiting',
+						presentation: presentTask({
+							ticket: entry,
+							...assignment === undefined ? { assignment: null } : { assignment },
+							latestRun: assignment === undefined ? null : repo.listWorkerRunsByAssignment(assignment.id).at(-1) ?? null,
+						}),
 						result: report?.summary ?? null,
 					};
 				};
 				const views = tickets.map(view);
-				const latest = views.find((entry) => entry.status === 'running' || entry.status === 'waiting')
-					?? views.find((entry) => entry.status !== 'waiting');
-				if (latest === undefined) throw new Error('当前没有可查询的任务');
-				args = { ...args, taskId: latest.id };
+				const open = views.find((entry) => entry.presentation.status === 'needs-you')
+					?? views.find((entry) => entry.presentation.status === 'running' || entry.presentation.status === 'accepted' || entry.presentation.status === 'waiting')
+					?? views.find((entry) => entry.presentation.status !== 'dropped');
+				if (open === undefined) throw new Error('当前没有可查询的任务');
+				args = { ...args, taskId: open.id };
 			}
 			if (args.taskId === void 0) throw new Error(`${action} 需要 taskId`);
 			let ticket;
@@ -504,7 +508,7 @@ export function apply(ctx: Context): void {
 			return {
 				taskId: ticket.id,
 				title: ticket.title,
-				status: ticket.status,
+				status: ticket.presentationStatus,
 				executorSessionId: ticket.executorSessionId,
 				...action === "result" && ticket.result !== null ? { result: ticket.result } : {},
 				...ticket.error === null ? {} : { error: ticket.error },
@@ -1174,26 +1178,31 @@ function turnRestriction(exec: ToolExecution): string | undefined {
 		if (!NOTIFICATION_TURN_TOOLS.has(exec.name)) return "通知回合只做自然表达，不执行领域命令";
 	}
 }
-const TICKET_STATUS_LABELS = {
+const TASK_PRESENTATION_LABELS = {
+	accepted: "已接受，正在等待执行资源",
 	running: "进行中",
+	waiting: "进行中，在等后续信息",
+	"needs-you": "需要用户回答",
 	done: "已完成",
-	failed: "失败",
-	cancelled: "已取消",
-	interrupted: "等待你处理",
-	waiting: "等待中"
+	failed: "未完成",
+	cancelled: "已停止",
+	dropped: "已结束（无需处理）"
 };
 function ticketStatusMessage(ticket: TicketView) {
-	const base = `任务「${ticket.title}」当前状态：${TICKET_STATUS_LABELS[ticket.status]}。`;
-	if (ticket.status === "running") return `${base}结果尚未回流。`;
-	if (ticket.status === "done") return `${base}结果已生成并回流。`;
-	if (ticket.question !== null) return `${base}需要你回答：${ticket.question.question}`;
-	return ticket.error === null ? base : `${base}${ticket.error.message}`;
+	const label = TASK_PRESENTATION_LABELS[ticket.presentationStatus] ?? ticket.presentationStatus;
+	const base = `任务「${ticket.title}」当前状态：${label}。`;
+	if (ticket.presentationStatus === "needs-you" && ticket.question !== null) return `${base}需要用户回答：${ticket.question.question}`;
+	if (ticket.presentationStatus === "done") return `${base}结果已生成。请以第一人称向用户转述，不要重复汇报已说过的结果。`;
+	if (ticket.presentationStatus === "failed") return `${base}${ticket.error === null ? "" : `可确认的事实：${ticket.error.message}`}。请说明事实与下一步（重试或补充信息），不要猜测根因。`;
+	if (ticket.presentationStatus === "running" || ticket.presentationStatus === "waiting" || ticket.presentationStatus === "accepted") return `${base}结果尚未生成；普通进展不要主动汇报，只更新任务面板。`;
+	return base;
 }
 function ticketResultMessage(ticket: TicketView) {
-	if (ticket.status === "done") return ticket.result === null ? `任务「${ticket.title}」已完成，但没有留下文本结果。` : `任务「${ticket.title}」已完成，结果如下：\n${ticket.result}`;
-	if (ticket.status === "running" || ticket.status === "waiting") return `任务「${ticket.title}」仍在进行，暂无最终结果。`;
-	const reason = ticket.error === null ? "" : `：${ticket.error.message}`;
-	return `任务「${ticket.title}」当前为${TICKET_STATUS_LABELS[ticket.status]}，暂无最终结果${reason}`;
+	if (ticket.presentationStatus === "done") return ticket.result === null ? `任务「${ticket.title}」已完成，但没有留下文本结果。` : `任务「${ticket.title}」已完成，结果如下：\n${ticket.result}`;
+	if (ticket.presentationStatus === "needs-you" && ticket.question !== null) return `任务「${ticket.title}」需要用户回答：${ticket.question.question}`;
+	if (ticket.presentationStatus === "running" || ticket.presentationStatus === "waiting" || ticket.presentationStatus === "accepted") return `任务「${ticket.title}」仍在进行，暂无最终结果。`;
+	if (ticket.presentationStatus === "failed") return `任务「${ticket.title}」未完成${ticket.error === null ? "" : `：${ticket.error.message}`}。请说明事实与下一步。`;
+	return `任务「${ticket.title}」当前为${TASK_PRESENTATION_LABELS[ticket.presentationStatus] ?? ticket.presentationStatus}，暂无最终结果。`;
 }
 function renderCandidate(candidate: EvalCandidateView) {
 	const lines = [];
@@ -1235,7 +1244,7 @@ function renderStatus(status: ReturnType<QunoServiceFace['statusSummary']>) {
 		`主对话：${status.mainSession}；静默：${status.mutedUntil === null ? "否" : `到 ${new Date(status.mutedUntil).toISOString()}`}`,
 		`关注事项：进行中 ${String(status.attention.open)}，等待 ${String(status.attention.waiting)}，延后 ${String(status.attention.snoozed)}`,
 		`待提醒消息：${String(status.notices.pending + status.notices.inboxDurable)}；阻塞 ${String(status.notices.blocked)}`,
-		`后台任务：进行中 ${String(status.tasks.running)}，等待处理 ${String(status.tasks.interrupted)}`
+		`任务：进行中 ${String(status.tasks.running)}，需要处理 ${String(status.tasks.interrupted)}`
 	];
 	if (!status.watchdog.healthy) parts.push(`运行时健康：${status.watchdog.findings.map((finding: { code: string; count: number }) => `${finding.code}(${String(finding.count)})`).join("，")}`);
 	if (status.collectors.length > 0) parts.push(`来源：${status.collectors.map((collectors: { label: string; type: string; health: string; stale?: boolean }) => `${collectors.label}=${collectors.stale ? "陈旧" : collectors.health}`).join("，")}`);

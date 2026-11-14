@@ -26,7 +26,8 @@ Host 行常驻；`quno` 的 agent preset 由 Host 在启动时**程序化注册*
 - **会话列表过滤**：Quno 主会话与 `quno-exec-*` Executor 会话均不出现在普通工作区、扁平列表或搜索中；仍可从 Quno 入口、任务卡和运行记录打开。支持 `uiWorkspace.registerSessionVisibilityFilter` 的 runtime 负责隐藏主会话，旧 runtime 仅缺少这项新增过滤，其余功能不变。
 - **安静时段与频控**：默认 22:00–08:00 静默、同主题最小间隔 10 分钟、每小时最多 3 条；`quno_mute` 可临时让出。
 - **反馈**：通知/任务卡提供「已处理 / 稍后 / 关闭」；自然语言反馈由主对话模型调用 `quno_attention` 吸收。汇报卡按携带 `notificationId` 的那条消息绑定到所属 Turn，重载后仍可操作；历史通知按需读取（`noticeDetail`）。
-- **只读委派**：每个 Ticket 复用稳定的 `quno-exec-<ticketId>` 只读子会话（`quno-task` preset，无 shell、无写工具）；Worker 用 `quno_worker_report` 结构化返回结论、产物与待答问题，Report 经 Router relay 进入通知 outbox。停止/重试先落库再处理激活，晚到写入不会改回状态。
+- **只读委派**：每个 Ticket 复用稳定的 `quno-exec-<ticketId>` 只读子会话（`quno-task` preset，无 shell、无写工具）；Worker 用 `quno_worker_report` 结构化返回结论、产物与待答问题。沟通准入：只有结果、失败与需要回答的提问进入主对话（Quno 第一人称转述），普通进度只更新任务面板。停止/重试/回答先落库再处理激活，晚到写入不会改回状态。
+- **任务中心与执行记录**：右栏「任务」按 需要你 / 进行中 / 已结束 分组；任务详情含当前活动、需要你（回答入口）、结果产物与**只读执行记录**（全状态可进，运行中默认展开；Host 侧白名单投影 + 脱敏 + 有界分页，无输入框），诊断折叠里才提供原始执行会话入口。程序注入的输入在排队条与消息流中都不显示（`presentation: 'internal'` + 内部 kind 注册表双信号过滤），模型输入与持久日志完全保留。
 - **结构化只读 CLI**：Worker 用 `quno_cli_call` 调用插件登记的能力（capability + operation + 声明参数），结果在**同一回合**返回，本地短查询不必走异步 Exchange。授权与校验在 Host 的 `qunoCli` broker 内：只放行 `access: 'read'`、按 Ticket `Mandate` 快照授权、参数闭表校验（`profile`/`argv` 进不来）、并发/超时/输出上限强制，全程不经 shell。能力必须先从 `quno_read.cliCapabilities` 发现；采集实例暂停不影响显式授权的只读查询。异步 `quno_exchange` 只留给真正远端/异步的采集器查询面，其失败与过期都会带原因回流并被唤醒一次。
 - **采集器接入**：字段驱动表单（数值边界、静态选项、多值、远程选项、密钥留空保持）；云之家「最近群聊」经 `collectorOptions` 发现，仅多人群选可选。接入向导只承诺「已创建，正在首次同步」，健康以真实结果更新。
 - **真实探测**：`probeCollector` 只检查可达性，不重启实例、不改配置版本、不推进检查点、不写健康，也不代表同步成功。

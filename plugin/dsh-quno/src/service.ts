@@ -25,6 +25,7 @@ import {
   buildNoticeDetail,
   buildQunoState,
   buildRecentEvents,
+  buildTaskActivity,
   buildThreadDetail,
   buildTicketDetail,
   buildTriggerDetail,
@@ -53,6 +54,8 @@ import { QunoCollectorsService } from './collectors.ts'
 import { Outbox, type HistoryReader, type MainConversationFace } from './outbox.ts'
 import { registerQunoPresets } from './presets.ts'
 import { recall, type RecallRequest, type RecallResult } from './recall.ts'
+import { presentTask } from './presentation.ts'
+import { projectTaskActivity } from './activity.ts'
 import type { AttentionAct } from './contracts.ts'
 import type {
   EvalCandidateView,
@@ -74,6 +77,7 @@ import type {
   QunoWireState,
   CollectorOptionsPageWire,
   CollectorProbeWire,
+  TaskActivityWire,
   ThreadDetailWire,
   TicketDetailWire,
   TriggerDetailWire,
@@ -1406,13 +1410,18 @@ export class QunoHost implements QunoServiceFace {
     return buildExchangeDetail(this, request.exchangeId)
   }
 
-  /** Resume, abandon or cancel an open Ticket. */
+  /** Resume, abandon or cancel an open Ticket; `answer` forwards the user's reply into the same Ticket. */
   async taskCommandForClient(request: {
     readonly taskId: string
-    readonly action: 'resume' | 'abandon' | 'cancel'
+    readonly action: 'resume' | 'abandon' | 'cancel' | 'answer'
+    readonly text?: string
   }): Promise<QunoWireState> {
     if (request.action === 'cancel' || request.action === 'abandon') {
       this.engine.stopTicket({ ticketId: request.taskId, by: 'human', reason: `user ${request.action}`, now: this.now() })
+    } else if (request.action === 'answer') {
+      const text = request.text?.trim() ?? ''
+      if (text === '') throw new QunoDomainError('answer-required', '回答内容不能为空')
+      this.noteTicket(request.taskId, text)
     } else {
       this.engine.retryTicket({ ticketId: request.taskId, now: this.now() })
     }
@@ -1420,9 +1429,23 @@ export class QunoHost implements QunoServiceFace {
     return await this.state()
   }
 
-  /** Resume or abandon an open Ticket. */
-  async taskCommand(request: { readonly taskId: string; readonly action: 'resume' | 'abandon' | 'cancel' }): Promise<QunoWireState> {
+  /** Resume, answer or abandon an open Ticket. */
+  async taskCommand(request: { readonly taskId: string; readonly action: 'resume' | 'abandon' | 'cancel' | 'answer'; readonly text?: string }): Promise<QunoWireState> {
     return await this.taskCommandForClient(request)
+  }
+
+  /**
+   * One page of a task's read-only execution record (design §9.3). The
+   * executor session is resolved from the ticket's latest assignment — never
+   * from a caller-supplied session id — and the projection happens on the
+   * Host: whitelist event types, redacted arguments, bounded text.
+   */
+  async taskActivityForClient(request: {
+    readonly taskId: string
+    readonly cursor?: number
+    readonly limit?: number
+  }): Promise<TaskActivityWire> {
+    return await buildTaskActivity(this, request)
   }
 
   /** Short-term mute from the UI. */
@@ -1461,12 +1484,30 @@ export class QunoHost implements QunoServiceFace {
     return currentEvalId(this.mainAgent())
   }
 
+  /**
+   * The session-history reader for on-demand read-only projections (the
+   * execution record). Optional in composed runtimes; callers degrade to an
+   * explicit "unavailable" note instead of guessing.
+   */
+  sessionReader(): {
+    readSession(sessionId: string): Promise<{ events: readonly { readonly type: string; readonly seq: number; readonly time: number; readonly data: unknown }[] }>
+  } | undefined {
+    return this.ctx.get('sessionQuery') as
+      | { readSession(sessionId: string): Promise<{ events: readonly { readonly type: string; readonly seq: number; readonly time: number; readonly data: unknown }[] }> }
+      | undefined
+  }
+
   private ticketView(ticketId: string): TicketView {
     const ticket = this.repo.getTicket(ticketId)
     if (ticket === undefined) throw new QunoStateError('unknown-task', `任务 ${ticketId} 不存在`)
     const assignment = this.repo.findActiveAssignment(ticket.id) ?? this.repo.listAssignmentsByTicket(ticket.id).at(-1)
     const report = assignment?.report ?? null
     const ended = ticket.ended
+    const presentation = presentTask({
+      ticket,
+      ...(assignment === undefined ? { assignment: null } : { assignment }),
+      latestRun: assignment === undefined ? null : this.repo.listWorkerRunsByAssignment(assignment.id).at(-1) ?? null,
+    })
     const status: TicketView['status'] = ended !== null
       ? ended.outcome === 'completed' ? 'done'
         : ended.outcome === 'failed' ? 'failed'
@@ -1486,6 +1527,7 @@ export class QunoHost implements QunoServiceFace {
       title: ticket.title,
       goal: ticket.goal,
       status,
+      presentationStatus: presentation.status,
       mode: ticket.mode,
       executorSessionId: assignment?.executorSessionId ?? null,
       result,
