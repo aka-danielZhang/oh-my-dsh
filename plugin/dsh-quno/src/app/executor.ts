@@ -24,6 +24,7 @@ import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentRegistry } from '@deepseek-ai/dsh-agent'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import { EXECUTOR_PRESET, EXECUTOR_SESSION_PREFIX } from '../presentation.ts'
 import { WORKER_BOUNDARY, registerWorkerTools, ticketIdFromExecutorSession } from './worker-tools.ts'
 import type { WorkerCliFace } from './worker-tools.ts'
 import { EffectRetryError } from './effects.ts'
@@ -39,8 +40,8 @@ import type {
 } from '../core/model.ts'
 import type { CollectorEndpointView } from '../types.ts'
 
-/** Child preset id registered by this plugin. */
-export const EXECUTOR_PRESET = 'quno-task'
+/** Child preset id registered by this plugin (shared constant, see presentation.ts). */
+export { EXECUTOR_PRESET }
 
 /** Suggestions per WorkerRun. */
 export const DEFAULT_MAX_WORKERS = 4
@@ -496,7 +497,7 @@ export class Executor {
         ...(this.deps.resolveExchangeResponder === undefined ? {} : { resolveExchangeResponder: this.deps.resolveExchangeResponder }),
         ...(this.deps.listCollectors === undefined ? {} : { listCollectors: this.deps.listCollectors }),
         ...(this.deps.cli === undefined ? {} : { cli: this.deps.cli }),
-      }, { ticketId, executorSessionId: `quno-exec-${ticketId}` })
+      }, { ticketId, executorSessionId: `${EXECUTOR_SESSION_PREFIX}${ticketId}` })
       const presets = this.deps.ctx.get('agentPresets') as unknown as PresetRegistryFace | undefined
       if (presets !== undefined) {
         try {

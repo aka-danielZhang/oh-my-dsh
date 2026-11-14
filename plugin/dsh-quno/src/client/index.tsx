@@ -46,7 +46,10 @@ import { QunoSettingsSection } from './settings.tsx'
 import { QunoMainMarker, QunoPresetLabelShadow } from './marker.tsx'
 import { QunoPanelTab, QunoPanelTitle } from './panel.tsx'
 import { QunoCapsule } from './capsule.tsx'
-import { QunoHeaderIdentity } from './header-identity.tsx'
+import { QunoWorkEntry } from './work-entry.tsx'
+import { QunoLeadingIdentity, QunoWorkerCommands, WorkerComposerTakeover, selectWorkerComposer } from './worker-session.tsx'
+import { createWorkNavigation, workerOpenFailure } from './work-navigation.ts'
+import type { WorkerMissing } from './task-list.tsx'
 import { QunoHeroWelcome } from './hero-welcome.tsx'
 import { QunoTaskCard } from './task-card.tsx'
 import { QunoReportActions } from './report-actions.tsx'
@@ -57,7 +60,7 @@ import { registerInternalQueueKinds } from './queue-internal.ts'
 import { QunoQueueDock, QUNO_QUEUE_CSS } from './queue-dock.tsx'
 import { qunoWorkspaceSessionVisible, surfaceEnabled } from './view-model.ts'
 import { QUNO_PANEL_ID, QUNO_PANEL_KIND } from './right-tab.ts'
-import { QUNO_CSS } from './ui.tsx'
+import { QUNO_CSS, QUNO_WORK_CSS } from './ui.tsx'
 
 /** Dictionary namespace owned by this plugin. */
 const NS = 'quno'
@@ -197,6 +200,80 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     const layout = ctx.get('layout') as { selectPanel(panelId: null): void } | undefined
     layout?.selectPanel(null)
   }
+  // Best-effort vertical scroll of the active conversation content (v2 §3
+  // returnContext): read at entry, restored after the session switch.
+  const readMainScrollForReturn = (): number | null => {
+    if (typeof document === 'undefined') return null
+    const content = document.querySelector('[data-conversation-content]')
+    return content === null ? null : content.scrollTop
+  }
+  // Client-only work navigation (design v2 §3/§9.3): remembers how to come
+  // back from a worker session and keeps every operation view-level — it
+  // never calls launch/resume/stop and never writes the domain store.
+  const workNavigation = createWorkNavigation({
+    openSession,
+    selectMainPanel: backToConversation,
+    openWorkPanel: () => { sidebarRight?.openTab(QUNO_PANEL_KIND, { params: { view: 'task' } }) },
+    workPanelVisible: () => typeof document !== 'undefined' && document.querySelector('[data-quno-panel]') !== null,
+    readMainScroll: readMainScrollForReturn,
+    restoreMainScroll: (y: number) => {
+      if (typeof document === 'undefined') return
+      // The conversation content remounts after the session switch; retry a
+      // few frames before giving up (best-effort by design, v2 §3).
+      let attempts = 0
+      const apply = (): void => {
+        const content = document.querySelector('[data-conversation-content]')
+        if (content !== null) { content.scrollTop = y; return }
+        if (attempts >= 3) return
+        attempts += 1
+        requestAnimationFrame(apply)
+      }
+      requestAnimationFrame(apply)
+    },
+    focusWorkEntry: () => {
+      if (typeof document === 'undefined') return
+      const entry = document.querySelector('[data-quno-work-entry]')
+      if (entry !== null && typeof (entry as HTMLElement).focus === 'function') (entry as HTMLElement).focus()
+    },
+    fallbackMainSessionId: () => store.getSnapshot().state?.main.sessionId ?? null,
+  }, typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined' ? window.sessionStorage : null)
+
+  /**
+   * Open a worker's native session (design v2 §9.3): resolve the executor
+   * session Host-side by ticketId, verify the identity echo, remember the
+   * return context, then switch. Failures land in `report` — the work list
+   * shows the honest missing page; nothing is auto-created.
+   */
+  const openWorkerSession = async (
+    ticketId: string,
+    keyboard: boolean,
+    report: (missing: WorkerMissing) => void,
+  ): Promise<void> => {
+    const result = await store.workerDetail(ticketId)
+    const failure = workerOpenFailure(result, ticketId)
+    if (failure !== null) {
+      const statusText = result.ok === true ? result.value.status : null
+      report({ ticketId, reason: failure, statusText })
+      return
+    }
+    if (result.ok !== true) return
+    const detail = result.value
+    if (detail.executorSessionId === null) return
+    const mainSessionId = store.getSnapshot().state?.main.sessionId ?? null
+    workNavigation.enterWorker({
+      mainSessionId: mainSessionId ?? '',
+      workPanelOpen: true,
+      scrollY: readMainScrollForReturn(),
+      entry: 'worker-list',
+      keyboard,
+    })
+    try {
+      openSession(detail.executorSessionId)
+    } catch {
+      report({ ticketId, reason: 'detail-failed', statusText: null })
+    }
+  }
+
   // Queue-dock operations, resolved per session exactly like the stock dock's
   // inject (the conversation service is session-scoped; image URLs come from
   // uiConversation). Structural faces — no harness value imports.
@@ -362,6 +439,18 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       return () => { style.remove() }
     })
 
+    // The worker-surface stylesheet (same claim discipline as the skin CSS).
+    ctx.effect(() => {
+      const tagId = 'dsh-quno/worker-css'
+      if (document.querySelector(`style[data-plugin-css="${tagId}"]`) !== null) return () => {}
+      const style = document.createElement('style')
+      style.dataset.plugin = 'dsh-quno'
+      style.dataset.pluginCss = tagId
+      style.textContent = QUNO_WORK_CSS
+      document.head.appendChild(style)
+      return () => { style.remove() }
+    })
+
     // The queue strip's stylesheet (same claim discipline as the skin CSS).
     ctx.effect(() => {
       const tagId = 'dsh-quno/queue-css'
@@ -418,7 +507,10 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
           inject: () => ({
             store,
             t,
-            openSession,
+            onOpenWorker: (ticketId: string, keyboard: boolean, report: (missing: WorkerMissing) => void) => {
+              void openWorkerSession(ticketId, keyboard, report)
+            },
+            onWorkerMissingBack: (keyboard: boolean) => { workNavigation.returnToMainFromPanel(keyboard) },
             onEditCollector: (instanceId: string, type: string) => { onboarding.open({ kind: 'edit', instanceId, type }) },
             onAddCollector: () => { onboarding.open({ kind: 'create' }) },
           }),
@@ -426,7 +518,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         held.push(ctx.slots.inject('sidebar.right.pane.tab.title', () => ctx.slots.register({
           name: 'sidebar.right.pane.tab.title',
           key: QUNO_PANEL_ID,
-          inject: () => ({ store, t, openSession }),
+          inject: () => ({ store, t }),
         }, QunoPanelTitle)))
         panelReady = true
       }
@@ -438,19 +530,27 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       if (sidebarRight !== undefined) {
         held.push(ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
           name: 'conversation.session.header.utilities',
+          id: 'quno-work-entry',
+          order: 45,
+          inject: () => ({ store, t, face: sidebarRight }),
+        }, QunoWorkEntry)))
+        held.push(ctx.slots.inject('conversation.session.header.utilities', () => ctx.slots.register({
+          name: 'conversation.session.header.utilities',
           id: 'quno-capsule',
           order: 60,
           inject: () => ({ store, t, face: sidebarRight }),
         }, QunoCapsule)))
       }
 
-      // Header identity (§13.8): 头像 + 名字 + 状态点 while a Quno main is on
-      // screen; null otherwise keeps the root seat clean.
+      // Combined header identity (design v2 §6.1 + §13.8): the Quno main
+      // identity on a main, the worker identity (返回 Quno + title + Worker
+      // label + status) on an executor session. ONE registration — the slot
+      // is single-kind, a second entry would shadow this cell outright.
       held.push(ctx.slots.inject('conversation.header.leading', () => ctx.slots.register({
         name: 'conversation.header.leading',
         priority: -1,
-        inject: () => ({ store, t }),
-      }, QunoHeaderIdentity)))
+        inject: () => ({ store, t, onBack: (keyboard: boolean) => { workNavigation.backToQuno() } }),
+      }, QunoLeadingIdentity)))
 
       // First-open welcome (§13.8): avatar + welcome line + opener chips on
       // the hero of a Quno main (the marker's hero seat carries the claim).
@@ -481,6 +581,28 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
         id: 'agent-preset',
         priority: -1,
       }, QunoPresetLabelShadow)))
+
+      // Worker commands (design v2 §6.1): 停止/重试 per status, on the actions
+      // seat — never nested inside a work-list row button (v2 §5.2).
+      held.push(ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+        name: 'conversation.session.header.actions',
+        id: 'quno-worker-commands',
+        order: 20,
+        inject: () => ({ store, t }),
+      }, QunoWorkerCommands)))
+
+      // Read-only composer takeover (design v2 §6.2/§9.4 client half): the
+      // chain elect replaces the composer for executor sessions with the
+      // read-only notice + collapsible task summary. Program inputs bypass
+      // the composer entirely, so TicketInput and worker output keep flowing;
+      // the Host-side submit gate stays the recorded fork follow-up (§18.3).
+      held.push(ctx.slots.inject('conversation.composer', () => ctx.slots.register({
+        name: 'conversation.composer',
+        priority: -10,
+        locale: NS,
+        select: selectWorkerComposer,
+        inject: () => ({ store, t, onBack: (keyboard: boolean) => { workNavigation.backToQuno() } }),
+      }, WorkerComposerTakeover)))
     }
 
     const applyGating = (): void => {

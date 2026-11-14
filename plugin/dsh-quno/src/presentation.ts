@@ -47,6 +47,32 @@ export type TaskActivityKind =
 /** Where a ticket's mandate came from — a machine enum, not localized copy. */
 export type TaskOriginLabel = 'direct' | 'source'
 
+/**
+ * The agent preset an executor session is created with (`app/executor.ts`
+ * mounts it). Lives here so the client can recognize worker sessions without
+ * importing anything from the host side.
+ */
+export const EXECUTOR_PRESET = 'quno-task'
+
+/**
+ * Durable executor-session id convention: `quno-exec-<ticketId>` (assigned at
+ * worker creation and mirrored by the store's COALESCE). The client uses the
+ * prefix to recognize worker sessions and to recover the ticket id — the same
+ * facts, never a second identity source.
+ */
+export const EXECUTOR_SESSION_PREFIX = 'quno-exec-'
+
+/**
+ * Recover the ticket id from an executor session id.
+ * @param sessionId - a session id from any client surface.
+ * @returns the ticket id, or `null` when the session is not a worker session.
+ */
+export function executorTicketIdOf(sessionId: string): string | null {
+  return sessionId.startsWith(EXECUTOR_SESSION_PREFIX)
+    ? sessionId.slice(EXECUTOR_SESSION_PREFIX.length)
+    : null
+}
+
 /** The durable slices the projection reads. Structural (not full records). */
 export interface TaskPresentationInput {
   readonly ticket: Pick<TicketRecord, 'mode' | 'ended' | 'question' | 'origin' | 'createdAt'>
@@ -152,6 +178,22 @@ function openFlags(ticket: TaskPresentationInput['ticket'], assignment: TaskPres
     canAnswer: needsUser,
     canViewActivity: assignment !== null,
   }
+}
+
+/**
+ * The display-only Worker label (design v2 §9.1): derived from the ticket id
+ * with a stable FNV-1a short hash. It is NOT a second identity — routing,
+ * authorization and every command keep addressing the ticket id.
+ * @param ticketId - the ticket's durable id.
+ * @returns e.g. `Worker 02f803ec`.
+ */
+export function workerLabelOf(ticketId: string): string {
+  let hash = 0x811c9dc5
+  for (let index = 0; index < ticketId.length; index += 1) {
+    hash ^= ticketId.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return `Worker ${(hash >>> 0).toString(16).padStart(8, '0')}`
 }
 
 /** Stable result discriminator: report timestamp plus its monotonic nonce. */

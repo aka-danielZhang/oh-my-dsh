@@ -132,69 +132,29 @@ export interface TaskWire {
   readonly settledAt: number | null
 }
 
-/** One read-only execution-record entry (design §9.3). */
-export type TaskActivityItemWire =
-  | {
-    readonly kind: 'task-input'
-    readonly seq: number
-    readonly at: number
-    readonly text: string
-    readonly textTruncated: boolean
-    /** The program source kind of the injected input, when not the user's own. */
-    readonly source: string | null
-  }
-  | {
-    readonly kind: 'worker-say'
-    readonly seq: number
-    readonly at: number
-    readonly text: string
-    readonly textTruncated: boolean
-    readonly interrupted: boolean
-  }
-  | {
-    readonly kind: 'tool'
-    readonly seq: number
-    readonly at: number
-    readonly tool: string
-    /** Coarse display bucket from the registered-tool declarations. */
-    readonly display: string
-    readonly argsSummary: string | null
-    readonly argsTruncated: boolean
-    readonly resultSummary?: string | null
-    readonly resultTruncated?: boolean
-    readonly isError?: boolean
-    readonly resultSeq?: number | null
-  }
-  | {
-    readonly kind: 'tool-result'
-    readonly seq: number
-    readonly at: number
-    readonly callId?: string
-    readonly resultSummary: string | null
-    readonly resultTruncated: boolean
-    readonly isError: boolean
-  }
-  | {
-    readonly kind: 'turn'
-    readonly seq: number
-    readonly at: number
-    readonly turn: number
-    readonly phase: 'start' | 'end'
-    readonly reason?: string
-  }
-
-/** One page of the read-only execution record. */
-export interface TaskActivityWire {
-  readonly items: readonly TaskActivityItemWire[]
-  /** Cursor for the next page; `null` when the record is exhausted. */
-  readonly nextCursor: number | null
-  /** True when at least one more page exists. */
-  readonly truncated: boolean
-  /** Diagnostic identity of the executor session (never shown on cards). */
-  readonly sessionIdentity: { readonly sessionId: string; readonly startedAt: number | null } | null
-  /** Present when the record cannot be read (session missing, for instance). */
+/**
+ * One worker's inspect-opening facts (design v2 §9.3): the Host resolves the
+ * executor session from the ticket id — the client never passes a session id
+ * of its own, and the response echoes `ticketId` so the caller can verify the
+ * identity before opening anything.
+ */
+export interface WorkerDetailWire {
+  readonly ticketId: string
+  readonly title: string
+  /** The unified user-facing status (same vocabulary as TaskWire). */
+  readonly status: string
+  /** `null` while the execution session has not been allocated yet. */
+  readonly executorSessionId: string | null
+  readonly canStop: boolean
+  readonly canRetry: boolean
+  /** Present when the worker cannot be resolved at all. */
   readonly note?: string
 }
+
+/** Input of the `workerDetail` Remote (v2 §9.3). */
+export const workerDetailInput = z.object({
+  ticketId: z.string().min(1).max(200),
+})
 
 /** One ingested Collector event in the panel's recent-events summary. */
 export interface EventWire {
@@ -621,12 +581,6 @@ export const taskCommandInput = z.object({
   action: z.enum(['resume', 'abandon', 'cancel', 'answer']),
   /** The user's answer text; required for the `answer` action only. */
   text: z.string().min(1).max(8000).optional(),
-})
-
-export const taskActivityInput = z.object({
-  taskId: z.string().min(1).max(300),
-  cursor: z.number().int().min(0).optional(),
-  limit: z.number().int().min(1).max(100).optional(),
 })
 
 export const probeCollectorInput = z.object({

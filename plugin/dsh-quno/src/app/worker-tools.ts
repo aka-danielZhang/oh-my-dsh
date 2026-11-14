@@ -14,6 +14,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
+import { executorTicketIdOf } from '../presentation.ts'
 import { QunoStateError } from '../core/model.ts'
 import type {
   ReportState,
@@ -50,9 +51,9 @@ export interface WorkerCliFace {
   readonly call: (input: CliCallInput) => Promise<CliCallResult>
 }
 
-/** Resolve the Ticket owned by one executor session id. */
+/** Resolve the Ticket owned by one executor session id (pure mirror in presentation.ts). */
 export function ticketIdFromExecutorSession(sessionId: string): TicketId | null {
-  return sessionId.startsWith('quno-exec-') ? sessionId.slice('quno-exec-'.length) : null
+  return executorTicketIdOf(sessionId)
 }
 
 /** Dependencies of the worker tools. */

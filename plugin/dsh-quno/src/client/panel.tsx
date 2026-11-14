@@ -21,7 +21,7 @@ import { taskUserStatus } from './panel-state.ts'
 import { CollectorDetail, collectorContext } from './collector-detail.tsx'
 import { CollectorListPage } from './collector-list.tsx'
 import { AttentionPage } from './attention-view.tsx'
-import { TaskDetailPage, TaskListPage } from './task-list.tsx'
+import { TaskListPage, WorkerMissingPage, type WorkerMissing } from './task-list.tsx'
 import { RunsPage } from './runs-view.tsx'
 import {
   Callout,
@@ -36,7 +36,15 @@ import { QunoMark } from './quno-mark.tsx'
 export interface QunoPanelInjected {
   readonly store: QunoClientStore
   readonly t: QunoTranslate
-  readonly openSession: (sessionId: string) => void
+  /**
+   * Open a worker's native session (design v2 §5.2/§9.3): the Host resolves
+   * the executor session from the ticket id; failures land in `report`
+   * instead of a detail page. Historic card params route through the same
+   * flow — there is no detail middle page anymore.
+   */
+  readonly onOpenWorker: (ticketId: string, keyboard: boolean, report: (missing: WorkerMissing) => void) => void
+  /** Leave a missing-worker page: plain return to the main conversation. */
+  readonly onWorkerMissingBack: (keyboard: boolean) => void
   /** Open the onboarding wizard in edit mode (shared with settings). */
   readonly onEditCollector?: (instanceId: string, type: string) => void
   /** Open the onboarding wizard in create mode. */
@@ -46,7 +54,9 @@ export interface QunoPanelInjected {
 type PanelTabProps = PropsRuntime<'sidebar.right.pane.tab'> & QunoPanelInjected
 
 /** The chip title: the Quno name, with the running-task count while any runs. */
-export function QunoPanelTitle(props: PropsRuntime<'sidebar.right.pane.tab.title'> & QunoPanelInjected): React.ReactElement {
+export function QunoPanelTitle(
+  props: PropsRuntime<'sidebar.right.pane.tab.title'> & Pick<QunoPanelInjected, 'store' | 't'>,
+): React.ReactElement {
   const snapshot = React.useSyncExternalStore(props.store.subscribe, props.store.getSnapshot, props.store.getSnapshot)
   const running = snapshot.state?.tasks.filter(task => {
     const status = taskUserStatus(task)
@@ -65,26 +75,29 @@ export function QunoPanelTab(props: PanelTabProps): React.ReactElement {
   const { tab } = props.useTabInfo()
   const params = narrowPanelParams(tab.navigation.params)
   const [view, setView] = React.useState<QunoPanelView>(params?.view ?? (params?.taskId !== undefined ? 'task' : 'collectors'))
-  const [taskId, setTaskId] = React.useState<string | null>(params?.taskId ?? null)
   const [collectorId, setCollectorId] = React.useState<string | null>(params?.collectorId ?? null)
   const [runId, setRunId] = React.useState<string | null>(params?.runId ?? null)
+  const [workerMissing, setWorkerMissing] = React.useState<WorkerMissing | null>(null)
 
   // Re-navigation (the capsule or a card opens with new params) re-applies the focus.
+  // A `taskId` param now routes into the worker session directly — the detail
+  // middle page is retired (design v2 §5.2).
   React.useEffect(() => {
     if (params?.taskId !== undefined) {
-      setTaskId(params.taskId)
+      setWorkerMissing(null)
       setCollectorId(null)
       setRunId(null)
       setView('task')
+      props.onOpenWorker(params.taskId, false, setWorkerMissing)
     } else if (params?.collectorId !== undefined) {
       setCollectorId(params.collectorId)
-      setTaskId(null)
       setRunId(null)
+      setWorkerMissing(null)
       setView('collectors')
     } else if (params?.view !== undefined) {
-      setTaskId(null)
       setCollectorId(null)
       setRunId(params.runId ?? null)
+      setWorkerMissing(null)
       setView(params.view)
     }
     // `revision` bumps on every navigation, whether or not params changed.
@@ -94,9 +107,9 @@ export function QunoPanelTab(props: PanelTabProps): React.ReactElement {
 
   const switchView = (next: QunoPanelView): void => {
     setView(next)
-    setTaskId(null)
     setCollectorId(null)
     setRunId(null)
+    setWorkerMissing(null)
   }
 
   return (
@@ -146,16 +159,23 @@ export function QunoPanelTab(props: PanelTabProps): React.ReactElement {
             />
           ))}
         {view === 'attention' && <AttentionPage snapshot={snapshot} store={props.store} t={props.t} />}
-        {view === 'task' && (taskId === null
-          ? <TaskListPage snapshot={snapshot} store={props.store} t={props.t} onOpen={setTaskId} />
+        {view === 'task' && (workerMissing !== null
+          ? (
+            <WorkerMissingPage
+              missing={workerMissing}
+              t={props.t}
+              onBack={keyboard => {
+                setWorkerMissing(null)
+                props.onWorkerMissingBack(keyboard)
+              }}
+            />
+          )
           : (
-            <TaskDetailPage
-              taskId={taskId}
+            <TaskListPage
               snapshot={snapshot}
               store={props.store}
               t={props.t}
-              openSession={props.openSession}
-              onBack={() => { setTaskId(null) }}
+              onOpenWorker={(ticketId, keyboard) => { props.onOpenWorker(ticketId, keyboard, setWorkerMissing) }}
             />
           ))}
         {view === 'runs' && (

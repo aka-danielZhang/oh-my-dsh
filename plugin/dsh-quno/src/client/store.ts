@@ -25,7 +25,7 @@ import type {
   QunoWireState,
   CollectorOptionsPageWire,
   CollectorProbeWire,
-  TaskActivityWire,
+  WorkerDetailWire,
 } from '../api-types.ts'
 
 /**
@@ -88,7 +88,7 @@ export interface QunoRemoteFace {
   noticeDetail(request: { notificationId: string }): Promise<RemoteResult<NoticeDetailWire | null>>
   eventDetail(request: { eventId: string }): Promise<RemoteResult<EventDetailWire | null>>
   taskCommand(request: { taskId: string; action: 'resume' | 'abandon' | 'cancel' | 'answer'; text?: string }): Promise<RemoteResult<QunoWireState>>
-  taskActivity(request: { taskId: string; cursor?: number; limit?: number }): Promise<RemoteResult<TaskActivityWire>>
+  workerDetail(request: { ticketId: string }): Promise<RemoteResult<WorkerDetailWire>>
   mute(request: { minutes?: number; until?: string; cancel?: boolean }): Promise<RemoteResult<QunoWireState>>
   eventsRecent(request: { limit?: number }): Promise<RemoteResult<{ events: EventWire[] }>>
 }
@@ -109,7 +109,6 @@ export interface QunoSnapshot {
   /** Evidence payloads fetched on demand, keyed by event id. */
   readonly eventDetails: Readonly<Record<string, AsyncValue<EventDetailWire>>>
   /** Read-only execution-record pages, keyed by `${taskId}@${cursor ?? 'head'}`. */
-  readonly taskActivities: Readonly<Record<string, AsyncValue<TaskActivityWire>>>
   readonly error: string | null
   readonly busy: boolean
 }
@@ -123,7 +122,6 @@ const INITIAL: QunoSnapshot = {
   probes: {},
   noticeDetails: {},
   eventDetails: {},
-  taskActivities: {},
   error: null,
   busy: false,
 }
@@ -140,7 +138,6 @@ export class QunoClientStore {
   /** Per-record request order: a slow answer must never overwrite a newer one. */
   private readonly noticeSeq = new Map<string, number>()
   private readonly eventSeq = new Map<string, number>()
-  private readonly activitySeq = new Map<string, number>()
 
   constructor(private readonly remote: QunoRemoteFace) {}
 
@@ -338,38 +335,15 @@ export class QunoClientStore {
   }
 
   /**
-   * Read one page of a task's read-only execution record. Same `AsyncValue`
-   * discipline as the other on-demand reads; pages are keyed by cursor so an
-   * appended tail never invalidates an already-served page.
+   * One worker's inspect-opening facts (design v2 §9.3): a one-shot read, NOT
+   * a polled projection — the Host resolves the executor session from the
+   * ticket id at open time, so a stale snapshot can never send the client to
+   * the wrong session.
    */
-  async loadTaskActivity(taskId: string, cursor?: number): Promise<AsyncValue<TaskActivityWire>> {
-    const key = `${taskId}@${cursor === undefined ? 'head' : String(cursor)}`
-    const cached = this.snapshot.taskActivities[key]
-    if (cached !== undefined && cached.status !== 'error') return cached
-
-    const seq = this.nextSeq(this.activitySeq, key)
-    this.patchActivity(key, { status: 'loading' })
-
-    let next: AsyncValue<TaskActivityWire>
-    try {
-      const result = await this.remote.taskActivity({
-        taskId,
-        ...(cursor === undefined ? {} : { cursor }),
-        limit: 50,
-      })
-      next = !result.ok
-        ? { status: 'error', message: `${result.error.code}: ${result.error.message}` }
-        : { status: 'ready', data: result.value }
-    } catch (error) {
-      next = { status: 'error', message: (error as Error).message }
-    }
-
-    if (this.activitySeq.get(key) !== seq) {
-      return this.snapshot.taskActivities[key] ?? { status: 'loading' }
-    }
-    this.patchActivity(key, next)
-    return next
+  workerDetail(ticketId: string): Promise<RemoteResult<WorkerDetailWire>> {
+    return this.remote.workerDetail({ ticketId })
   }
+
 
   /** Short-term mute state. */
   async mute(request: { minutes?: number; until?: string; cancel?: boolean }): Promise<void> {
@@ -456,12 +430,6 @@ export class QunoClientStore {
     })
   }
 
-  private patchActivity(key: string, value: AsyncValue<TaskActivityWire>): void {
-    this.set({
-      ...this.snapshot,
-      taskActivities: bounded({ ...this.snapshot.taskActivities, [key]: value }),
-    })
-  }
 
   private nextSeq(map: Map<string, number>, key: string): number {
     const seq = (map.get(key) ?? 0) + 1

@@ -17,7 +17,6 @@ import {
   collectorRowState,
   collectorRowTone,
   lifecycleKey,
-  taskSections,
   taskUserStatus,
   taskUserStatusKey,
   type CollectorPageInput,
@@ -152,69 +151,6 @@ test('the collectors row shows one state in the documented priority', () => {
   assert.equal(collectorRowTone('auth-required'), 'error')
   assert.equal(collectorRowTone('stale'), 'warn')
   assert.equal(collectorRowTone('ok'), 'ok')
-})
-
-test('task sections follow the status table and hide empty sections', () => {
-  const base = {
-    status: 'running',
-    plan: null as string | null,
-    prompt: 'do it' as string | null,
-    result: null as string | null,
-    resultDigest: null as string | null,
-    artifacts: [] as readonly unknown[],
-    childSessionId: 'child-1' as string | null,
-    error: null as unknown,
-  }
-
-  const running = taskSections({ ...base, plan: '1. read' })
-  assert.equal(running.plan, true)
-  assert.equal(running.prompt, true)
-  assert.equal(running.result, false)
-  assert.equal(running.stop, true)
-  assert.equal(running.retry, false)
-  // Running work shows its record first.
-  assert.equal(running.record, true)
-
-  // A running task without a plan renders no plan heading at all.
-  assert.equal(taskSections(base).plan, false)
-
-  const done = taskSections({ ...base, status: 'done', result: 'ok' })
-  assert.equal(done.result, true)
-  assert.equal(done.record, true)
-  assert.equal(done.plan, false)
-  assert.equal(done.stop, false)
-  assert.equal(done.artifacts, false, 'no artifacts means no artifacts section')
-
-  const doneWithArtifact = taskSections({
-    ...base,
-    status: 'done',
-    result: 'ok',
-    artifacts: [{ kind: 'file', label: 'a', uri: 'file:///a' }],
-  })
-  assert.equal(doneWithArtifact.artifacts, true)
-
-  const failed = taskSections({ ...base, status: 'failed', error: { code: 'x', message: 'y' } })
-  assert.equal(failed.error, true)
-  assert.equal(failed.retry, true)
-  assert.equal(failed.stop, false, 'an ended failure cannot be stopped any more')
-
-  const needsYou = taskSections({
-    ...base,
-    status: 'running',
-    presentationStatus: 'needs-you',
-    question: { question: '要哪个群？' },
-  })
-  assert.equal(needsYou.question, true)
-  assert.equal(needsYou.record, true)
-
-  // A record-less task hides the record section entirely.
-  const noRecord = taskSections({ ...base, childSessionId: null })
-  assert.equal(noRecord.record, false)
-
-  const cancelled = taskSections({ ...base, status: 'cancelled' })
-  assert.equal(cancelled.cancelledNote, true)
-  assert.equal(cancelled.prompt, true)
-  assert.equal(cancelled.stop, false)
 })
 
 test('status keys are localised and never leak the raw enum', () => {

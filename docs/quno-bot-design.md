@@ -94,7 +94,7 @@
       通知 outbox（安静时段/频控/合并/时效）──> Notification Turn（自然表达）
 ```
 
-沟通与展示遵循「一个事实源，三种投影」：Ticket/Assignment/WorkerRun/Report/Session 日志是唯一事实；主对话投影（Quno 第一人称，只有接受/需回答/结果/失败/停止进入对话）、任务中心投影（右栏「任务」，全状态可钻取）与执行记录投影（右栏内只读时间线）各自回答不同问题，不产生第二份状态（2026-11-14 定稿，见 `docs/notes/2026-11-14-quno-router-worker-product-and-program-design.md` 与 §18.3）。
+沟通与展示遵循「一个事实源，三种投影」：Ticket/Assignment/WorkerRun/Report/Session 日志是唯一事实；主对话投影（Quno 第一人称，只有接受/需回答/结果/失败/停止进入对话）、工作投影（会话头「工作」入口 + 右栏 Worker 行列表，全状态可钻取）与执行记录投影（Worker 原生会话只读查看，v2 §6）各自回答不同问题，不产生第二份状态（2026-11-14 定稿、2026-11-15 修订为 Worker 原生会话，见 `docs/notes/2026-11-14-quno-router-worker-product-and-program-design.md` 与 §18.3/§18.4）。
 
 五条不能合并的流：
 
@@ -211,6 +211,8 @@ Executor 会话是独立的只读子会话（`quno-task` preset，稳定 id `qun
 - 旧 Assignment、旧 fence、旧采集器 run generation、已结束 Ticket 的晚到写入全部拒绝。
 
 ### 5.3 任务投影与用户状态机（2026-11-14 修订）
+
+`workerId` 恒等于 `ticketId`；`workerLabel`（如 `Worker 02f803ec`）是 ticketId 的稳定短哈希**展示标签**（`presentation.workerLabelOf`），不保证跨系统唯一、不是路由或授权凭证——任何 Remote 命令只接受 ticketId（v2 §9.1）。
 
 - **TaskPresentation 纯投影**（`src/presentation.ts`）：Ticket + Assignment + WorkerRun + Report → `TaskPresentation`（status/activityKind/lastActivityAt/canCancel/canRetry/canAnswer/canViewActivity/resultRevision/origin）。主对话状态查询、任务卡、任务列表与任务详情全部调用同一投影，不写回 Ticket、不产生第二份状态。
 - **用户状态机**（由事实推导，不由模型措辞决定）：`accepted`（Assignment 已建、尚无执行）/ `running`（有 active run 或仍在继续的工作）/ `waiting`（等待来源事件，不催用户）/ `needs-you`（有 TicketQuestion，或 blocked/failed 需用户决定）/ `done` / `failed`（`ended.outcome=failed`）/ `cancelled`（`stopped`）/ `dropped`（closed/dropped，任务列表记「无需处理」，主对话默认安静）。`accepted` 与 `running` 刻意不同：launch 失败/资源不足显示「已接受（等待执行资源）」，不能永远显示「正在干」。
@@ -688,7 +690,7 @@ Notice:    pending → prepared → inbox-durable → presented
 - **面板内四视图**（组件内页签，设置页两页签同款 useState 模式）：
   - **动态**：各采集器实例一行（按钮）→ **采集器详情**；信息缺口；最近事件摘要，事件行 → **事件详情**（`eventDetail` 按需读取，payload 有界）。
   - **关注**：open/waiting/snoozed 列表 + 已处理/延后/不再关注按钮（`actAttention`，带 expectedRevision 防并发）；折叠分组「已完结」读 resolved/dismissed/expired，并显示完成时间；证据引用按 `reliability.readOriginal` 与事件 `pruned` 决定能否点开原文，不可读时只展示摘要与血缘。
-  - **任务**：进行中/已结束列表；点击进入任务详情（§13.6，取消/续跑/子会话/产物）。
+  - **任务（2026-11-15 修订为 Worker 行）**：按需要你/进行中/已结束分组的纯 Worker 行列表（任务标题为主、Worker 标签为辅、状态独立右列；行内无嵌套按钮）；点击**直接进入该 Worker 的原生会话**（v2 §5.2，不再有任务详情中间页），停止/重试在 Worker 会话头，任务摘要在会话内折叠（§13.6）。
   - **运行**：Eval/Decision 与 WorkerRun 分列筛选——状态、来源 Thread/Ticket、超时次数、错误；通知列表（title/status/body/why/时间）；顶部「立即检查」复用 `checkNow()`。大正文只经 `evalDetail`/`ticketDetail` 按需加载。
 - **采集器详情**（`collector-detail.tsx`，设置页与面板共用）：三轴状态（期望/生命周期/健康）分开展示；`healthy + stale` 显示「连接正常，但数据可能陈旧」；上次尝试/成功/事件/重试/连续失败/错误码/覆盖范围/来源延迟/检查点版本；能力声明（调度、间隔、run 超时、配额、权限、可靠性五项、首轮语义）；配置（secret 掩码）；本实例缺口；操作（暂停/恢复/停用/探测/编辑/删除）。声明缺失时显示「声明不可用」，不把未知补成支持。
 - **导航参数**：`SidebarRightTabParamsMap.qunoPanel = { taskId?, collectorId?, runId?, view? }`；`view` 为 `'collectors' | 'attention' | 'task' | 'runs'`；`narrowPanelParams` 校验并丢弃非法值；实例删除后详情显示「实例不存在」并可返回，不崩溃。
@@ -700,7 +702,7 @@ Notice:    pending → prepared → inbox-durable → presented
   - **展示原语**：列表统一 `PanelListRow`（状态点 + 标题 + 元信息 + 钻取箭头）；详情统一 `DetailHeader + DetailSection`；空态分四级——`PanelEmpty`（整页）、`InlineEmpty`（分区）、`MissingState`（对象不存在）、`Callout`（需要解释的状态）；`LoadingRows` 只用于首次加载。
   - **关注页**：保留卡片但去掉左色条，不显示 `topicKey`，状态本地化；操作失败留在原卡上提示冲突，不跳回列表。
   - **采集器详情**：默认只给身份、状态、上次成功同步、声明驱动的配置摘要、当前异常与主操作（暂停/恢复、编辑、探测）；三轴、检查点版本、尝试/重试时间、延迟与覆盖、连续失败、错误码、可靠性五项、权限原始声明与原始配置收进「诊断信息」折叠；停用与删除移入独立危险区（确认按钮为「取消 / 确认删除」）。
-  - **任务页**：按「需要你（question/blocked/failed 待决定）/ 进行中（accepted/running/waiting）/ 已结束」分组，空组不渲染；详情按状态条件渲染（概览 + 当前活动 + 需要你（回答入口）+ 结果与产物 + **执行记录（全状态可进，运行中默认展开）** + 诊断折叠），无内容不留空标题；任务不存在用独立 `taskMissing`。执行记录是右栏内只读时间线（`taskActivity` Remote：白名单事件 + 脱敏 + 有界分页），无 composer、无编辑、无 steer；打开原始执行会话只在诊断折叠里。旧 Wire 缺新字段时按 legacy status 回退投影。
+  - **任务页**：按「需要你（question/blocked/failed 待决定）/ 进行中（accepted/running/waiting）/ 已结束」分组，空组不渲染；详情按状态条件渲染（概览 + 当前活动 + 需要你（回答入口）+ 结果与产物 + **执行记录（全状态可进，运行中默认展开）** + 诊断折叠），无内容不留空标题；任务不存在用独立 `taskMissing`。执行记录自 2026-11-15 起改为 **Worker 原生会话只读查看**（§13.6b：composer 经 chain 槽整体接管为只读说明 + 可折叠任务摘要）；右栏自绘只读时间线与 `taskActivity` Remote 退役（v2 §10 不自绘 transcript）。旧 Wire 缺新字段时按 legacy status 回退投影。
   - **运行页**：只负责思考运行，通知正文不再堆叠；`runId` 真正消费为运行详情页（状态、触发方式、起止、耗时、模型与成本、处置/延后/汇报数、错误）。运行状态统一映射：`claimed/running → 进行中`、`committed → 已提交`、`failed → 失败`、`interrupted → 已中断`、其他 → 未知状态；手动检查无工作时明确写「没有可处理内容，本次未调用模型」，不创建虚假运行记录。
 
 ### 13.5 对话内胶囊（正文右上悬浮；slot 只提供会话上下文）
@@ -720,7 +722,21 @@ Notice:    pending → prepared → inbox-durable → presented
 - **任务详情视图（2026-10-27 修订）**：真实状态、静态计划、原始指令、按 `createdAt/settledAt` 计算的耗时、结果、错误、产物与子会话入口。**不展示「第几步/工具调用 5/8/单轮 120s」**——现有委派数据没有步骤状态机，8 次工具与 120 秒是 Eval/WorkerRun 预算，不能套到 Ticket 的全部生命周期；要做实时过程需另开按需 `taskDetail` 并从子会话日志推导。
 - **取消（2026-10-27）**：新增 `taskCommand({action:'cancel'})`。先持久化用户取消意图，再 dispose 子任务 activation；所有晚到完成/失败/中断在写状态前检查 durable status，取消后不改状态、不再发完成通知；重复取消幂等；重启对账不会复活已取消任务。已完成任务拒绝取消。`abandon` 保留为取消的别名。
 - **子会话与产物**：「查看子会话」已从产品主路径退役（2026-11-14）：执行过程在右栏只读执行记录内查看（§13.4），`openSession(childSessionId)` 仅保留在诊断折叠中（打开的仍是正常会话，只读边界来自 `quno-task` preset 的执行权限）。产物：`url` 走普通外链；`file`/`directory` 显示路径并提供复制（不硬跳 `file://`）；`note` 可展开查看。
-- 链路闭环：回复消息里的卡片（对话上下文）→ 点击 → 右栏实时运行（不离开主对话）→ 需要深挖才跳进子会话只读视图。
+- **2026-11-15 v2 交互修订（设计 `docs/notes/2026-11-14-quno-router-worker-product-and-program-design.md`，落地记录 §18.4）**：
+  - 主消息流**零任务卡**：`quno_task` 的 `tool.call.toolview` 保留 keyed 注册但渲染空——遮蔽 stock 工具卡防止技术 meta 泄漏，历史日志原文保留（v2 §4.1/§9.5）；
+  - 「工作」入口固定在会话头 `conversation.session.header.utilities`（order 45）：显示真实活动计数（needs-you 优先、单 badge、aria 含状态），点击只切换右栏；
+  - 任务详情中间页退役：Worker 行直开原生会话；任务摘要作为会话内可折叠信息（prompt/需要你+回答/结果/产物/诊断）；
+  - **Worker 只读会话（§13.6b）**。
+- 链路闭环（v2）：回复消息（第一人称）→ 会话头「工作」→ Worker 行 → **原生 Worker 会话只读查看** → 「返回 Quno」回到主会话（焦点/滚动/右栏恢复）。
+
+### 13.6b Worker 只读会话（v2 §6，2026-11-15 落地）
+
+- **会话识别**：executor 会话按 durable 约定 `quno-exec-<ticketId>` + `quno-task` preset 投影识别（`presentation.ts` 共享常量，host/client 同源），不依赖 UI 会话列表。
+- **三个席位**：`conversation.header.leading`（single/root）一个**合并**身份组件——quno 主会话渲染身份三件套、executor 会话渲染「‹ 返回 Quno + 任务标题 + Worker 标签 + 状态」（单 cell，第二个注册会整体遮蔽第一个）；`conversation.session.header.actions`（order 20）按状态渲染停止/重试；`conversation.composer`（chain elect，priority -10，`select` 纯谓词）对 executor 会话**整体接管 composer**——只读说明（role=status）+ 可折叠任务摘要。ui-subagent 的 SubagentReadOnlyComposer 是同型先例。
+- **只读边界**：接管是组件级（不是 CSS 隐藏），用户提交路径在 UI 上不存在；程序输入（TicketInput/Worker 输出/flush）不经 composer，天然不受影响（v2 §9.4）。**Host 侧提交门未建**：基线 prompt 路径无模式拒绝，通用 `interactionMode` 字段 + SessionController 提交门走 fork 流程（§18.4 后续项，v2 §9.4 预留分支）；在 fork 落地前不得声称 Host 级只读。
+- **导航（v2 §3/§9.3）**：client-only（`work-navigation.ts`），不进 SQLite、不触发 launch/resume/stop；returnContext（mainSessionId/右栏/滚动）走 window sessionStorage，丢失降级为普通返回（主会话 id 恒以轮询快照为准）；`workerDetail` Remote 由 Host 按 ticketId 解析 executorSessionId 并回显身份，客户端不传任意 sessionId；打开失败/未分配/不存在分别呈现诚实缺失页（v2 §5.4），绝不自动创建会话。
+- **焦点纪律（v2 §6.3）**：键盘激活（click `detail===0`）才移动焦点——进入 Worker 聚焦「返回 Quno」（一次性 sessionStorage 旗标），返回主对话聚焦「工作」入口；鼠标不抢焦点。
+- **样式**：`QUNO_WORK_CSS`（`data-plugin-css` 幂等），只用 `--dsw-*` token；1100/720/480px 三档响应式，长 ID `overflow-wrap: anywhere`。
 - 运行日志的逐行 follow（`ctx.jobs` Remote stream）v1 未接，任务详情以结果/计划/产物 + 子会话入口呈现（偏差 #14）。
 
 - **2026-10-28 修订**：任务详情改由状态表驱动（见 §13.4）：计划只在 running、结果与产物只在 done、错误与续跑只在 failed/interrupted、取消说明只在 cancelled；原来「计划 + 产物」的固定空分区一并移除。子会话入口只在 done/cancelled 出现，任务不存在用独立 `taskMissing`。
@@ -733,18 +749,21 @@ Notice:    pending → prepared → inbox-durable → presented
 | `sidebar.workspaces.alternate`（fork zw.6 新槽） | Quno 联系人页签 | 已发布（`v0.2.1-rc.2+zw.6`）并实机验证 |
 | `sidebar.workspaces`（stock，不动） | work 页签 = stock 浏览区原样 | fork Region 包装，无备选时逐字节等价 |
 | `sidebarRightTabs.register` + `sidebar.right.pane.tab`（+`.title`） | Quno 面板（动态/关注/任务） | 已落地，实机验证 |
+| `conversation.session.header.utilities`（order 45） | 「工作」入口按钮（v2 §4.2）：真实活动计数 badge（needs-you 优先、含 needs-you 不叠加）、aria 含状态、点击只切右栏 | 2026-11-15 新增 |
 | `conversation.session.header.utilities`（order 60） | 对话内胶囊：槽内只放隐藏 sentinel，胶囊 Portal 到正文容器右上角 | 2026-10-29 定稿（header 工具区版废弃） |
 | `conversation.session.header.utilities` + `conversation.hero.options` | `data-quno-main` 会话标记（双席位，渲染 null/哨兵） | 已落地，实机验证 |
-| `conversation.header.leading`（显式 priority:-1） | Quno 会话头身份（头像 + 名字 + 状态点） | 2026-10-23 新增（§13.8），待实现 |
+| `conversation.header.leading`（显式 priority:-1） | **合并**身份（single 槽单 cell）：quno 主会话身份三件套 / Worker 会话身份（返回 Quno + 任务标题 + Worker 标签 + 状态）（§13.6b） | 2026-10-23 新增，2026-11-15 合并 Worker 身份 |
 | `conversation.hero.options` | Quno 首开欢迎块（头像 + 欢迎语 + 建议开场） | 2026-10-23 新增（§13.8），待实现 |
 | QUNO_SKIN_CSS（`data-plugin-css` 幂等） | 消息头像、皮肤 token、卡片规格 | 2026-10-23 新增（§13.9），待实现 |
 | `conversation.session.header.actions` 同 id 遮蔽 | quno 主会话隐藏 preset 标签 | 已发货机制（copy-session-id 先例） |
-| `tool.call.toolview` key `quno_task` | 任务卡（主按钮 → 面板，次按钮 → 子会话） | 已落地 |
+| `conversation.session.header.actions`（order 20） | Worker 命令：按状态渲染停止/重试（§13.6b，不嵌套在行按钮里） | 2026-11-15 新增 |
+| `tool.call.toolview` key `quno_task` | **渲染空**（v2 §4.1 主消息流无任务卡；注册保留以遮蔽 stock 卡，日志原文保留） | 2026-11-15 修订 |
 | `conversation.chat.turnTail` | 回合尾反馈按钮（读本回合通知，不再扫「最近一小时」） | 2026-10-27 改为 Turn 绑定 |
 | `ctx.uiConversation.events.register` | `quno-notice` Definition：**全部 Quno 程序输入**（quno-eval/report/notify/task）→ exclusive 认领 → 隐藏 Chat node → `turnDataSource` 按回合回读（Quno 真实回复原生渲染） | 2026-10-27 新增，2026-11-14 泛化 |
 | `conversation.input.dock` 同 id `queue` priority -1 遮蔽 | 内部消息感知队列条：`presentation: 'internal'` 或已注册 kind 的程序行不进 QueueDock；人类行编辑/删除/steer 全保留 | 2026-11-14 新增（插件侧通用实现；上收 fork 为后续项，见 §18.3） |
 | `shell.overlay`（id `quno-onboarding`） | 三栏接入向导（创建/编辑同一表单，`min(1120px, viewport-64px)`） | 2026-10-27 新增 |
-| Typert Remote `quno` | 21 方法：新增 `taskActivity`（只读执行记录，Host 脱敏分页）；`taskCommand` 增 `answer`（回答进同一 Ticket） | 2026-11-05 新增 detail 面，2026-11-14 增量 |
+| Typert Remote `quno` | `taskActivity` 退役（v2 §10 不自绘 transcript）；新增 `workerDetail`（ticketId → executorSessionId，Host 侧解析 + 身份回显）；`taskCommand` 增 `answer`（回答进同一 Ticket） | 2026-11-05 新增 detail 面，2026-11-15 修订 |
+| `conversation.composer`（chain elect，priority -10） | executor 会话只读接管：只读说明 + 可折叠任务摘要（§13.6b；subagent 只读 composer 同型先例） | 2026-11-15 新增 |
 | `settings.section` / `settings.general.item` | Quno 设置页 / 总开关 | 已落地 |
 | Typert Remote `quno` | 11 方法（含新增 `eventsRecent`；任务列表随 `state()` 携带 plan/prompt） | 已落地 |
 
@@ -949,12 +968,12 @@ dsh-quno-collector-<name>   各来源采集器（日历、订阅源、云之家�
 | 铬件净化 | quno 主会话无 hero/空态工作区选择、preset 标签与 cwd 露出；模型选择器、权限、Plan 等 composer 常规件保留可用 |
 | 右栏面板与胶囊 | 右栏默认收起；胶囊实时计数；动态/关注/任务三视图实时刷新；大正文只经 detail 接口按需加载 |
 | 对话皮肤 | 每条 Quno 消息左侧头像；会话头头像 + 名字 + 状态点；首开欢迎块；非 quno 会话无皮肤残留 |
-| 任务卡联动 | 点任务卡 → 右栏定位任务详情（概览/当前活动/需要你/结果产物/执行记录/诊断）；卡片只有「查看详情」（运行中加「停止」，失败加「重试」），无子会话按钮；会话不出现在列表 |
+| 工作入口联动 | 主消息流无任务卡（quno_task tool view 渲染空）；历史任务信息经会话头「工作」→ Worker 行直达原生会话；右栏参数 `taskId` 也走同一流程，无详情中间页 |
 | 主对话安静闭环（P0 发布门） | `main-task-quiet-success`：一次第一人称接受、一次结果；可见回复零 Worker/后台/requestId/工具参数泄漏；结果只说一次 |
 | 内部失败不进队列（P0 发布门） | `main-task-internal-failure-hidden`：Router 猜测 organ 同步拒绝零落库；Worker 两次非法 op 落两条持久 error 证据；主对话只收到 internal 标记的提问 relay |
 | progress 不打扰（P0 发布门） | `task-report-progress-no-chat`：两条 progress 只更新任务投影，主对话恰好一次结果 relay |
-| 运行中执行记录（P0 发布门） | `task-activity-readonly-running`：运行中可读真实任务指令与工具证据；无 system prompt；wire 无写面 |
-| 记录脱敏（P0 发布门） | `task-activity-redaction`：伪造 token 参数不出 Host；工具卡按声明投影（脱敏摘要 + display 分桶） |
+| 工作入口与 Worker 列表（实机验收，v2 §13） | 顶栏「工作」计数正确（needs-you 不叠加）、空态可进、无横向滚动；Worker 行一一对应、状态真实；行直开原生会话、无嵌套按钮 |
+| Worker 只读会话（实机验收，v2 §13） | 打开正确 executorSessionId；原生内容 + 无 composer（chain 接管）；返回导航不触发 launch/resume/stop；程序事件继续追加；伪造 sessionId 读不到其他任务 |
 | 队列显示过滤 | 程序输入不进 QueueDock；真实用户排队消息可编辑/删除/steer；`presentation: 'internal'` 与已注册 kind 双信号过滤 |
 
 ### 15.2 事件流与判断（沿用事件流设计验收表）
@@ -1102,6 +1121,15 @@ dsh-quno-collector-<name>   各来源采集器（日历、订阅源、云之家�
 - **验证**：`pnpm run typecheck/build/test` 全绿（220 项 node:test，新增 presentation/activity/queue-internal/relay-policy 用例）；scripted 链路评测全量通过（新增 5 条 P0 交互用例 `main-task-quiet-success`/`main-task-internal-failure-hidden`/`task-report-progress-no-chat`/`task-activity-readonly-running`/`task-activity-redaction`；`worker-restart`/`worker-handback` 脚本按新 relay 策略收敛；redact 扫描器 `sk-` 模式补 `\b` 锚修复 case id 误报）。Live 发布门与桌面 DOM 验证未执行（见实施记录）。
 - **未做/后续**：QueueDock seam 上收 fork（zw 层）；`quno_exchange` 主对话工具卡的非技术投影（§7.3，本版仅记录未实施）；详情打开时有界刷新提速（P2）；CLI 能力展示声明的细粒度活动标签（P2，现仅 yzj op 级映射）。
 
+### 18.4 2026-11-15 Worker 原生会话与工作入口落地（v2 交互定稿）
+
+- **新增**：`client/work-model.ts`（纯投影：入口计数、Worker 行活动文案、composer elect 选择器）、`client/work-entry.tsx`（「工作」入口，utilities 槽 order 45）、`client/worker-session.tsx`（合并 leading 身份 + Worker 命令 + composer 接管）、`client/work-navigation.ts`（client-only 导航：returnContext/sessionStorage/焦点规则/缺失页）、`client/task-list.tsx` 重写（纯 Worker 行，行直开原生会话，无嵌套按钮）。
+- **workerDetail Remote**（api/service/typert 四层）：Host 按 ticketId 解析 executorSessionId + 状态 + 身份回显；`presentation.ts` 增 `workerLabelOf`（FNV-1a 短哈希展示标签）、`EXECUTOR_PRESET`/`EXECUTOR_SESSION_PREFIX` 共享常量（executor.ts/worker-tools.ts 改为引用）。
+- **退役**：`taskActivity` Remote（`buildTaskActivity`/`taskActivityForClient`/`taskActivityInput`/`TaskActivityWire`）、`activity.ts` 投影、`task-activity.tsx` 自绘时间线、`task-detail.tsx` 中间页（摘要并入会话内折叠）、`tool.call.toolview` 任务卡置空（注册保留遮蔽 stock）；evals 两个 taskActivity 用例随投影退役，桌面 DOM 验收转为 §15.1 实机行。
+- **只读边界与偏差**：composer 接管是组件级客户端半边（v2 §9.4）；**Host 提交门未建**——基线 prompt 路径无模式拒绝，通用 `interactionMode` + SessionController 提交门按 fork 流程补（后续项，见下）；QueueDock fork 上收项沿用 §18.3。与会话头相关的 v2 细项（隐藏 stock 会话头 chrome 的完整自定义头）依赖 single 槽整体替换，插件侧不可安全实现，记 fork 收敛。
+- **验证**：`pnpm run typecheck` 0 错、`pnpm test` 238 项全绿（新增 `tests/work-surface.test.ts` 8 项：入口计数/行活动/composer 选择器/往返上下文/缺失原因映射/焦点旗标）、`pnpm run build` 通过；scripted evals 全量通过无新增失败（退役 2 例后 16 例 runnable 全绿，9 例既有 blocked 与改动前一致）。桌面 DOM/键盘/窄屏实机验收未执行（§15.1 实机行）。
+- **未做/后续**：fork——通用 `interactionMode` 字段 + Host 提交门（v2 §9.4）；实机验收轮（Electron + scratch DSH_HOME）；L4 用例 `worker-list-open-and-return-keyboard` 等 8 项；P2 活动与复杂状态。
+
 ## 19. 文档沿革
 
 - 2026-10-22 三份原始提案（主对话设计、事件流设计、Sense 契约）各自成文于 `docs/notes/`。
@@ -1158,4 +1186,5 @@ dsh-quno-collector-<name>   各来源采集器（日历、订阅源、云之家�
 - 2026-10-30 主对话只路由：真实会话证实主 agent 在拥有 `quno_task` 的情况下仍直接执行后，主 preset 移除直接执行工具，所有实际工作强制立即委派并快速应答；`quno_task` 同时支持持久任务状态与结果查询（实证与验收见 `docs/notes/2026-10-30-quno-main-routing-only.md`）。
 - 2026-11-05 内核重构：目标设计终稿见 `docs/notes/2026-11-05-quno-superagent-program-design.md`；同日按 P0–P5 落地领域内核、SQLite v3、Effect outbox、SessionTransport、只读 Executor 与 Eval Router，旧 Analyzer/Delivery/Task 写路径删除，契约收敛回本文（§2–§3、§5、§7.3、§8、§11、§14.1、§15、§18.1）。
 - 2026-11-10 采集层重构：Sense/Organ（`quno.sense/v1`，插件自带定时器 + 自报健康）退役为统一 Collector 契约（`quno.collector/v2`）——Host 统一调度（单发 timer、hint 钳制、退避、fatal 停排）、`run(ctx)` 三面模型、健康由 Host 推导、`mount` 生命周期；`senses.ts` 重写为 `collectors.ts`，store v3→v4 四表 RENAME，`organ:` 端点改 `collector:`，`quno_read.organs` 改 `collectors`，插件族改名 `dsh-quno-collector-<name>`；本文 §6、§14.1、§15.3 已收敛到新契约。决策与实施见 `docs/notes/2026-11-10-quno-collector-redesign.md`。
+- 2026-11-15 v2 交互落地：主消息流零任务卡、「工作」入口入会话头、Worker 行直开原生会话（taskActivity/task-detail/task-card 退役）、Worker 只读会话（composer chain 接管）与 client-only 返回导航、workerDetail Remote；契约收敛 §2/§5.3/§13.4/§13.6/§13.6b/§13.7/§15.1，落地记录 §18.4（实施记录 `docs/notes/2026-11-15-quno-worker-session-impl.md`）。
 - 2026-11-14 Router/Worker 交互定稿与 P0+P1 落地：一个事实源三种投影、用户状态机、relay 沟通准入、第一人称 Router、内部输入入队前后隐藏（含 QueueDock 过滤 seam 插件侧实现）、只读执行记录（`taskActivity` Remote + 脱敏分页）；契约收敛 §2/§5/§8/§10/§13/§15，落地记录见 §18.3（设计见 `docs/notes/2026-11-14-quno-router-worker-product-and-program-design.md`，实施记录见 `docs/notes/2026-11-14-quno-router-worker-implementation.md`）。

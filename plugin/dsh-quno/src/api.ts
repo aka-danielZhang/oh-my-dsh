@@ -12,7 +12,6 @@
 import { localClock, zonedToEpoch } from './util.ts'
 import type { QunoHost } from './service.ts'
 import { presentTask } from './presentation.ts'
-import { projectTaskActivity } from './activity.ts'
 import type {
   AttentionWire,
   EvalDetailWire,
@@ -28,8 +27,8 @@ import type {
   CollectorTypeWire,
   CollectorWire,
   SourceWire,
-  TaskActivityWire,
   TaskWire,
+  WorkerDetailWire,
   ThreadDetailWire,
   ThreadWire,
   TicketDetailWire,
@@ -705,41 +704,41 @@ function toTaskWire(repo: DomainRepository, ticket: TicketRecord): TaskWire {
 }
 
 /**
- * One page of a task's read-only execution record (design §9.3). The session
- * is resolved from the ticket's OWN latest assignment; a missing record or an
- * unreadable session is an explicit note, never fabricated activity.
+ * One worker's inspect-opening facts (design v2 §9.3). The executor session is
+ * resolved from the ticket's OWN latest assignment — the caller supplies a
+ * ticket id and the Host answers with the session id plus the identity echo,
+ * so a fabricated session id can never be smuggled through the client.
  */
-export async function buildTaskActivity(
+export async function buildWorkerDetail(
   host: QunoHost,
-  request: { readonly taskId: string; readonly cursor?: number; readonly limit?: number },
-): Promise<TaskActivityWire> {
-  const ticket = host.repo.getTicket(request.taskId)
+  request: { readonly ticketId: string },
+): Promise<WorkerDetailWire> {
+  const ticket = host.repo.getTicket(request.ticketId)
   if (ticket === undefined) {
-    return { items: [], nextCursor: null, truncated: false, sessionIdentity: null, note: 'unknown-task' }
+    return {
+      ticketId: request.ticketId,
+      title: '',
+      status: 'dropped',
+      executorSessionId: null,
+      canStop: false,
+      canRetry: false,
+      note: 'unknown-ticket',
+    }
   }
-  const assignment = host.repo.listAssignmentsByTicket(ticket.id).at(-1)
-  if (assignment === undefined) {
-    return { items: [], nextCursor: null, truncated: false, sessionIdentity: null, note: 'no-execution-session' }
-  }
-  const reader = host.sessionReader()
-  if (reader === undefined) {
-    return { items: [], nextCursor: null, truncated: false, sessionIdentity: null, note: 'session-query-unavailable' }
-  }
-  let events: readonly { readonly type: string; readonly seq: number; readonly time: number; readonly data: unknown }[]
-  try {
-    const snapshot = await reader.readSession(assignment.executorSessionId)
-    events = snapshot.events
-  } catch {
-    return { items: [], nextCursor: null, truncated: false, sessionIdentity: null, note: 'session-missing' }
-  }
-  const projected = projectTaskActivity(events, request.cursor ?? null, request.limit)
-  const first = events[0]
+  const assignment = host.repo.listAssignmentsByTicket(ticket.id).at(-1) ?? null
+  const presentation = presentTask({
+    ticket,
+    assignment,
+    latestRun: assignment === null ? null : host.repo.listWorkerRunsByAssignment(assignment.id).at(-1) ?? null,
+  })
   return {
-    ...projected,
-    sessionIdentity: {
-      sessionId: assignment.executorSessionId,
-      startedAt: first === undefined ? null : first.time,
-    },
+    ticketId: ticket.id,
+    title: ticket.title,
+    status: presentation.status,
+    executorSessionId: assignment?.executorSessionId ?? null,
+    canStop: presentation.canCancel,
+    canRetry: presentation.canRetry,
+    ...(assignment === null ? { note: 'session-not-assigned' } : {}),
   }
 }
 

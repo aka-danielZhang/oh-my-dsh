@@ -25,7 +25,7 @@ import {
   buildNoticeDetail,
   buildQunoState,
   buildRecentEvents,
-  buildTaskActivity,
+  buildWorkerDetail,
   buildThreadDetail,
   buildTicketDetail,
   buildTriggerDetail,
@@ -55,7 +55,6 @@ import { Outbox, type HistoryReader, type MainConversationFace } from './outbox.
 import { registerQunoPresets } from './presets.ts'
 import { recall, type RecallRequest, type RecallResult } from './recall.ts'
 import { presentTask } from './presentation.ts'
-import { projectTaskActivity } from './activity.ts'
 import type { AttentionAct } from './contracts.ts'
 import type {
   EvalCandidateView,
@@ -77,7 +76,7 @@ import type {
   QunoWireState,
   CollectorOptionsPageWire,
   CollectorProbeWire,
-  TaskActivityWire,
+  WorkerDetailWire,
   ThreadDetailWire,
   TicketDetailWire,
   TriggerDetailWire,
@@ -1434,18 +1433,11 @@ export class QunoHost implements QunoServiceFace {
     return await this.taskCommandForClient(request)
   }
 
-  /**
-   * One page of a task's read-only execution record (design §9.3). The
-   * executor session is resolved from the ticket's latest assignment — never
-   * from a caller-supplied session id — and the projection happens on the
-   * Host: whitelist event types, redacted arguments, bounded text.
-   */
-  async taskActivityForClient(request: {
-    readonly taskId: string
-    readonly cursor?: number
-    readonly limit?: number
-  }): Promise<TaskActivityWire> {
-    return await buildTaskActivity(this, request)
+  /** One worker's inspect-opening facts, resolved Host-side from the ticket id (design v2 §9.3). */
+  async workerDetailForClient(request: {
+    readonly ticketId: string
+  }): Promise<WorkerDetailWire> {
+    return await buildWorkerDetail(this, request)
   }
 
   /** Short-term mute from the UI. */

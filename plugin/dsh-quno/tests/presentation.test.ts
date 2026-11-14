@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { activityKindForTool, presentTask, resultRevisionOf } from '../src/presentation.ts'
+import { activityKindForTool, presentTask, resultRevisionOf, workerLabelOf } from '../src/presentation.ts'
 import type { AssignmentRecord, TicketRecord, WorkerRunRecord } from '../src/core/model.ts'
 
 // Minimal durable slices; only the fields the projection reads are present.
@@ -142,4 +142,12 @@ test('activity labels come from the tool declarations, never from prose', () => 
   assert.equal(activityKindForTool('read', null), 'read-file')
   assert.equal(activityKindForTool('web_fetch', null), 'read-web')
   assert.equal(activityKindForTool('mystery_tool', null), 'working')
+})
+
+test('the Worker label is a stable display hash, never a second identity', () => {
+  assert.equal(workerLabelOf('ticket-1'), workerLabelOf('ticket-1'))
+  assert.notEqual(workerLabelOf('ticket-1'), workerLabelOf('ticket-2'))
+  assert.match(workerLabelOf('ticket-1'), /^Worker [0-9a-f]{8}$/)
+  // Different-length ids hash stably too (padding, not truncation).
+  assert.equal(workerLabelOf('a'.repeat(64)), workerLabelOf('a'.repeat(64)))
 })
