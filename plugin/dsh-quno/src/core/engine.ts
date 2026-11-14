@@ -1126,14 +1126,22 @@ export class Engine {
         // A once Ticket with an open followed Thread waits for that Thread.
       }
 
-      this.repo.enqueueEffect({
-        kind: 'router-relay',
-        key: ticket.id,
-        payload: { ticketId: ticket.id, assignmentId: assignment.id, reportState: report.state },
-        now: input.now,
-      })
+      // Communication admission (design §8.5): only a state that means
+      // something to the user enters the main conversation. Plain progress
+      // and silent waits only update the task projection; a dropped ticket
+      // stays quiet. The Relay effect stays single-row-per-ticket: a newer
+      // meaningful report replaces an undelivered older one.
+      const relayed = reportRelayWorthy(report.state, report.question !== undefined)
+      if (relayed) {
+        this.repo.enqueueEffect({
+          kind: 'router-relay',
+          key: ticket.id,
+          payload: { ticketId: ticket.id, assignmentId: assignment.id, reportState: report.state },
+          now: input.now,
+        })
+      }
       const latest = this.repo.getTicket(ticket.id) ?? ticket
-      return { ticket: latest, ended, relayed: true }
+      return { ticket: latest, ended, relayed }
     })
   }
 
@@ -2006,6 +2014,23 @@ export function normalizeReport(report: WorkerReport, now: number): WorkerReport
     artifacts: report.artifacts.slice(0, 20),
     ...(report.question === undefined ? {} : { question: { question: report.question.question.slice(0, 2000), ...(report.question.triggerId === undefined ? {} : { triggerId: report.question.triggerId }) } }),
   }
+}
+
+/**
+ * Communication admission for one Worker report (design §8.5): whether the
+ * report earns a main-conversation relay.
+ *
+ * - `ready`: a real result — relayed (once tickets end here; persistent
+ *   tickets relay each new result revision);
+ * - `blocked`/`waiting` WITH a question: the user must answer — relayed;
+ * - `failed`: an actionable failure — relayed;
+ * - `progress`, silent `waiting`, `dropped`: only the task projection
+ *   changes; the main conversation stays quiet.
+ */
+export function reportRelayWorthy(state: ReportState, hasQuestion: boolean): boolean {
+  if (state === 'ready' || state === 'failed') return true
+  if (state === 'blocked' || state === 'waiting') return hasQuestion
+  return false
 }
 
 /** Deduplicate channel refs by (source, thread, address). */

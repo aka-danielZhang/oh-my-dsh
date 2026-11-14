@@ -31,6 +31,8 @@ declare module '@deepseek-ai/dsh-llm' {
     'quno-eval': {
       readonly kind: 'quno-eval'
       readonly form: 'relay'
+      /** Program input: queue display and the chat flow hide it (design §7). */
+      readonly presentation: 'internal'
       readonly summary: string
       readonly evalId: string
       readonly threadId: string
@@ -39,6 +41,8 @@ declare module '@deepseek-ai/dsh-llm' {
     'quno-report': {
       readonly kind: 'quno-report'
       readonly form: 'relay'
+      /** Program input: queue display and the chat flow hide it (design §7). */
+      readonly presentation: 'internal'
       readonly summary: string
       readonly ticketId: string
       readonly assignmentId: string
@@ -47,6 +51,8 @@ declare module '@deepseek-ai/dsh-llm' {
     'quno-input': {
       readonly kind: 'quno-input'
       readonly form: 'relay' | 'notice'
+      /** Program input: hidden from queue display wherever it lands. */
+      readonly presentation: 'internal'
       readonly summary: string
       readonly ticketId: string
       readonly runId?: string
@@ -55,6 +61,8 @@ declare module '@deepseek-ai/dsh-llm' {
     'quno-worker-prompt': {
       readonly kind: 'quno-worker-prompt'
       readonly form: 'relay'
+      /** Program input: hidden from queue display wherever it lands. */
+      readonly presentation: 'internal'
       readonly summary: string
       readonly ticketId: string
       readonly runId?: string
@@ -70,6 +78,8 @@ export interface TransportSendInput {
   readonly source: {
     readonly kind: string
     readonly form: 'relay' | 'notice'
+    /** Every program-injected input is display-internal (design §7.1). */
+    readonly presentation: 'internal'
     readonly summary: string
     readonly runId?: string
     readonly evalId?: string

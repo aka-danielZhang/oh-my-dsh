@@ -17,7 +17,8 @@ import {
   senseRowState,
   senseRowTone,
   taskSections,
-  taskStatusKey,
+  taskUserStatus,
+  taskUserStatusKey,
   type SensePageInput,
 } from '../src/client/panel-state.ts'
 
@@ -34,28 +35,39 @@ const emptyPage: SensePageInput = {
 
 test('groupTasks buckets tasks and keeps empty buckets empty', () => {
   const empty = groupTasks([])
-  assert.deepEqual(empty.needsAction, [])
-  assert.deepEqual(empty.running, [])
+  assert.deepEqual(empty.needsYou, [])
+  assert.deepEqual(empty.active, [])
   assert.deepEqual(empty.settled, [])
 
   const tasks = [
-    { id: 'a', status: 'failed' },
+    { id: 'a', status: 'running', presentationStatus: 'needs-you' },
     { id: 'b', status: 'interrupted' },
     { id: 'c', status: 'running' },
     { id: 'd', status: 'cancelled' },
     { id: 'e', status: 'done' },
   ]
   const groups = groupTasks(tasks)
-  assert.deepEqual(groups.needsAction.map(task => task.id), ['a', 'b'])
-  assert.deepEqual(groups.running.map(task => task.id), ['c'])
+  assert.deepEqual(groups.needsYou.map(task => task.id), ['a', 'b'])
+  assert.deepEqual(groups.active.map(task => task.id), ['c'])
   assert.deepEqual(groups.settled.map(task => task.id), ['d', 'e'])
   assert.equal(groups.settled.length, 2)
 })
 
-test('a cancelled task is settled, never "needs action"', () => {
+test('a cancelled task is settled, never "needs you"', () => {
   const groups = groupTasks([{ status: 'cancelled' }])
-  assert.equal(groups.needsAction.length, 0)
+  assert.equal(groups.needsYou.length, 0)
   assert.equal(groups.settled.length, 1)
+})
+
+test('presentationStatus wins over the legacy status; legacy rows fall back', () => {
+  assert.equal(taskUserStatus({ status: 'interrupted', presentationStatus: 'needs-you' }), 'needs-you')
+  assert.equal(taskUserStatus({ status: 'running', presentationStatus: 'accepted' }), 'accepted')
+  assert.equal(taskUserStatus({ status: 'interrupted' }), 'needs-you')
+  assert.equal(taskUserStatus({ status: 'waiting' }), 'waiting')
+  assert.equal(taskUserStatus({ status: 'weird' }), 'done')
+  assert.equal(taskUserStatusKey('needs-you'), 'taskStatusNeedsYou')
+  assert.equal(taskUserStatusKey('accepted'), 'taskStatusAccepted')
+  assert.equal(taskUserStatusKey('dropped'), 'taskStatusDropped')
 })
 
 test('the dynamic page separates "no Sense" from "no events"', () => {
@@ -149,7 +161,7 @@ test('task sections follow the status table and hide empty sections', () => {
     result: null as string | null,
     resultDigest: null as string | null,
     artifacts: [] as readonly unknown[],
-    childSessionId: null as string | null,
+    childSessionId: 'child-1' as string | null,
     error: null as unknown,
   }
 
@@ -157,17 +169,19 @@ test('task sections follow the status table and hide empty sections', () => {
   assert.equal(running.plan, true)
   assert.equal(running.prompt, true)
   assert.equal(running.result, false)
-  assert.equal(running.cancel, true)
-  assert.equal(running.resume, false)
+  assert.equal(running.stop, true)
+  assert.equal(running.retry, false)
+  // Running work shows its record first.
+  assert.equal(running.record, true)
 
   // A running task without a plan renders no plan heading at all.
   assert.equal(taskSections(base).plan, false)
 
-  const done = taskSections({ ...base, status: 'done', result: 'ok', childSessionId: 'child-1' })
+  const done = taskSections({ ...base, status: 'done', result: 'ok' })
   assert.equal(done.result, true)
-  assert.equal(done.child, true)
+  assert.equal(done.record, true)
   assert.equal(done.plan, false)
-  assert.equal(done.cancel, false)
+  assert.equal(done.stop, false)
   assert.equal(done.artifacts, false, 'no artifacts means no artifacts section')
 
   const doneWithArtifact = taskSections({
@@ -180,23 +194,30 @@ test('task sections follow the status table and hide empty sections', () => {
 
   const failed = taskSections({ ...base, status: 'failed', error: { code: 'x', message: 'y' } })
   assert.equal(failed.error, true)
-  assert.equal(failed.resume, true)
-  assert.equal(failed.cancel, true)
+  assert.equal(failed.retry, true)
+  assert.equal(failed.stop, false, 'an ended failure cannot be stopped any more')
 
-  const interrupted = taskSections({ ...base, status: 'interrupted', error: { code: 'x', message: 'y' } })
-  assert.equal(interrupted.error, true)
-  assert.equal(interrupted.resume, true)
+  const needsYou = taskSections({
+    ...base,
+    status: 'running',
+    presentationStatus: 'needs-you',
+    question: { question: '要哪个群？' },
+  })
+  assert.equal(needsYou.question, true)
+  assert.equal(needsYou.record, true)
 
-  const cancelled = taskSections({ ...base, status: 'cancelled', childSessionId: 'child-1' })
+  // A record-less task hides the record section entirely.
+  const noRecord = taskSections({ ...base, childSessionId: null })
+  assert.equal(noRecord.record, false)
+
+  const cancelled = taskSections({ ...base, status: 'cancelled' })
   assert.equal(cancelled.cancelledNote, true)
   assert.equal(cancelled.prompt, true)
-  assert.equal(cancelled.child, true)
-  assert.equal(cancelled.cancel, false)
+  assert.equal(cancelled.stop, false)
 })
 
 test('status keys are localised and never leak the raw enum', () => {
-  assert.equal(taskStatusKey('done'), 'taskStatusDone')
-  assert.equal(taskStatusKey('weird'), 'statusUnknown')
+  assert.equal(taskUserStatusKey('done'), 'taskStatusDone')
   assert.equal(attentionStatusKey('snoozed'), 'statusSnoozed')
   assert.equal(attentionStatusKey('weird'), 'statusUnknown')
 })

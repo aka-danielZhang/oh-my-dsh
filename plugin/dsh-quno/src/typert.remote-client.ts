@@ -22,6 +22,7 @@ import type {
   QunoWireState,
   SenseOptionsPageWire,
   SenseProbeWire,
+  TaskActivityWire,
   ThreadDetailWire,
   TicketDetailWire,
   TriggerDetailWire,
@@ -40,6 +41,7 @@ import {
   probeSenseInput,
   senseCommandInput,
   senseOptionsInput,
+  taskActivityInput,
   taskCommandInput,
   threadDetailInput,
   ticketDetailInput,
@@ -83,8 +85,10 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     }) => Promise<RemoteResult<QunoWireState>>
     taskCommand: (request: {
       taskId: string
-      action: 'resume' | 'abandon' | 'cancel'
+      action: 'resume' | 'abandon' | 'cancel' | 'answer'
+      text?: string
     }) => Promise<RemoteResult<QunoWireState>>
+    taskActivity: (request: { taskId: string; cursor?: number; limit?: number }) => Promise<RemoteResult<TaskActivityWire>>
     mute: (request: { minutes?: number; until?: string; cancel?: boolean }) => Promise<RemoteResult<QunoWireState>>
     eventsRecent: (request: { limit?: number }) => Promise<RemoteResult<{ events: EventWire[] }>>
     probeSense: (request: { instanceId: string }) => Promise<RemoteResult<SenseProbeWire>>
@@ -138,8 +142,10 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     }) => Promise<RemoteResult<QunoWireState>>
     'quno/taskCommand': (request: {
       taskId: string
-      action: 'resume' | 'abandon' | 'cancel'
+      action: 'resume' | 'abandon' | 'cancel' | 'answer'
+      text?: string
     }) => Promise<RemoteResult<QunoWireState>>
+    'quno/taskActivity': (request: { taskId: string; cursor?: number; limit?: number }) => Promise<RemoteResult<TaskActivityWire>>
     'quno/mute': (request: { minutes?: number; until?: string; cancel?: boolean }) => Promise<RemoteResult<QunoWireState>>
     'quno/eventsRecent': (request: { limit?: number }) => Promise<RemoteResult<{ events: EventWire[] }>>
     'quno/probeSense': (request: { instanceId: string }) => Promise<RemoteResult<SenseProbeWire>>
@@ -246,6 +252,14 @@ export const TYPERT_REMOTE: TypertRemoteContribution = {
       invocation: direct,
       parameters: parameter('request', taskCommandInput, 'dsh-quno/api-types#TaskCommandInput'),
       result: STATE,
+      sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
+    },
+    {
+      id: 'dsh-quno#quno/taskActivity', service: 'quno', namespace: 'quno', method: 'taskActivity',
+      implementation: 'taskActivityForClient',
+      invocation: direct,
+      parameters: parameter('request', taskActivityInput, 'dsh-quno/api-types#TaskActivityInput'),
+      result: resultCodec('dsh-quno/api-types#TaskActivityWire'),
       sourceLocation: { file: 'src/api.ts', line: 1, column: 1 },
     },
     {

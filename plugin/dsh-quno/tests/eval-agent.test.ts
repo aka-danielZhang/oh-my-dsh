@@ -133,6 +133,7 @@ test('an eval turn reads the candidate and submits a decision through the preset
       source: {
         kind: 'quno-eval',
         form: 'relay',
+        presentation: 'internal',
         summary: '评估 1 条来源事件',
         evalId: 'eval_1',
         threadId: 'thr_1',

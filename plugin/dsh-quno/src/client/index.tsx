@@ -23,6 +23,7 @@ import React from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-api-gateway/client'
 import type {} from '@deepseek-ai/dsh-api-session-controller/client'
+import type { QueueAction } from '@deepseek-ai/dsh-api-session-controller/types'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
@@ -37,6 +38,7 @@ import type { QunoLocaleKey } from './locales.ts'
 import type { QunoRemoteFace } from './store.ts'
 import type { SidebarRightFace } from './capsule.tsx'
 import type { QunoConversationFace } from './report-actions.tsx'
+import type { QunoQueueDockInjected } from './queue-dock.tsx'
 import TYPERT_REMOTE from '../typert.remote-client.ts'
 import { QunoClientStore } from './store.ts'
 import { en, zh } from './locales.ts'
@@ -51,6 +53,8 @@ import { QunoReportActions } from './report-actions.tsx'
 import { QunoEntryPanel, QunoEntryGlyph } from './entry-panel.tsx'
 import { QunoOnboardingHost, onboarding } from './sense-onboarding.tsx'
 import { qunoNoticeDefinition } from './report-turn.ts'
+import { registerInternalQueueKinds } from './queue-internal.ts'
+import { QunoQueueDock, QUNO_QUEUE_CSS } from './queue-dock.tsx'
 import { qunoWorkspaceSessionVisible, surfaceEnabled } from './view-model.ts'
 import { QUNO_PANEL_ID, QUNO_PANEL_KIND } from './right-tab.ts'
 import { QUNO_CSS } from './ui.tsx'
@@ -193,6 +197,33 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     const layout = ctx.get('layout') as { selectPanel(panelId: null): void } | undefined
     layout?.selectPanel(null)
   }
+  // Queue-dock operations, resolved per session exactly like the stock dock's
+  // inject (the conversation service is session-scoped; image URLs come from
+  // uiConversation). Structural faces — no harness value imports.
+  const queueDockFace = (sessionId: SessionId): QunoQueueDockInjected => {
+    const sessionsRoot = ctx.get('sessions') as unknown as {
+      scope?(id: string): { get(name: string): unknown } | undefined
+    } | undefined
+    const actx = sessionsRoot?.scope?.(sessionId)
+    if (actx === undefined) throw new Error(`queue dock: session "${String(sessionId)}" resolved no scope`)
+    const conversation = actx.get('conversation') as
+      | {
+        updateQueue(itemId: string, action: QueueAction): Promise<void>
+        input: { for(scope: unknown): { notify(level: 'info' | 'error', text: string): void } }
+      }
+      | undefined
+    if (conversation === undefined) throw new Error('queue dock: conversation service unavailable')
+    const imageFace = uiConversation as unknown as
+      | { imageUrl?(id: string, attachment: { attachmentId: string }): Promise<string> }
+      | undefined
+    return {
+      updateQueue: (itemId, action) => conversation.updateQueue(itemId, action),
+      notify: (level, text) => { conversation.input.for(actx).notify(level, text) },
+      loadImage: attachment => imageFace?.imageUrl !== undefined
+        ? imageFace.imageUrl(sessionId, attachment)
+        : Promise.reject(new Error('queue dock: image URL service unavailable')),
+    }
+  }
   // The panel linkage degrades to the child-session jump while the gated
   // surface is disposed or the service is missing (an unregistered kind throws).
   let panelReady = false
@@ -263,11 +294,30 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
       name: 'tool.call.toolview',
       key: 'quno_task',
-      inject: () => ({ store, t, openSession, openPanel }),
+      inject: () => ({ store, t, openPanel }),
     }, QunoTaskCard))
 
-    // A durable notice message becomes one hidden Chat node bound to its own
-    // Turn; the tail card below reads it back by notification id.
+    // Queue display filter (design §7.1): program-injected inputs never
+    // surface as queued rows above the composer. Two signals cooperate — the
+    // forward `presentation: 'internal'` flag on new sources and this legacy
+    // kind registry for durable records that cannot be rewritten. Ungated:
+    // queued program rows from before a master-switch flip must still hide.
+    ctx.effect(() => registerInternalQueueKinds(['quno-eval', 'quno-report', 'quno-notify', 'quno-task']), 'dsh-quno: internal queue kinds')
+
+    // The internal-aware queue strip shadows the stock dock entry (same entry
+    // id `queue`, lower priority renders): identical UI, plus the display
+    // filter. Human rows keep edit/remove/steer; the filter only affects
+    // display and the model still receives every queued message.
+    ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
+      name: 'conversation.input.dock',
+      id: 'queue',
+      priority: -1,
+      locale: 'conversation',
+      inject: (sessionId: SessionId) => queueDockFace(sessionId),
+    }, QunoQueueDock))
+
+    // A durable program input becomes one hidden Chat node bound to its own
+    // Turn; the tail card below reads notices back by notification id.
     const noticeRegistry = uiConversation as unknown as {
       events?: { register(definition: unknown): () => void }
     } | undefined
@@ -308,6 +358,18 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       style.dataset.plugin = 'dsh-quno'
       style.dataset.pluginCss = tagId
       style.textContent = QUNO_CSS
+      document.head.appendChild(style)
+      return () => { style.remove() }
+    })
+
+    // The queue strip's stylesheet (same claim discipline as the skin CSS).
+    ctx.effect(() => {
+      const tagId = 'dsh-quno/queue-css'
+      if (document.querySelector(`style[data-plugin-css="${tagId}"]`) !== null) return () => {}
+      const style = document.createElement('style')
+      style.dataset.plugin = 'dsh-quno'
+      style.dataset.pluginCss = tagId
+      style.textContent = QUNO_QUEUE_CSS
       document.head.appendChild(style)
       return () => { style.remove() }
     })

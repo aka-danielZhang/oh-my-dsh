@@ -1,15 +1,17 @@
 /**
- * Binds a delivered notice to the Turn it was injected into.
+ * Binds program-injected inputs to the Turn they were injected into, and
+ * keeps them out of the visible flow (design §7.2).
  *
- * The Host already stamps every proactive message's `source.notificationId`
- * into the durable `user/message` event, so the client does not need a new
- * event type: this Definition matches that message, folds one Context per
- * notification, and materializes a HIDDEN Chat node. Hidden means it adds no
- * row and no grouping effect; `ChatNodeStore.turnDataSource(turn, kind)`
- * exposes it per Turn, which is exactly what the turn-tail card reads.
+ * The Host stamps every program message's `source.kind` into the durable
+ * `user/message` event. This Definition matches ALL Quno program sources
+ * (eval candidates, report relays, notifications, task notices), claims each
+ * one exclusively on the Chat target, and materializes a HIDDEN node. Hidden
+ * means: no row, no grouping effect — but `ChatNodeStore.turnDataSource(turn,
+ * kind)` still publishes it per Turn, which is what the turn-tail report card
+ * reads.
  *
- * The card therefore survives reloads, stays bound to its own Turn, and no
- * longer depends on "the newest notice within the last hour".
+ * The Router's own natural-language reply on the same Turn renders natively:
+ * only the program INPUT is hidden, never Quno's answer.
  *
  * @module dsh-quno/client/report-turn
  */
@@ -22,16 +24,24 @@ import type {
 } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 
-/** Payload published onto the Chat target for one delivered notice. */
+/** Payload published onto the Chat target for one program input. */
 export interface QunoNoticeChatData {
   readonly notificationId: string
-  readonly kind: 'notify' | 'task'
+  readonly kind: 'notify' | 'task' | 'eval' | 'report'
   readonly taskId?: string
 }
 
+/** The program source kinds the main conversation hides on sight. */
+const INTERNAL_SOURCE_KINDS: ReadonlySet<string> = new Set([
+  'quno-eval',
+  'quno-report',
+  'quno-notify',
+  'quno-task',
+])
+
 declare module '@deepseek-ai/dsh-client-ui-chat/client' {
   interface ChatNodeDataMap {
-    /** A proactive report or task result bound to its own Turn. */
+    /** A program input bound to its own Turn (hidden node, queryable per Turn). */
     'quno-notice': QunoNoticeChatData
   }
 }
@@ -41,16 +51,41 @@ interface QunoNoticeState extends QunoNoticeChatData {
   readonly turn: number | null
 }
 
-/** Structural shape of the injected message source both kinds share. */
+/** Structural shape of the injected message source all kinds share. */
 interface QunoMessageSource {
   readonly kind?: string
   readonly notificationId?: string
   readonly taskId?: string
+  readonly evalId?: string
+  readonly ticketId?: string
+  readonly assignmentId?: string
 }
 
 function sourceOf(event: { readonly data: unknown }): QunoMessageSource | undefined {
   const data = event.data as { readonly source?: QunoMessageSource } | undefined
   return data?.source
+}
+
+/**
+ * One stable business identity per program input, so the fold survives
+ * reloads: notifications use their id, evals the eval id, report relays the
+ * assignment they report about.
+ */
+function claimIdOf(source: QunoMessageSource): string | null {
+  if (typeof source.notificationId === 'string' && source.notificationId !== '') return source.notificationId
+  if (typeof source.evalId === 'string' && source.evalId !== '') return source.evalId
+  if (typeof source.ticketId === 'string' && source.ticketId !== '' && typeof source.assignmentId === 'string' && source.assignmentId !== '') {
+    return `${source.ticketId}:${source.assignmentId}`
+  }
+  if (typeof source.ticketId === 'string' && source.ticketId !== '') return source.ticketId
+  return null
+}
+
+function kindOf(source: QunoMessageSource): QunoNoticeChatData['kind'] {
+  if (source.kind === 'quno-task') return 'task'
+  if (source.kind === 'quno-eval') return 'eval'
+  if (source.kind === 'quno-report') return 'report'
+  return 'notify'
 }
 
 function turnOf(match: ConversationMatch): number | null {
@@ -69,28 +104,29 @@ export const qunoNoticeDefinition: ConversationNodeDefinition<QunoNoticeState> =
   match: (event) => {
     if (event.type !== 'user/message') return null
     const source = sourceOf(event)
-    if (source?.kind !== 'quno-notify' && source?.kind !== 'quno-task') return null
-    if (typeof source.notificationId !== 'string' || source.notificationId === '') return null
-    // Claim the injected program message on the Chat target: the report card
-    // below is its visible form, so a phantom user bubble must not render.
-    return { id: source.notificationId, role: 'start', exclusive: true }
+    if (source?.kind === undefined || !INTERNAL_SOURCE_KINDS.has(source.kind)) return null
+    const id = claimIdOf(source)
+    if (id === null) return null
+    // Claim the program message on the Chat target: the hidden node (and, for
+    // notices, the turn-tail card) is its visible form, so no phantom user
+    // bubble renders.
+    return { id, role: 'start', exclusive: true }
   },
   start: (_context, match) => {
-    const source = sourceOf(match.event)
-    // `match` only accepts a non-empty notificationId, so this never falls back.
-    const notificationId = typeof source?.notificationId === 'string' ? source.notificationId : ''
+    const source = sourceOf(match.event) ?? {}
     return {
-      notificationId,
-      kind: source?.kind === 'quno-task' ? 'task' : 'notify',
-      ...(typeof source?.taskId === 'string' && source.taskId !== '' ? { taskId: source.taskId } : {}),
+      // `match` only accepts a non-empty id, so the fallback never triggers.
+      notificationId: typeof source.notificationId === 'string' ? source.notificationId : (claimIdOf(source) ?? ''),
+      kind: kindOf(source),
+      ...(typeof source.taskId === 'string' && source.taskId !== '' ? { taskId: source.taskId } : {}),
       turn: turnOf(match),
     }
   },
   update: (context) => context.state,
   buildViewNode: (context) => {
     if (context.state === undefined) return null
-    // A hidden node keeps the report out of the visible flow (no row, no
-    // grouping effect) while `turnDataSource` still publishes it per Turn.
+    // A hidden node keeps the program input out of the visible flow (no row,
+    // no grouping effect) while `turnDataSource` still publishes it per Turn.
     return {
       key: context.key,
       kind: 'quno-notice',

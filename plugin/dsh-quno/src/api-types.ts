@@ -98,7 +98,26 @@ export interface RunWire {
 export interface TaskWire {
   readonly id: string
   readonly title: string
+  /** Legacy coarse status (kept for old clients; mirrors the ended outcome). */
   readonly status: string
+  /**
+   * The unified user-facing status (design §4.2). Clients prefer this field;
+   * it is absent on stale cached snapshots, which then fall back to `status`.
+   */
+  readonly presentationStatus?: string
+  /** Coarse activity bucket from the registered-tool display declarations. */
+  readonly activityKind?: string | null
+  /** Latest recorded activity time (no heartbeat fabrication). */
+  readonly lastActivityAt?: number | null
+  readonly canCancel?: boolean
+  readonly canRetry?: boolean
+  readonly canAnswer?: boolean
+  /** The read-only execution record is reachable (running included). */
+  readonly canViewActivity?: boolean
+  /** Stable discriminator of the latest result (persistent dedupe). */
+  readonly resultRevision?: string | null
+  /** Where the mandate came from: a human turn or an accepted source. */
+  readonly originLabel?: 'direct' | 'source'
   readonly childSessionId: string | null
   readonly resultDigest: string | null
   readonly result: string | null
@@ -106,10 +125,75 @@ export interface TaskWire {
   readonly plan: string | null
   /** The delegating prompt (bounded), so the panel detail can show the ask. */
   readonly prompt: string | null
+  readonly question: { readonly id: string; readonly question: string } | null
   readonly artifacts: readonly { readonly kind: string; readonly label: string; readonly uri: string }[]
   readonly error: { readonly code: string; readonly message: string } | null
   readonly createdAt: number
   readonly settledAt: number | null
+}
+
+/** One read-only execution-record entry (design §9.3). */
+export type TaskActivityItemWire =
+  | {
+    readonly kind: 'task-input'
+    readonly seq: number
+    readonly at: number
+    readonly text: string
+    readonly textTruncated: boolean
+    /** The program source kind of the injected input, when not the user's own. */
+    readonly source: string | null
+  }
+  | {
+    readonly kind: 'worker-say'
+    readonly seq: number
+    readonly at: number
+    readonly text: string
+    readonly textTruncated: boolean
+    readonly interrupted: boolean
+  }
+  | {
+    readonly kind: 'tool'
+    readonly seq: number
+    readonly at: number
+    readonly tool: string
+    /** Coarse display bucket from the registered-tool declarations. */
+    readonly display: string
+    readonly argsSummary: string | null
+    readonly argsTruncated: boolean
+    readonly resultSummary?: string | null
+    readonly resultTruncated?: boolean
+    readonly isError?: boolean
+    readonly resultSeq?: number | null
+  }
+  | {
+    readonly kind: 'tool-result'
+    readonly seq: number
+    readonly at: number
+    readonly callId?: string
+    readonly resultSummary: string | null
+    readonly resultTruncated: boolean
+    readonly isError: boolean
+  }
+  | {
+    readonly kind: 'turn'
+    readonly seq: number
+    readonly at: number
+    readonly turn: number
+    readonly phase: 'start' | 'end'
+    readonly reason?: string
+  }
+
+/** One page of the read-only execution record. */
+export interface TaskActivityWire {
+  readonly items: readonly TaskActivityItemWire[]
+  /** Cursor for the next page; `null` when the record is exhausted. */
+  readonly nextCursor: number | null
+  /** True when at least one more page exists. */
+  readonly truncated: boolean
+  /** Diagnostic identity of the executor session (never shown on cards). */
+  readonly sessionIdentity: { readonly sessionId: string; readonly startedAt: number | null } | null
+  /** Present when the record cannot be read (session missing, for instance). */
+  readonly note?: string
 }
 
 /** One ingested Sense event in the panel's recent-events summary. */
@@ -536,7 +620,15 @@ export const senseCommandInput = z.object({
 
 export const taskCommandInput = z.object({
   taskId: z.string().min(1).max(200),
-  action: z.enum(['resume', 'abandon', 'cancel']),
+  action: z.enum(['resume', 'abandon', 'cancel', 'answer']),
+  /** The user's answer text; required for the `answer` action only. */
+  text: z.string().min(1).max(8000).optional(),
+})
+
+export const taskActivityInput = z.object({
+  taskId: z.string().min(1).max(300),
+  cursor: z.number().int().min(0).optional(),
+  limit: z.number().int().min(1).max(100).optional(),
 })
 
 export const probeSenseInput = z.object({

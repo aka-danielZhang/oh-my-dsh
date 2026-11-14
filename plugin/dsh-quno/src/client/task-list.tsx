@@ -1,6 +1,8 @@
 /**
- * 任务: the delegated-task list, grouped by what the user can do about it,
- * plus the detail routing (including the honest "this task is gone" page).
+ * 任务: the delegated-task list, grouped by what the user can do about it
+ * (需要你 / 进行中 / 已结束 — design §6.1), plus the detail routing (including
+ * the honest "this task is gone" page). Every row drills into the detail; the
+ * execution record is reached from there, never directly.
  *
  * @module dsh-quno/client/task-list
  */
@@ -10,7 +12,7 @@ import type { TaskWire } from '../api-types.ts'
 import type { QunoTranslate } from './locales.ts'
 import type { QunoClientStore, QunoSnapshot } from './store.ts'
 import { formatClock } from './format.ts'
-import { groupTasks, taskStatusKey, taskTone } from './panel-state.ts'
+import { groupTasks, taskTone, taskUserStatus, taskUserStatusKey } from './panel-state.ts'
 import {
   LoadingRows,
   MissingState,
@@ -48,30 +50,34 @@ export function TaskListPage(props: TaskListPageProps): React.ReactElement {
   }
 
   const groups = groupTasks(state.tasks)
-  const total = groups.needsAction.length + groups.running.length + groups.settled.length
+  const total = groups.needsYou.length + groups.active.length + groups.settled.length
   if (total === 0) {
     return <PanelEmpty icon="task" title={t('tasksEmptyTitle')} description={t('tasksEmptyDesc')} />
   }
 
-  const row = (task: TaskWire): React.ReactElement => (
-    <PanelListRow
-      key={task.id}
-      tone={taskTone(task.status)}
-      title={task.title}
-      subtitle={formatClock(task.settledAt ?? task.createdAt)}
-      meta={<StatusLabel tone={taskTone(task.status)}>{t(taskStatusKey(task.status))}</StatusLabel>}
-      onClick={() => { props.onOpen(task.id) }}
-      titleAttr={task.title}
-    />
-  )
+  const row = (task: TaskWire): React.ReactElement => {
+    const status = taskUserStatus(task)
+    const when = task.lastActivityAt ?? task.settledAt ?? task.createdAt
+    return (
+      <PanelListRow
+        key={task.id}
+        tone={taskTone(task)}
+        title={task.title}
+        subtitle={formatClock(when)}
+        meta={<StatusLabel tone={taskTone(task)}>{t(taskUserStatusKey(status))}</StatusLabel>}
+        onClick={() => { props.onOpen(task.id) }}
+        titleAttr={task.title}
+      />
+    )
+  }
 
   return (
     <div style={styles.stack}>
-      {groups.needsAction.length > 0 && (
-        <PanelSection title={t('taskGroupNeedsAction')}>{groups.needsAction.map(row)}</PanelSection>
+      {groups.needsYou.length > 0 && (
+        <PanelSection title={t('taskGroupNeedsYou')}>{groups.needsYou.map(row)}</PanelSection>
       )}
-      {groups.running.length > 0 && (
-        <PanelSection title={t('taskGroupRunning')}>{groups.running.map(row)}</PanelSection>
+      {groups.active.length > 0 && (
+        <PanelSection title={t('taskGroupActive')}>{groups.active.map(row)}</PanelSection>
       )}
       {groups.settled.length > 0 && (
         <PanelSection title={t('taskGroupSettled')}>{groups.settled.map(row)}</PanelSection>

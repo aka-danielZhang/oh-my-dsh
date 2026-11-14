@@ -425,6 +425,39 @@ test('a ready report completes a once Ticket and enqueues a Router relay', () =>
   assert.equal(endedAssignment?.state, 'ended')
 })
 
+test('communication admission: a progress report never enqueues a Router relay', () => {
+  const f = fixture()
+  const { ticket } = acceptFirstEval(f)
+  const assignment = f.repo.findActiveAssignment(ticket.id)
+  assert.ok(assignment)
+  f.engine.assignmentStarted({ assignmentId: assignment.id, now: now() })
+  const outcome = f.engine.report({
+    assignmentId: assignment.id,
+    report: { state: 'progress', summary: '还在读取', at: now(), artifacts: [] },
+    now: now(),
+  })
+  assert.equal(outcome.relayed, false)
+  assert.equal(f.repo.listDueEffects(now(), 20).some(item => item.kind === 'router-relay'), false)
+  // The report itself is durable on the assignment: the task projection moves.
+  assert.equal(f.repo.getAssignment(assignment.id)?.report?.state, 'progress')
+})
+
+test('communication admission: a dropped report ends the Ticket without waking the conversation', () => {
+  const f = fixture()
+  const { ticket } = acceptFirstEval(f)
+  const assignment = f.repo.findActiveAssignment(ticket.id)
+  assert.ok(assignment)
+  f.engine.assignmentStarted({ assignmentId: assignment.id, now: now() })
+  const outcome = f.engine.report({
+    assignmentId: assignment.id,
+    report: { state: 'dropped', summary: '无事可交付', at: now(), artifacts: [] },
+    now: now(),
+  })
+  assert.equal(outcome.ended, true)
+  assert.equal(outcome.relayed, false)
+  assert.equal(f.repo.listDueEffects(now(), 20).some(item => item.kind === 'router-relay'), false)
+})
+
 test('a blocked report keeps the Ticket open and records its question', () => {
   const f = fixture()
   const { ticket } = acceptFirstEval(f)
@@ -444,6 +477,9 @@ test('a blocked report keeps the Ticket open and records its question', () => {
   assert.equal(outcome.ended, false)
   assert.equal(outcome.ticket.ended, null)
   assert.equal(outcome.ticket.question?.question, '要用哪个账号登录？')
+  // A question must reach the user: the relay earns its place (design §8.5).
+  assert.equal(outcome.relayed, true)
+  assert.ok(f.repo.listDueEffects(now(), 20).some(item => item.kind === 'router-relay'))
 })
 
 test('stopTicket requeues unprocessed human follow-ups for a fresh Eval', () => {

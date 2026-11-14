@@ -25,9 +25,10 @@ export const recoveryCases: readonly EvalCase[] = [
       router: [
         toolTurn('quno_eval', {}, 'wr-eval-1'),
         toolTurn('quno_eval_decide', { kind: 'accept', title: '跟进客户请求', goal: '基于授权 Trigger 完成客户请求。' }, 'wr-decide-1'),
-        textTurn('已受理，后台开始处理。'),
-        textTurn('第一批处理完成，任务继续。'),
-        toolTurn('quno_notify', { title: '客户请求已处理', summary: '客户请求处理完成', body: '客户请求处理完成：报告已生成。', why: '后台工作有了结果。' }, 'wr-notify-1'),
+        textTurn('已受理，我来跟进。'),
+        // NOTE: the progress report no longer relays (communication admission,
+        // design §8.5) — there is deliberately no router turn for it here.
+        toolTurn('quno_notify', { title: '客户请求已处理', summary: '客户请求处理完成', body: '客户请求处理完成：报告已生成。', why: '任务有了结果。' }, 'wr-notify-1'),
         textTurn('结果稍后通知你。'),
         textTurn('客户请求已处理完成，结果已通知。'),
       ],

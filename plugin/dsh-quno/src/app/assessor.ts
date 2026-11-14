@@ -53,6 +53,7 @@ export class Assessor {
       source: {
         kind: 'quno-eval',
         form: 'relay',
+        presentation: 'internal',
         summary: `评估 ${String(view.triggers.length)} 条来源事件`,
         evalId: evalRecord.id,
         threadId: evalRecord.threadId,
@@ -97,6 +98,7 @@ export class Assessor {
       source: {
         kind: 'quno-report',
         form: 'relay',
+        presentation: 'internal',
         summary: `任务报告：${ticket.title}`,
         ticketId: ticket.id,
         assignmentId: assignment.id,
@@ -136,6 +138,7 @@ export class Assessor {
       source: {
         kind: 'quno-report',
         form: 'relay',
+        presentation: 'internal',
         summary: outcome.summary,
         ticketId: exchange.id,
         assignmentId: exchange.id,
@@ -235,7 +238,7 @@ export function renderReport(ticket: TicketRecord, assignment: AssignmentRecord)
     for (const artifact of report.artifacts.slice(0, 10)) lines.push(`- [${artifact.kind}] ${artifact.label} — ${artifact.uri}`)
   }
   lines.push(`ticketId=${ticket.id}`)
-  lines.push('请用自然语言向用户转述结果、影响和下一步；不要重新执行工作。')
+  lines.push('这是你（Quno）自己接受的任务结果。请以第一人称向用户转述结果、影响和下一步；不要提到后台、Worker、子会话或内部工具；失败时只说明能确认的事实与下一步，不要猜测根因。不要重新执行工作。')
   return lines.join('\n')
 }
 

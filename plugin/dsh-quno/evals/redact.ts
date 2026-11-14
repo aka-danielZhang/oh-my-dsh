@@ -11,7 +11,9 @@
 
 /** Patterns that look like credentials inside arbitrary text. */
 const SECRET_PATTERNS: readonly RegExp[] = [
-  /sk-[A-Za-z0-9_-]{8,}/g,
+  // Word-boundary anchor: a bare `sk-` also matches inside words like
+  // `task-quiet-success` (case ids trip the scan otherwise).
+  /\bsk-[A-Za-z0-9_-]{8,}/g,
   /Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi,
   // Credential assignments require an explicit [:=] separator — a space after
   // the word is prose ("authorization status") and must not match (found by

@@ -11,6 +11,8 @@
 
 import { localClock, zonedToEpoch } from './util.ts'
 import type { QunoHost } from './service.ts'
+import { presentTask } from './presentation.ts'
+import { projectTaskActivity } from './activity.ts'
 import type {
   AttentionWire,
   EvalDetailWire,
@@ -26,6 +28,7 @@ import type {
   SenseTypeWire,
   SenseWire,
   SourceWire,
+  TaskActivityWire,
   TaskWire,
   ThreadDetailWire,
   ThreadWire,
@@ -660,6 +663,11 @@ function toTaskWire(repo: DomainRepository, ticket: TicketRecord): TaskWire {
   const assignment = assignments.at(-1)
   const report = [...assignments].reverse().map(candidate => candidate.report).find(candidate => candidate !== null) ?? null
   const ended = ticket.ended
+  const presentation = presentTask({
+    ticket,
+    ...(assignment === undefined ? { assignment: null } : { assignment }),
+    latestRun: assignment === undefined ? null : repo.listWorkerRunsByAssignment(assignment.id).at(-1) ?? null,
+  })
   const status = ended !== null
     ? ended.outcome === 'completed' ? 'done'
       : ended.outcome === 'failed' ? 'failed'
@@ -672,11 +680,21 @@ function toTaskWire(repo: DomainRepository, ticket: TicketRecord): TaskWire {
     id: ticket.id,
     title: ticket.title,
     status,
+    presentationStatus: presentation.status,
+    activityKind: presentation.activityKind,
+    lastActivityAt: presentation.lastActivityAt,
+    canCancel: presentation.canCancel,
+    canRetry: presentation.canRetry,
+    canAnswer: presentation.canAnswer,
+    canViewActivity: presentation.canViewActivity,
+    resultRevision: presentation.resultRevision,
+    originLabel: presentation.origin,
     childSessionId: assignment?.executorSessionId ?? null,
     resultDigest: report === null ? null : String(report.at),
     result: report === null ? null : report.summary,
     plan: null,
     prompt: ticket.goal,
+    question: ticket.question === null ? null : { id: ticket.question.id, question: ticket.question.question },
     artifacts: (report?.artifacts ?? []).map(artifact => ({ kind: artifact.kind, label: artifact.label, uri: artifact.uri })),
     error: report !== null && report.state === 'failed'
       ? { code: 'task-failed', message: report.summary }
@@ -685,6 +703,45 @@ function toTaskWire(repo: DomainRepository, ticket: TicketRecord): TaskWire {
         : null,
     createdAt: ticket.createdAt,
     settledAt: ended?.at ?? null,
+  }
+}
+
+/**
+ * One page of a task's read-only execution record (design §9.3). The session
+ * is resolved from the ticket's OWN latest assignment; a missing record or an
+ * unreadable session is an explicit note, never fabricated activity.
+ */
+export async function buildTaskActivity(
+  host: QunoHost,
+  request: { readonly taskId: string; readonly cursor?: number; readonly limit?: number },
+): Promise<TaskActivityWire> {
+  const ticket = host.repo.getTicket(request.taskId)
+  if (ticket === undefined) {
+    return { items: [], nextCursor: null, truncated: false, sessionIdentity: null, note: 'unknown-task' }
+  }
+  const assignment = host.repo.listAssignmentsByTicket(ticket.id).at(-1)
+  if (assignment === undefined) {
+    return { items: [], nextCursor: null, truncated: false, sessionIdentity: null, note: 'no-execution-session' }
+  }
+  const reader = host.sessionReader()
+  if (reader === undefined) {
+    return { items: [], nextCursor: null, truncated: false, sessionIdentity: null, note: 'session-query-unavailable' }
+  }
+  let events: readonly { readonly type: string; readonly seq: number; readonly time: number; readonly data: unknown }[]
+  try {
+    const snapshot = await reader.readSession(assignment.executorSessionId)
+    events = snapshot.events
+  } catch {
+    return { items: [], nextCursor: null, truncated: false, sessionIdentity: null, note: 'session-missing' }
+  }
+  const projected = projectTaskActivity(events, request.cursor ?? null, request.limit)
+  const first = events[0]
+  return {
+    ...projected,
+    sessionIdentity: {
+      sessionId: assignment.executorSessionId,
+      startedAt: first === undefined ? null : first.time,
+    },
   }
 }
 
