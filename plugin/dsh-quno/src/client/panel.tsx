@@ -18,8 +18,8 @@ import type { QunoClientStore, QunoSnapshot } from './store.ts'
 import type { QunoPanelView } from './right-tab.ts'
 import { narrowPanelParams } from './right-tab.ts'
 import { taskUserStatus } from './panel-state.ts'
-import { SenseDetail, senseContext } from './sense-detail.tsx'
-import { SenseListPage } from './sense-list.tsx'
+import { CollectorDetail, collectorContext } from './collector-detail.tsx'
+import { CollectorListPage } from './collector-list.tsx'
 import { AttentionPage } from './attention-view.tsx'
 import { TaskDetailPage, TaskListPage } from './task-list.tsx'
 import { RunsPage } from './runs-view.tsx'
@@ -38,9 +38,9 @@ export interface QunoPanelInjected {
   readonly t: QunoTranslate
   readonly openSession: (sessionId: string) => void
   /** Open the onboarding wizard in edit mode (shared with settings). */
-  readonly onEditSense?: (instanceId: string, type: string) => void
+  readonly onEditCollector?: (instanceId: string, type: string) => void
   /** Open the onboarding wizard in create mode. */
-  readonly onAddSense?: () => void
+  readonly onAddCollector?: () => void
 }
 
 type PanelTabProps = PropsRuntime<'sidebar.right.pane.tab'> & QunoPanelInjected
@@ -64,38 +64,38 @@ export function QunoPanelTitle(props: PropsRuntime<'sidebar.right.pane.tab.title
 export function QunoPanelTab(props: PanelTabProps): React.ReactElement {
   const { tab } = props.useTabInfo()
   const params = narrowPanelParams(tab.navigation.params)
-  const [view, setView] = React.useState<QunoPanelView>(params?.view ?? (params?.taskId !== undefined ? 'task' : 'sense'))
+  const [view, setView] = React.useState<QunoPanelView>(params?.view ?? (params?.taskId !== undefined ? 'task' : 'collectors'))
   const [taskId, setTaskId] = React.useState<string | null>(params?.taskId ?? null)
-  const [senseId, setSenseId] = React.useState<string | null>(params?.senseId ?? null)
+  const [collectorId, setCollectorId] = React.useState<string | null>(params?.collectorId ?? null)
   const [runId, setRunId] = React.useState<string | null>(params?.runId ?? null)
 
   // Re-navigation (the capsule or a card opens with new params) re-applies the focus.
   React.useEffect(() => {
     if (params?.taskId !== undefined) {
       setTaskId(params.taskId)
-      setSenseId(null)
+      setCollectorId(null)
       setRunId(null)
       setView('task')
-    } else if (params?.senseId !== undefined) {
-      setSenseId(params.senseId)
+    } else if (params?.collectorId !== undefined) {
+      setCollectorId(params.collectorId)
       setTaskId(null)
       setRunId(null)
-      setView('sense')
+      setView('collectors')
     } else if (params?.view !== undefined) {
       setTaskId(null)
-      setSenseId(null)
+      setCollectorId(null)
       setRunId(params.runId ?? null)
       setView(params.view)
     }
     // `revision` bumps on every navigation, whether or not params changed.
-  }, [params?.taskId, params?.senseId, params?.runId, params?.view, tab.navigation.revision])
+  }, [params?.taskId, params?.collectorId, params?.runId, params?.view, tab.navigation.revision])
 
   const snapshot = React.useSyncExternalStore(props.store.subscribe, props.store.getSnapshot, props.store.getSnapshot)
 
   const switchView = (next: QunoPanelView): void => {
     setView(next)
     setTaskId(null)
-    setSenseId(null)
+    setCollectorId(null)
     setRunId(null)
   }
 
@@ -106,7 +106,7 @@ export function QunoPanelTab(props: PanelTabProps): React.ReactElement {
           active={view}
           onChange={switchView}
           tabs={[
-            { key: 'sense', label: props.t('panelTabSense') },
+            { key: 'collectors', label: props.t('panelTabCollector') },
             { key: 'attention', label: props.t('panelTabAttentionShort') },
             { key: 'task', label: props.t('tabTasks') },
             { key: 'runs', label: props.t('tabRuns') },
@@ -125,24 +125,24 @@ export function QunoPanelTab(props: PanelTabProps): React.ReactElement {
             </Callout>
           </div>
         )}
-        {view === 'sense' && (senseId === null
+        {view === 'collectors' && (collectorId === null
           ? (
-            <SenseListPage
+            <CollectorListPage
               snapshot={snapshot}
               store={props.store}
               t={props.t}
-              onOpen={setSenseId}
-              {...(props.onAddSense === undefined ? {} : { onAdd: props.onAddSense })}
+              onOpen={setCollectorId}
+              {...(props.onAddCollector === undefined ? {} : { onAdd: props.onAddCollector })}
             />
           )
           : (
-            <SenseDetailPage
-              senseId={senseId}
+            <CollectorDetailPage
+              collectorId={collectorId}
               snapshot={snapshot}
               store={props.store}
               t={props.t}
-              onBack={() => { setSenseId(null) }}
-              {...(props.onEditSense === undefined ? {} : { onEditSense: props.onEditSense })}
+              onBack={() => { setCollectorId(null) }}
+              {...(props.onEditCollector === undefined ? {} : { onEditCollector: props.onEditCollector })}
             />
           ))}
         {view === 'attention' && <AttentionPage snapshot={snapshot} store={props.store} t={props.t} />}
@@ -173,14 +173,14 @@ export function QunoPanelTab(props: PanelTabProps): React.ReactElement {
   )
 }
 
-/** One Sense's full detail, with the honest missing state after a removal. */
-function SenseDetailPage(props: {
-  readonly senseId: string
+/** One Collector's full detail, with the honest missing state after a removal. */
+function CollectorDetailPage(props: {
+  readonly collectorId: string
   readonly snapshot: QunoSnapshot
   readonly store: QunoClientStore
   readonly t: QunoTranslate
   readonly onBack: () => void
-  readonly onEditSense?: (instanceId: string, type: string) => void
+  readonly onEditCollector?: (instanceId: string, type: string) => void
 }): React.ReactElement {
   const { t, snapshot } = props
   const state = snapshot.state
@@ -188,7 +188,7 @@ function SenseDetailPage(props: {
     if (snapshot.phase === 'error') {
       return (
         <PanelEmpty
-          icon="sense"
+          icon="collectors"
           title={t('loadFailedTitle')}
           description={snapshot.error ?? ''}
           action={{ label: t('retry'), onClick: () => { void props.store.refresh() } }}
@@ -197,13 +197,13 @@ function SenseDetailPage(props: {
     }
     return <LoadingRows rows={4} />
   }
-  const context = senseContext(state, props.senseId)
+  const context = collectorContext(state, props.collectorId)
   if (context.instance === undefined) {
     return (
       <MissingState
-        icon="sense"
-        title={t('senseMissing')}
-        description={t('senseMissingDesc')}
+        icon="collectors"
+        title={t('collectorMissing')}
+        description={t('collectorMissingDesc')}
         backLabel={t('panelBack')}
         onBack={props.onBack}
       />
@@ -211,16 +211,16 @@ function SenseDetailPage(props: {
   }
   const instance = context.instance
   return (
-    <SenseDetail
+    <CollectorDetail
       store={props.store}
       t={t}
       instance={instance}
       type={context.type}
       gaps={context.gaps}
       onBack={props.onBack}
-      {...(props.onEditSense === undefined
+      {...(props.onEditCollector === undefined
         ? {}
-        : { onEdit: () => { props.onEditSense?.(instance.id, instance.type) } })}
+        : { onEdit: () => { props.onEditCollector?.(instance.id, instance.type) } })}
     />
   )
 }

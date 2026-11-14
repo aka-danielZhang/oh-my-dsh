@@ -13,7 +13,7 @@ import {
   type CliCapabilityProvider,
   type CliOperationSpec,
 } from '../src/cli-broker.ts'
-import type { SenseInstanceRecord } from '../src/types.ts'
+import type { CollectorInstanceRecord } from '../src/types.ts'
 
 const OPERATIONS: Readonly<Record<string, CliOperationSpec>> = {
   'items.list': {
@@ -31,7 +31,7 @@ const OPERATIONS: Readonly<Record<string, CliOperationSpec>> = {
   },
 }
 
-function instance(patch: Partial<SenseInstanceRecord> & { id: string }): SenseInstanceRecord {
+function instance(patch: Partial<CollectorInstanceRecord> & { id: string }): CollectorInstanceRecord {
   return {
     qunoId: 'quno',
     type: 'test/cli-im',
@@ -61,7 +61,7 @@ function provider(overrides: Partial<CliCapabilityProvider> = {}): CliCapability
   const built: CliCapabilityProvider & { calls: number } = {
     capability: 'demo',
     title: '演示',
-    senseType: 'test/cli-im',
+    collectorType: 'test/cli-im',
     operations: OPERATIONS,
     timeoutMs: 1_000,
     get calls() {
@@ -77,7 +77,7 @@ function provider(overrides: Partial<CliCapabilityProvider> = {}): CliCapability
 }
 
 function broker(
-  instances: readonly SenseInstanceRecord[],
+  instances: readonly CollectorInstanceRecord[],
   capability: CliCapabilityProvider,
 ): CliCapabilityBroker {
   const b = new CliCapabilityBroker({ listInstances: () => instances })
@@ -231,7 +231,7 @@ test('no configured account refuses with the setup instruction', async () => {
   const b = broker([], provider())
   await assert.rejects(
     b.call({ capability: 'demo', operation: 'items.list', params: {}, grant: GRANT }),
-    /还没有配置任何账号：先在感知器里添加 test\/cli-im 实例并完成登录/,
+    /还没有配置任何账号：先在采集器里添加 test\/cli-im 实例并完成登录/,
   )
 })
 

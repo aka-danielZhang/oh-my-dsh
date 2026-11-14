@@ -18,10 +18,10 @@ import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { Tone } from './panel-state.ts'
 
 /** Neutral line icons; no new icon dependency and no per-source mascots. */
-export type PanelIconKind = 'sense' | 'attention' | 'task' | 'run' | 'event'
+export type PanelIconKind = 'collectors' | 'attention' | 'task' | 'run' | 'event'
 
 const ICONS: Record<PanelIconKind, React.ReactNode> = {
-  sense: (
+  collectors: (
     <>
       <circle cx="8" cy="8" r="2.1" />
       <path d="M3.2 8a4.8 4.8 0 0 1 4.8-4.8" />

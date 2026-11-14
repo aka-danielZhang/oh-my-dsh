@@ -1,9 +1,9 @@
 /**
- * The Quno public contract: event envelopes, batch submission, Sense
+ * The Quno public contract: event envelopes, batch submission, collector
  * declarations, configuration, attention commands and run output.
  *
  * Everything crossing a trust boundary is validated here, before a store
- * transaction starts. These schemas are also the single source the Sense
+ * transaction starts. These schemas are also the single source the collector
  * plugins are written against (`dsh-quno/contracts`) — the Host rejects a
  * declaration or batch the schema does not accept instead of half-using it.
  *
@@ -13,14 +13,14 @@
 import { z } from 'zod'
 import type {
   AttentionStatus,
+  CollectorDefinition,
+  CollectorHealthDetail,
+  CollectorHealthState,
   DayRange,
   EventEnvelope,
   IngestBatch,
   QunoConfig,
   RunOutput,
-  SenseDefinition,
-  SenseHealthDetail,
-  SenseHealthState,
 } from './types.ts'
 
 /** Hard ingress limits for the first release (calibrated against real load later). */
@@ -41,13 +41,13 @@ export const LIMITS = {
   maxPatchEntryKeyChars: 200,
 } as const
 
-/** The only accepted Sense contract major version. */
-export const SENSE_CONTRACT_VERSION = 'quno.sense/v1' as const
+/** The only accepted collector contract version. */
+export const COLLECTOR_CONTRACT_VERSION = 'quno.collector/v2' as const
 
 export const eventOperationSchema = z.enum(['upsert', 'delete', 'retract'])
 export const prioritySchema = z.enum(['p0', 'p1', 'p2', 'p3'])
 export const attentionStatusSchema = z.enum(['open', 'waiting', 'snoozed', 'resolved', 'dismissed', 'expired'])
-export const senseHealthSchema = z.enum(['healthy', 'degraded', 'rate-limited', 'auth-required', 'unavailable', 'unknown'])
+export const collectorHealthSchema = z.enum(['healthy', 'degraded', 'rate-limited', 'auth-required', 'unavailable', 'unknown'])
 
 const isoDate = z.string().refine(value => !Number.isNaN(Date.parse(value)), 'expected an ISO-8601 timestamp')
 const optionalIsoDate = z.union([isoDate, z.null()]).optional()
@@ -133,7 +133,6 @@ export const ingestBatchSchema = z.object({
     }),
     z.null(),
   ]).optional(),
-  complete: z.boolean().optional(),
   gap: z.union([
     z.object({
       from: z.string().max(400).optional(),
@@ -187,10 +186,10 @@ const configFieldSchema = z.object({
 
 const relativeSeconds = z.number().int().nonnegative()
 
-/** A Sense's declaration, validated before it may register. */
-export const senseDefinitionSchema = z.object({
+/** A collector's declaration, validated before it may register. */
+export const collectorDefinitionSchema = z.object({
   type: z.string().min(3).max(200),
-  contractVersion: z.literal(SENSE_CONTRACT_VERSION),
+  contractVersion: z.literal(COLLECTOR_CONTRACT_VERSION),
   implementationVersion: z.string().min(1).max(50),
   displayName: z.string().min(1).max(100),
   description: z.string().min(1).max(1000),
@@ -206,15 +205,13 @@ export const senseDefinitionSchema = z.object({
     mcp: z.array(z.string().max(400)).max(50).optional(),
     requiresModel: z.boolean().optional(),
   }),
-  runtime: z.object({
-    modes: z.array(z.enum(['poll', 'watch', 'push', 'hybrid'])).min(1),
+  schedule: z.object({
     defaultIntervalSec: z.number().int().min(1).max(86_400),
     minIntervalSec: z.number().int().min(1).max(86_400),
-    concurrency: z.number().int().min(1).max(16),
-    timeoutMs: z.number().int().min(1000).max(600_000),
+    maxRunMs: z.number().int().min(1000).max(600_000),
     quotas: z.object({
-      maxEventsPerCheck: z.number().int().min(1).max(10_000).optional(),
-      maxBytesPerCheck: z.number().int().min(1024).max(100 * 1024 * 1024).optional(),
+      maxEventsPerRun: z.number().int().min(1).max(10_000).optional(),
+      maxBytesPerRun: z.number().int().min(1024).max(100 * 1024 * 1024).optional(),
     }).optional(),
   }),
   reliability: z.object({
@@ -229,16 +226,16 @@ export const senseDefinitionSchema = z.object({
   }),
   firstSync: z.enum(['baseline-only', 'snapshot-events', 'current-window-events', 'unknown']).optional(),
   defaults: z.record(z.string(), z.unknown()).optional(),
-  // Organ capabilities carry functions (resolveThreads/handleRequest/…); they
-  // pass through unvalidated. Without this field zod stripped the whole organ
-  // surface at registration, silently disabling exchanges and thread
-  // resolution for every organ-capable Sense (found by the link evaluator).
-  organ: z.unknown().optional(),
+  // Query capabilities carry functions (handleRequest); they pass through
+  // unvalidated. Without this field zod stripped the whole query surface at
+  // registration, silently disabling exchanges for every query-capable
+  // collector (found by the link evaluator).
+  query: z.unknown().optional(),
 }).superRefine((definition, ctx) => {
-  if (definition.runtime.minIntervalSec > definition.runtime.defaultIntervalSec) {
+  if (definition.schedule.minIntervalSec > definition.schedule.defaultIntervalSec) {
     ctx.addIssue({
       code: 'custom',
-      path: ['runtime', 'minIntervalSec'],
+      path: ['schedule', 'minIntervalSec'],
       message: 'minIntervalSec must not exceed defaultIntervalSec',
     })
   }
@@ -246,19 +243,20 @@ export const senseDefinitionSchema = z.object({
     ctx.addIssue({
       code: 'custom',
       path: ['reliability', 'replay'],
-      message: 'a Sense without a checkpoint cannot promise replay',
+      message: 'a collector without a checkpoint cannot promise replay',
     })
   }
 })
 
-/** One health report a Sense submits. */
-export const healthIssueSchema = z.object({
+/** One structured issue inside a run's health extras. */
+export const collectorHealthIssueSchema = z.object({
   code: z.string().min(1).max(100),
   detail: z.string().min(1).max(400),
   count: z.number().int().nonnegative().optional(),
 })
 
-export const healthProgressSchema = z.object({
+/** Structured queue progress carried through to the UI unchanged. */
+export const collectorHealthProgressSchema = z.object({
   trackedConversations: z.number().int().nonnegative().optional(),
   pendingConversations: z.number().int().nonnegative().optional(),
   blockedConversations: z.number().int().nonnegative().optional(),
@@ -270,19 +268,20 @@ export const healthProgressSchema = z.object({
   checkpointEntries: z.number().int().nonnegative().optional(),
 }).passthrough()
 
-export const senseHealthSchemaShape = z.object({
-  state: senseHealthSchema,
-  progress: healthProgressSchema.optional(),
-  issues: z.array(healthIssueSchema).max(50).optional(),
+/** Classified failure states of one run; the Host owns the backoff. */
+export const collectorFailureStateSchema = z.enum(['auth-required', 'rate-limited', 'unavailable', 'degraded'])
+
+/**
+ * Health extras a run returns on top of what the Host derives itself
+ * (state, code, consecutiveFailures, nextRetryAt, lastAttemptAt/Success/Event).
+ * The Host cannot know these — coverage markers, source lag, queue progress.
+ */
+export const collectorHealthExtrasSchema = z.object({
   detail: z.string().max(2000).optional(),
-  lastAttemptAt: z.number().int().nullable().optional(),
-  lastSuccessfulSyncAt: z.number().int().nullable().optional(),
-  lastEventAt: z.number().int().nullable().optional(),
-  consecutiveFailures: z.number().int().nonnegative().optional(),
-  errorCode: z.string().max(100).nullable().optional(),
-  nextRetryAt: z.number().int().nullable().optional(),
   coveredThrough: z.string().max(400).nullable().optional(),
   sourceLagSec: z.number().int().nonnegative().nullable().optional(),
+  progress: collectorHealthProgressSchema.optional(),
+  issues: z.array(collectorHealthIssueSchema).max(50).optional(),
 })
 
 const dayRangeSchema = z.object({
@@ -412,12 +411,13 @@ export const attentionActSchema = z.object({
 
 export type ParsedEventEnvelope = EventEnvelope
 export type ParsedIngestBatch = IngestBatch
-export type ParsedSenseDefinition = SenseDefinition
+export type ParsedCollectorDefinition = CollectorDefinition
 export type ParsedRunOutput = RunOutput
 export type AttentionAct = z.infer<typeof attentionActSchema>
-export type SenseHealthReport = z.infer<typeof senseHealthSchemaShape>
+export type CollectorHealthExtras = z.infer<typeof collectorHealthExtrasSchema>
+export type CollectorFailureState = z.infer<typeof collectorFailureStateSchema>
 
-/** A validation failure that is safe to hand back to a Sense or a model. */
+/** A validation failure that is safe to hand back to a collector or a model. */
 export interface ContractFailure {
   readonly code: string
   readonly message: string
@@ -487,18 +487,18 @@ export function parseIngestBatch(input: unknown): ContractResult<IngestBatch> {
   return { ok: true, value: batch }
 }
 
-/** Parse one Sense declaration. */
-export function parseSenseDefinition(input: unknown): ContractResult<SenseDefinition> {
-  const parsed = senseDefinitionSchema.safeParse(input)
+/** Parse one collector declaration. */
+export function parseCollectorDefinition(input: unknown): ContractResult<CollectorDefinition> {
+  const parsed = collectorDefinitionSchema.safeParse(input)
   if (!parsed.success) {
     return { ok: false, error: { code: 'validation', message: flatten(parsed.error) } }
   }
-  return { ok: true, value: parsed.data as SenseDefinition }
+  return { ok: true, value: parsed.data as CollectorDefinition }
 }
 
-/** Parse one health report. */
-export function parseHealthReport(input: unknown): ContractResult<SenseHealthReport> {
-  const parsed = senseHealthSchemaShape.safeParse(input)
+/** Parse one run's health extras (never a lifecycle transition). */
+export function parseHealthExtras(input: unknown): ContractResult<CollectorHealthExtras> {
+  const parsed = collectorHealthExtrasSchema.safeParse(input)
   if (!parsed.success) {
     return { ok: false, error: { code: 'validation', message: flatten(parsed.error) } }
   }
@@ -568,7 +568,7 @@ export function parseDayRange(input: unknown): ContractResult<DayRange | null> {
 }
 
 /** Health states ordered by severity for the UI's worst-first summary. */
-export const HEALTH_SEVERITY: readonly SenseHealthState[] = [
+export const HEALTH_SEVERITY: readonly CollectorHealthState[] = [
   'unknown',
   'healthy',
   'degraded',

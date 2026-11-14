@@ -56,7 +56,7 @@ export const liveRecoveryCases: readonly LiveEvalCase[] = [
       return facts
     },
     policy: async (rt) => {
-      await rt.host.updateConfig({ patch: { acceptMode: 'auto', autoSourceIds: [rt.options.organSourceId] } })
+      await rt.host.updateConfig({ patch: { acceptMode: 'auto', autoSourceIds: [rt.options.collectorSourceId] } })
     },
     steps: [
       { kind: 'ingest', envelopes: [imMention('wb-trigger-live', '@Quno 整理一份会议纪要：fixture 目录里有素材文件，纪要必须写明主持人和会议日期', Date.parse('2026-11-07T09:30:00Z'))] },
@@ -132,7 +132,7 @@ export const liveRecoveryCases: readonly LiveEvalCase[] = [
       return facts
     },
     policy: async (rt) => {
-      await rt.host.updateConfig({ patch: { acceptMode: 'auto', autoSourceIds: [rt.options.organSourceId] } })
+      await rt.host.updateConfig({ patch: { acceptMode: 'auto', autoSourceIds: [rt.options.collectorSourceId] } })
     },
     steps: [
       // Crash window: the eval accepted and enqueued the launch, but the whole

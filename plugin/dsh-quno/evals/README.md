@@ -65,8 +65,8 @@ evals/
                   路由 + provider usage）；SseAssembler 与 toOpenAiMessages 纯函数可本地回归
     scripted.ts   text/tool turn 的 chunk 构造（与现有单测同一词汇）
   fixtures/
-    organ.ts      合成 Sense：走真实 qunoSenses 注册 + 真实 ingress 事务提交 Trigger；
-                  organ 能力面响应真实 Exchange
+    organ.ts      合成采集器：走真实 qunoCollectors 注册 + run ctx commit 事务提交 Trigger；
+                  query 能力面响应真实 Exchange
     fs.ts         fixture 目录 + 只读 read/glob/grep + 真实但惰性的全局 bash
     hidden.ts     Live 隐藏事实生成器（seeded RNG：负责人/截止日期/文件名/错误码 + 干扰值）
   cases/          Scripted：P0（13）+ P1（12）+ blocked 清单（含真实第三方来源）
@@ -75,7 +75,7 @@ evals/
 
 ## 覆盖与边界（诚实清单）
 
-**Scripted P0（回归层 + 发布门，每次修改必跑）**：`chat-simple`、`direct-read`、`status-result`、`eval-observe`、`auto-investigate`、`owned-followup`、`worker-restart`、`notification-quiet`、`tool-guard`，以及结构化 CLI / 回流发布门三条：`cli-capability-read`（暂停中的实例仍可查；真实子进程 → 同回合结果 → report → 只汇报一次）、`cli-capability-refuse`（未知参数拒绝且零进程，纠正后成功）、`cli-capability-failure`（鉴权失败如实回流、只汇报一次且不称成功）、`exchange-failure-relay`（Exchange 终态失败回流一次，不得声称成功）。
+**Scripted P0（回归层 + 发布门，每次修改必跑）**：`chat-simple`、`direct-read`、`status-result`、`eval-observe`、`auto-investigate`、`owned-followup`、`worker-restart`、`notification-quiet`、`tool-guard`，以及结构化 CLI / 回流发布门四条：`cli-capability-read`（暂停中的实例仍可查；真实子进程 → 同回合结果 → report → 只汇报一次）、`cli-capability-refuse`（未知参数拒绝且零进程，纠正后成功）、`cli-capability-failure`（鉴权失败如实回流、只汇报一次且不称成功）、`exchange-failure-relay`（Exchange 终态失败回流一次，不得声称成功）。
 
 **Scripted P1**：`irrelevant-ignore`、`explicit-source-accept`、`worker-blocked-answer`、`worker-handback`、`worker-stop-late`、`policy-change`、`exchange-roundtrip`、`organ-discovery`、`organ-whitelist-reject`、`third-party-tool-unavailable`、`notification-dedupe`、`memory-isolation`。
 
@@ -83,7 +83,7 @@ evals/
 
 **Live E2E P0（能力验收层，发布门）**：`live-chat-simple`、`live-direct-read`、`live-status-result`、`live-clarify`、`live-tool-guard`、`live-eval-observe`、`live-auto-investigate`、`live-owned-followup`、`live-exchange`、`live-worker-blocked`、`live-worker-restart`、`live-notification-quiet`——与验收设计 §5 一一对应；每个 case 由「用户目标 + 隐藏事实 + 授权边界 + 行为 oracle」组成，失败按 §7.3 分类（classification.json 落盘）。
 
-**Live E2E P1**：`live-third-party-tool-unavailable` 用真实模型验证第三方 CLI 未接入时的诚实失败，禁止虚构 organ、桌面更新根因或查询结果。它只覆盖负向行为，不代表真实第三方读取已通过；其余 P1 扩展随验收设计 §6 待补。
+**Live E2E P1**：`live-third-party-tool-unavailable` 用真实模型验证第三方 CLI 未接入时的诚实失败，禁止虚构 collector 端点、桌面更新根因或查询结果。该 case 以 `mountEvalCollector: false` 建模「没有任何第三方来源」——合成采集器不挂载，`quno_read.collectors` 为空，worker 只能从发现面如实报缺口（2026-11-10 首跑发现：若合成源在场，worker 会探测它并被回显「成功」，既污染被测链路也违背 case 主题）。它只覆盖负向行为，不代表真实第三方读取已通过；其余 P1 扩展随验收设计 §6 待补。
 
 实现边界（与设计文档的偏差）：
 

@@ -38,7 +38,7 @@ function relayMessages(rt: EvalRuntime): readonly { kind: string | undefined; pr
 }
 
 /** The technical vocabulary that must never appear in visible replies. */
-const LEAK_MARKERS = ['后台', 'Worker', 'worker', '子会话', 'requestId', 'taskId=', 'quno_', 'organ:', 'Exchange', 'Ticket', 'Assignment']
+const LEAK_MARKERS = ['后台', 'Worker', 'worker', '子会话', 'requestId', 'taskId=', 'quno_', 'collector:', 'Exchange', 'Ticket', 'Assignment']
 
 export const interactionCases: readonly EvalCase[] = [
   {
@@ -105,20 +105,20 @@ export const interactionCases: readonly EvalCase[] = [
     id: 'main-task-internal-failure-hidden',
     title: '两次非法异步读取：失败证据在任务面，程序消息只走内部',
     priority: 'p0',
-    requirement: 'Router 侧猜测的 organ 被同步拒绝（零 Exchange、零排队条目）；Worker 侧两次非法 organ op 落两条持久 error 证据；回到主对话的只有 internal 标记的 blocked 提问 relay；可见回复不泄漏 endpoint/错误细节',
+    requirement: 'Router 侧猜测的 collector 被同步拒绝（零 Exchange、零排队条目）；Worker 侧两次非法 collector op 落两条持久 error 证据；回到主对话的只有 internal 标记的 blocked 提问 relay；可见回复不泄漏 endpoint/错误细节',
     tags: ['interaction', 'quiet', 'exchange-failure'],
     model: { router: 'scripted', worker: 'scripted' },
     setup: async (rt) => {
       await rt.host.updateConfig({ patch: { acceptMode: 'auto' } })
-      rt.options.organ.setWhitelist(true)
+      rt.options.collector.setWhitelist(true)
     },
     scripts: {
       router: [
-        toolTurn('quno_exchange', { responder: 'organ:missing-a', payload: { op: 'im.group.recent' } }, 'if-router-exchange-1'),
-        toolTurn('quno_exchange', { responder: 'organ:missing-b', payload: { op: 'im.group.recent' } }, 'if-router-exchange-2'),
+        toolTurn('quno_exchange', { responder: 'collector:missing-a', payload: { op: 'im.group.recent' } }, 'if-router-exchange-1'),
+        toolTurn('quno_exchange', { responder: 'collector:missing-b', payload: { op: 'im.group.recent' } }, 'if-router-exchange-2'),
         toolTurn('quno_task', {
           title: '整理云之家会话',
-          prompt: '通过只读云之家 organ 查询最近会话并整理；查询被拒绝时如实报告。',
+          prompt: '通过只读云之家采集器查询最近会话并整理；查询被拒绝时如实报告。',
         }, 'if-delegate-1'),
         textTurn('好，我来整理。有两个来源现在读不到，我先走可用的通道。'),
         textTurn('整理没能完成：云之家的查询被拒绝了两次。你确认授权范围后，我可以从原任务重试。'),
@@ -126,9 +126,9 @@ export const interactionCases: readonly EvalCase[] = [
       worker: [],
     },
     steps: [
-      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `organ:${drv.organInstanceId}`, payload: { op: 'im.message.send', params: { groupId: 'g1', text: 'hi' } } }, 'if-worker-exchange-1') },
-      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `organ:${drv.organInstanceId}`, payload: { op: 'im.status.post' } }, 'if-worker-exchange-2') },
-      { kind: 'script', role: 'worker', build: () => toolTurn('quno_worker_report', { state: 'blocked', summary: '两条查询都被 organ 白名单拒绝，无法整理会话。', question: { question: '是否调整查询范围后重试？' } }, 'if-blocked-1') },
+      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `collector:${drv.collectorInstanceId}`, payload: { op: 'im.message.send', params: { groupId: 'g1', text: 'hi' } } }, 'if-worker-exchange-1') },
+      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `collector:${drv.collectorInstanceId}`, payload: { op: 'im.status.post' } }, 'if-worker-exchange-2') },
+      { kind: 'script', role: 'worker', build: () => toolTurn('quno_worker_report', { state: 'blocked', summary: '两条查询都被采集器白名单拒绝，无法整理会话。', question: { question: '是否调整查询范围后重试？' } }, 'if-blocked-1') },
       { kind: 'script', role: 'worker', build: () => textTurn('已如实报告。') },
       { kind: 'human', text: '先试试 missing-a 和 missing-b 两个来源，再整理云之家会话。' },
       { kind: 'settle' },
@@ -140,7 +140,7 @@ export const interactionCases: readonly EvalCase[] = [
       const ticket = repo.listTickets(rt.host.qunoId, { limit: 5 }).at(-1)
       const relays = relayMessages(rt).filter(relay => relay.kind === 'quno-report')
       const visible = assistantTexts(rt, MAIN_SESSION)
-      const leaked = visible.filter(text => ['organ:', 'missing-a', 'missing-b', '异步读取失败', 'requestId', 'unsupported-op'].some(marker => text.includes(marker)))
+      const leaked = visible.filter(text => ['collector:', 'missing-a', 'missing-b', '异步读取失败', 'requestId', 'unsupported-op'].some(marker => text.includes(marker)))
       const workerResults = ticket === undefined ? [] : sessionEvents(rt, executorSession(ticket.id))
       return {
         chain: [

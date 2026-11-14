@@ -105,7 +105,7 @@ export class SqliteRepository implements DomainRepository {
       summary, data_json AS dataJson, priority, deadline,
       correlation_keys_json AS correlationKeysJson, supersedes_json AS supersedesJson,
       parents_json AS parentsJson, provenance_json AS provenanceJson, content_hash AS contentHash,
-      sense_config_revision AS configRevision, expires_at AS expiresAt, pruned_at AS prunedAt,
+      collector_config_revision AS configRevision, expires_at AS expiresAt, pruned_at AS prunedAt,
       actor_json AS actorJson, human, addressed, channel_json AS channelJson,
       content_ref_json AS contentRefJson, threads_json AS threadsJson
       FROM events`
@@ -178,7 +178,7 @@ export class SqliteRepository implements DomainRepository {
       id, source_id, event_key, subject_key, subject_revision, type, schema, operation,
       occurred_at, observed_at, received_at, ingest_seq, summary, data_json, priority, deadline,
       provenance_json, correlation_keys_json, supersedes_json, parents_json, content_hash,
-      sense_config_revision, expires_at, pruned_at,
+      collector_config_revision, expires_at, pruned_at,
       quno_id, actor_json, human, addressed, channel_json, content_ref_json, threads_json
     ) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`).run(
       trigger.id,

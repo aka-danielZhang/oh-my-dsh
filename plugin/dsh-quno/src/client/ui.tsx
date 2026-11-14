@@ -118,7 +118,7 @@ export function QunoStat(props: {
   return <span className={`dsh-quno-stat dsh-quno-stat--${props.tone}`}>{props.children}</span>
 }
 
-/** One label/value row used by the Sense and task details. */
+/** One label/value row used by the Collector and task details. */
 export function QunoKV(props: { readonly k: string; readonly v: React.ReactNode }): React.ReactElement {
   return (
     <div className="dsh-quno-kv">

@@ -9,9 +9,9 @@
  * - which capability/operation may run (closed tables, `access: 'read'` only);
  * - which arguments are legal (declared params; unknown keys are refused, so
  *   a payload can never smuggle `--profile`, `argv`, or another command);
- * - which configured target answers (Sense instances of the provider's type —
- *   the user's configuration IS the authorization; a paused instance keeps its
- *   account available, a disabled or removed one does not);
+ * - which configured target answers (collector instances of the provider's
+ *   type — the user's configuration IS the authorization; a paused instance
+ *   keeps its account available, a disabled or removed one does not);
  * - whether the Ticket's Mandate granted it at accept time;
  * - how long and how loud one call may be (timeout, output cap, concurrency).
  *
@@ -24,7 +24,7 @@
 
 import { QunoStateError } from './core/model.ts'
 import type { MandateCli } from './core/model.ts'
-import type { SenseInstanceRecord } from './types.ts'
+import type { CollectorInstanceRecord } from './types.ts'
 
 /** One declared parameter of one operation. */
 export interface CliParamSpec {
@@ -47,7 +47,7 @@ export interface CliOperationSpec {
   readonly params: readonly CliParamSpec[]
 }
 
-/** One user-configured target: a SenseInstance of the provider's type. */
+/** One user-configured target: a CollectorInstance of the provider's type. */
 export interface CliTarget {
   readonly id: string
   readonly label: string
@@ -82,8 +82,8 @@ export interface CliCapabilityProvider {
   readonly capability: string
   /** Human label for discovery and refusals. */
   readonly title: string
-  /** The Sense type whose configured instances are this capability's targets. */
-  readonly senseType: string
+  /** The collector type whose configured instances are this capability's targets. */
+  readonly collectorType: string
   readonly operations: Readonly<Record<string, CliOperationSpec>>
   /** Per-call deadline ceiling; the broker caps it at {@link MAX_CALL_TIMEOUT_MS}. */
   readonly timeoutMs?: number
@@ -140,7 +140,7 @@ export const DEFAULT_MAX_OUTPUT_CHARS = 24_000
 /** Dependencies of the broker. */
 export interface CliBrokerDeps {
   /** Configured instances of this Quno (the authorization surface). */
-  readonly listInstances: () => readonly SenseInstanceRecord[]
+  readonly listInstances: () => readonly CollectorInstanceRecord[]
 }
 
 /** One call as a Worker tool asks for it. */
@@ -373,7 +373,7 @@ export class CliCapabilityBroker {
   /** Configured instances of the provider's type; disabled ones are withdrawn. */
   private targetsOf(provider: CliCapabilityProvider): readonly CliTarget[] {
     return this.deps.listInstances()
-      .filter(instance => instance.type === provider.senseType && instance.desiredState !== 'disabled')
+      .filter(instance => instance.type === provider.collectorType && instance.desiredState !== 'disabled')
       .map(instance => ({
         id: instance.id,
         label: instance.label,
@@ -387,7 +387,7 @@ export class CliCapabilityBroker {
     if (targets.length === 0) {
       refuse(
         'no-target',
-        `${provider.title}（${provider.capability}）还没有配置任何账号：先在感知器里添加 ${provider.senseType} 实例并完成登录`,
+        `${provider.title}（${provider.capability}）还没有配置任何账号：先在采集器里添加 ${provider.collectorType} 实例并完成登录`,
       )
     }
     if (requested === undefined) {

@@ -204,7 +204,7 @@ export function QunoReportActions(props: PropsRuntime<'conversation.chat.turnTai
 
 /**
  * Source labels for the card's chip row, resolved from real evidence:
- * attention point → recent event → source → Sense type display name. Nothing
+ * attention point → recent event → source → Collector type display name. Nothing
  * is guessed from `topicKey`; an unresolvable source simply produces no chip.
  * @param state - the polled snapshot (sources and type declarations).
  * @param events - the recent-events cache (the only place event ids resolve).
@@ -229,7 +229,7 @@ function sourceChips(
       if (event === undefined) continue
       const source = state.sources.find(candidate => candidate.id === event.sourceId)
       if (source === undefined) continue
-      const type = state.senseTypes.find(candidate => candidate.type === source.type)
+      const type = state.collectorTypes.find(candidate => candidate.type === source.type)
       chips.add(type?.displayName ?? source.type)
     }
   }

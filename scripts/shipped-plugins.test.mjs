@@ -67,7 +67,7 @@ test('lists every ship:true plugin once', () => {
     'dsh-usage-stats',
     'dsh-web-search-toggle',
   ]
-  const qunoTrio = ['dsh-quno', 'dsh-quno-sense-calendar', 'dsh-quno-sense-feed']
+  const qunoTrio = ['dsh-quno', 'dsh-quno-collector-calendar', 'dsh-quno-collector-feed']
   const qunoShipping = names.includes('dsh-quno')
   assert.deepEqual(
     names,

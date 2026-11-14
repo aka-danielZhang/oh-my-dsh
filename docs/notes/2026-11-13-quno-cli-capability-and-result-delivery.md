@@ -8,7 +8,7 @@
 
 | 提案系统 | 现状 | 本次动作 |
 |---|---|---|
-| Sense Scheduler（定时采集、游标、Trigger） | **已经存在**：`senses.ts` 生命周期 + `scheduler.ts` 2s 有界 pass + 持久 Effect outbox；`checkpoint-entries/v1`、运行代际、健康三轴均已落地 | 不重建。仅明确「暂停只停采集，不停能力」的边界 |
+| 采集调度（定时采集、游标、Trigger） | **已经存在**：`collectors.ts` 生命周期（`run(ctx)` 由 Host 调度）+ 2s 有界 pass + 持久 Effect outbox；`checkpoint-entries/v1`、运行代际、健康三轴均已落地 | 不重建。仅明确「暂停只停采集，不停能力」的边界 |
 | Worker Capability Broker | **真缺**：Worker 只有异步 `quno_exchange`；本地短查询被迫走「发起 → 等输入 → 再回合」，且模型无从发现结构化能力 | 新增 Host 服务 `qunoCli`（`CliCapabilityBroker`）+ Worker 工具 `quno_cli_call` + yzj 能力 provider |
 | Result Delivery | **半缺**：成功回流已在，**失败/超时没有可靠送达**（Router 侧失败被静默吞掉；过期没有任何请求方输入） | 修复终态语义：失败原因持久化 + 请求方必被唤醒；不可投递时 Effect 重试而不是完成 |
 
@@ -60,7 +60,7 @@ CliCapabilityProvider {
 - `WORKER_BOUNDARY` 增加一条：本地只读查询用 `quno_cli_call`，名字只能来自 `quno_read.cliCapabilities`，绝不把排队/被拒说成查询成功；`quno_exchange` 只留给真正异步/远端。
 - 主对话 preset 仍未挂任何 CLI 工具（`quno_exchange` 保留为单次证据补读，§7.2 定稿不变）。
 
-### 3.3 yzj provider（`plugin/dsh-quno-sense-yzj/src/{organ,capability}.ts`）
+### 3.3 yzj provider（`plugin/dsh-quno-collector-yzj/src/{organ,capability}.ts`）
 
 - `runYzjOperation()` 成为**唯一执行路径**：Organ 异步面与 `quno_cli_call` 同步面共用 argv 构造、`classifyRun` 分类与 `takeToken` 每 profile 共享预算（按需查询与轮询同一桶，不单设配额）。
 - `handleOrganRequest` 保留为兼容适配层（运行实例注册表、`instance-not-running` 语义不变），内部改调同一函数，删除重复的执行/分类代码。
@@ -85,8 +85,8 @@ CliCapabilityProvider {
 
 | 层 | 结果 |
 |---|---|
-| `dsh-quno` node:test | 180 → **203** 全绿（新增 `cli-broker.test.ts` 17 条、`exchange-outcome.test.ts` 6 条；过期用例按新语义改写） |
-| `dsh-quno-sense-yzj` node:test | 54 → **61** 全绿（新增 `capability.test.ts` 7 条：声明面、profile 来源、参数拒绝、失败分类、共享预算、输出上限、apply 注册） |
+| `dsh-quno` node:test | **219** 全绿（合并 collector 线后；新增 `cli-broker.test.ts` 17 条、`exchange-outcome.test.ts` 6 条，过期用例按新语义改写） |
+| `dsh-quno-collector-yzj` node:test | **66** 全绿（新增 `capability.test.ts` 7 条：声明面、profile 来源、参数拒绝、失败分类、共享预算、输出上限、apply 注册） |
 | Scripted 链路评测 | 21 通过 + 8 blocked → **25 通过 + 9 blocked，0 fail**；新增四条 P0：`cli-capability-read`（暂停中的实例仍被查询；真实子进程 → 同回合结果 → report → 主对话只汇报一次）、`cli-capability-refuse`（带 `profile` 的 payload 被拒且**零进程**，纠正参数后成功）、`cli-capability-failure`（鉴权失败 → 工具错误 → report blocked + question → 主对话只汇报一次且不称成功）、`exchange-failure-relay`（Exchange 终态失败回流一次） |
 | 安全边界 | 越界/未知参数、写 operation、未授权 capability、disabled target 均在进程启动前拒绝；`quno-task` 仍无 `bash`，preset 断言不变 |
 
@@ -96,4 +96,4 @@ CliCapabilityProvider {
 
 1. **长任务阶段**：CLI 调用超过同步上限（或需要跨重启）时走持久 Job：`cli-job` Effect kind + Job 结果写入同一结果协议（error/response 消息 + 请求方唤醒），Worker 用 `quno_cli_call` 的 `jobId` 分支恢复。设计前提是「进度可查、结果只投一次」。
 2. **能力面扩展**：`gh` / `ot` 等 CLI 按同一 provider 契约接入；`access: 'command'` 的写操作需要独立的审批卡与审计，不在只读 Worker 里放开。
-3. **发版**：`dsh-quno` 与 `dsh-quno-sense-yzj` 各自独立插件 tag，不与桌面锁步（壳/IPC/打包未动）。
+3. **发版**：`dsh-quno` 与 `dsh-quno-collector-yzj` 各自独立插件 tag，不与桌面锁步（壳/IPC/打包未动）。

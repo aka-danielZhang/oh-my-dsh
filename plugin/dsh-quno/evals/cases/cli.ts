@@ -30,8 +30,8 @@ import {
   toolResults,
 } from './support.ts'
 import type { CliCallRequest, CliCallOutcome, CliCapabilityProvider, CliOperationSpec } from '../../src/cli-broker.ts'
-import type { SenseDefinition } from '../../src/types.ts'
-import type { SenseFactory, SenseHandle } from '../../src/senses.ts'
+import type { CollectorDefinition } from '../../src/types.ts'
+import type { CollectorFactory } from '../../src/collectors.ts'
 
 const SENSE_TYPE = 'eval/cli-im'
 const CAPABILITY = 'eval-cli'
@@ -121,7 +121,7 @@ function fixtureProvider(script: string, log: string): CliCapabilityProvider {
   return {
     capability: CAPABILITY,
     title: '评测 CLI',
-    senseType: SENSE_TYPE,
+    collectorType: SENSE_TYPE,
     operations: OPERATIONS,
     timeoutMs: 5_000,
     async execute(request: CliCallRequest): Promise<CliCallOutcome> {
@@ -147,25 +147,23 @@ function fixtureProvider(script: string, log: string): CliCapabilityProvider {
   }
 }
 
-function noopFactory(): SenseFactory {
+function noopFactory(): CollectorFactory {
   return {
     validateConfig: () => ({ ok: true, value: {} }),
-    start(): SenseHandle {
-      return { stop() {} }
-    },
+    run: async () => ({ ok: true }),
   }
 }
 
-function cliSenseDefinition(): SenseDefinition {
+function cliCollectorDefinition(): CollectorDefinition {
   return {
     type: SENSE_TYPE,
-    contractVersion: 'quno.sense/v1',
+    contractVersion: 'quno.collector/v2',
     implementationVersion: '0.0.1',
     displayName: '评测 CLI 来源',
-    description: 'eval-only Sense carrying the configured CLI target',
+    description: 'eval-only collector carrying the configured CLI target',
     eventTypes: [],
     permissions: { reads: [] },
-    runtime: { modes: ['poll'], defaultIntervalSec: 300, minIntervalSec: 60, concurrency: 1, timeoutMs: 5_000 },
+    schedule: { defaultIntervalSec: 300, minIntervalSec: 60, maxRunMs: 5_000 },
     reliability: {
       checkpoint: 'none',
       replay: { kind: 'none' },
@@ -186,18 +184,17 @@ async function installCliFixture(rt: EvalRuntime): Promise<CliFixture> {
   const script = join(rt.fixtureDir, 'fake-cli.mjs')
   const log = join(rt.fixtureDir, 'cli-calls.log')
   writeFixtureFiles(rt.fixtureDir, [{ path: 'fake-cli.mjs', content: FAKE_CLI }])
-  const registered = rt.host.senses.register(cliSenseDefinition(), noopFactory())
-  void registered
-  const created = rt.host.senses.createInstance({
+  rt.host.collectors.register(cliCollectorDefinition(), noopFactory())
+  const created = rt.host.collectors.createInstance({
     type: SENSE_TYPE,
     label: '评测云之家账号',
     config: { profile: 'eval-work' },
     desiredState: 'enabled',
   })
-  if (!created.ok) throw new Error(`eval cli sense: ${created.error.message}`)
-  // Pausing the Sense stops its polling, not its configured account: the
+  if (!created.ok) throw new Error(`eval cli collector: ${created.error.message}`)
+  // Pausing the collector stops its polling, not its configured account: the
   // explicit read capability must keep working (design §5.4 / 2026-11-13).
-  await rt.host.senses.pause(created.instance.id)
+  await rt.host.collectors.pause(created.instance.id)
   rt.host.cli.register(fixtureProvider(script, log))
   return { log, targetId: created.instance.id }
 }
@@ -402,6 +399,12 @@ export const cliCases: readonly EvalCase[] = [
     requirement: 'Router 发起 exchange → organ 失败 → 失败原因作为一次 relay 进入主对话（只一次），且不得声称成功',
     tags: ['exchange', 'relay', 'release-gate'],
     model: { router: 'scripted', worker: 'scripted' },
+    setup: async (rt) => {
+      // The synthetic collector refuses an out-of-whitelist payload, which is a
+      // terminal Exchange failure — exactly the path this case must deliver.
+      await rt.host.updateConfig({ patch: { acceptMode: 'auto' } })
+      rt.options.collector.setWhitelist(true)
+    },
     scripts: { router: [], worker: [] },
     steps: [
       // The tool turn must be queued before the human message triggers the
@@ -410,7 +413,7 @@ export const cliCases: readonly EvalCase[] = [
       {
         kind: 'script',
         role: 'router',
-        build: (_rt, drv) => toolTurn('quno_exchange', { responder: `organ:${String(drv.organInstanceId)}`, kind: 'command', payload: { op: 'x' } }, 'ef-exchange-1'),
+        build: (_rt, drv) => toolTurn('quno_exchange', { responder: `collector:${String(drv.collectorInstanceId)}`, kind: 'request', payload: { op: 'unsupported-op' } }, 'ef-exchange-1'),
       },
       { kind: 'script', role: 'router', build: () => textTurn('已发起读取，结果回来我再告诉你。') },
       { kind: 'human', text: '帮我读一下那个来源' },

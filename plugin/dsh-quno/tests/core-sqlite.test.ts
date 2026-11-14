@@ -9,7 +9,7 @@
 
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { addSense, openFixture } from './helpers.ts'
+import { addCollector, openFixture } from './helpers.ts'
 import { QunoStore } from '../src/store.ts'
 import { SqliteRepository } from '../src/app/store.ts'
 import { buildPolicy } from '../src/core/policy.ts'
@@ -100,8 +100,8 @@ function draft(patch: Partial<TriggerDraft> & { eventKey: string; thread?: strin
 test('sqlite repository: the full accept → report → relay path persists', () => {
   const fixture = openFixture()
   const { store } = fixture
-  addSense(fixture, 'test/im')
-  // The stable source id is derived from the Sense instance; use it.
+  addCollector(fixture, 'test/im')
+  // The stable source id is derived from the Collector instance; use it.
   const source = store.listSources('quno')[0]
   assert.ok(source)
   const f = sqliteFixture(store, fixture.root, fixture.now)
@@ -152,7 +152,7 @@ test('sqlite repository: the full accept → report → relay path persists', ()
 test('sqlite repository: follow-up input and handback survive the transaction', () => {
   const fixture = openFixture()
   const { store } = fixture
-  addSense(fixture, 'test/im')
+  addCollector(fixture, 'test/im')
   const source = store.listSources('quno')[0]
   assert.ok(source)
   const f = sqliteFixture(store, fixture.root, fixture.now)
@@ -186,7 +186,7 @@ test('sqlite repository: follow-up input and handback survive the transaction', 
 test('sqlite repository: duplicate trigger identity is refused without side effects', () => {
   const fixture = openFixture()
   const { store } = fixture
-  addSense(fixture, 'test/im')
+  addCollector(fixture, 'test/im')
   const source = store.listSources('quno')[0]
   assert.ok(source)
   const f = sqliteFixture(store, fixture.root, fixture.now)
@@ -219,7 +219,7 @@ test('sqlite migration: legacy tasks become Tickets and Assignments idempotently
     VALUES ('del_1', 'quno', 'evt_legacy_1', 'pending', 'p2', ?, ?)`).run(at, at)
   db.prepare(`INSERT INTO events (id, source_id, event_key, subject_key, subject_revision, type, schema,
     operation, occurred_at, observed_at, received_at, ingest_seq, summary, data_json, priority, deadline,
-    provenance_json, content_hash, sense_config_revision)
+    provenance_json, content_hash, collector_config_revision)
     VALUES ('evt_legacy_1', 'src_legacy', 'legacy-1', 'subject-1', NULL, 'im.message.created', 'quno.event/v1',
     'upsert', ?, ?, ?, 99, '旧事件', '{"x":1}', 'p2', NULL, '{"kind":"observed"}', 'hash-legacy', 1)`)
     .run(at, at, at)
@@ -272,7 +272,7 @@ test('sqlite repository: effect merge and stale completion follow the port contr
 test('retention never prunes a body that unsettled domain work still cites', () => {
   const fixture = openFixture()
   const { store } = fixture
-  addSense(fixture, 'test/im')
+  addCollector(fixture, 'test/im')
   const source = store.listSources('quno')[0]
   assert.ok(source)
   const f = sqliteFixture(store, fixture.root, fixture.now)

@@ -25,7 +25,7 @@ export type AssignmentId = string
 export type RunId = string
 /** One asynchronous paired exchange. */
 export type ExchangeId = string
-/** A durable logical endpoint (`quno:<id>/router`, `ticket:<id>`, `organ:<id>`). */
+/** A durable logical endpoint (`quno:<id>/router`, `ticket:<id>`, `collector:<id>`). */
 export type EndpointId = string
 /** Stable identity of one eval batch. */
 export type EvalId = string
@@ -97,7 +97,7 @@ export type Provenance =
   }
 
 /**
- * One immutable Trigger: the only domain event a Source/Organ produces.
+ * One immutable Trigger: the only domain event a Source (collector) produces.
  * Worker Reports, TicketInputs, Effects, Notifications, Exchange messages and
  * Channel messages are NOT Triggers; they have their own state machines.
  */
@@ -134,42 +134,6 @@ export interface TriggerRecord {
   readonly configRevision: number
   readonly expiresAt: number | null
   readonly prunedAt: number | null
-}
-
-/** What an Organ declares it can do beyond producing Triggers. */
-export type ThreadResolution =
-  | { readonly status: 'resolved'; readonly threads: readonly ThreadRef[] }
-  | { readonly status: 'unresolved'; readonly reason: string }
-
-/** The optional context/read capabilities of one Organ implementation. */
-export interface OrganCapabilities {
-  resolveThreads?(event: ParsedEventEnvelope): ThreadResolution
-  readOriginal?(request: {
-    readonly triggerId: TriggerId
-    readonly part: 'self' | 'thread' | 'root' | 'parent'
-    readonly cursor: string | null
-    readonly signal: AbortSignal
-  }): Promise<{
-    readonly items: readonly unknown[]
-    readonly nextCursor: string | null
-    readonly truncated: boolean
-  }>
-  handleRequest?(request: {
-    readonly exchangeId: ExchangeId
-    readonly endpoint: EndpointId
-    readonly payload: unknown
-    readonly signal: AbortSignal
-    completeExchange(result: unknown): Promise<void>
-    failExchange(reason: string, retryable: boolean): Promise<void>
-  }): Promise<void> | void
-  handleCommand?(request: {
-    readonly exchangeId: ExchangeId
-    readonly endpoint: EndpointId
-    readonly payload: unknown
-    readonly signal: AbortSignal
-    completeExchange(result: unknown): Promise<void>
-    failExchange(reason: string, retryable: boolean): Promise<void>
-  }): Promise<void> | void
 }
 
 /** The envelope a Source adapter hands the Engine before it becomes a Trigger. */
@@ -623,9 +587,14 @@ export function ticketEndpoint(ticketId: TicketId): EndpointId {
   return `ticket:${ticketId}`
 }
 
-/** Canonical endpoint name for one Organ instance. */
-export function organEndpoint(instanceId: string): EndpointId {
-  return `organ:${instanceId}`
+/** Canonical endpoint name for one collector instance's query face. */
+export function collectorEndpoint(instanceId: string): EndpointId {
+  return `collector:${instanceId}`
+}
+
+/** The instance id behind a collector endpoint, or null for any other endpoint. */
+export function collectorInstanceOf(endpoint: string): string | null {
+  return endpoint.startsWith('collector:') ? endpoint.slice('collector:'.length) : null
 }
 
 /** Stable Ticket id derived from an accepted Eval (repeated accepts return the same Ticket). */

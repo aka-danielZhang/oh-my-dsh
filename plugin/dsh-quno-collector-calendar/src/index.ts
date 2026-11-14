@@ -1,0 +1,614 @@
+/**
+ * dsh-quno-collector-calendar — a REAL collector over local iCalendar files.
+ *
+ * Identity: the VEVENT UID plus a revision token
+ * (SEQUENCE/LAST-MODIFIED/DTSTAMP/content hash). A change is emitted as a new
+ * immutable event; a disappearance is an explicit retraction, never a silent
+ * delete. Recurring rules are out of scope for v1 and declared honestly
+ * (`changeCoverage: snapshot-diff`). The Host owns the timer: `run` is one
+ * snapshot-diff pass, everything else is scheduling.
+ *
+ * @module dsh-quno-collector-calendar
+ */
+
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import type { Context } from '@deepseek-ai/cordis'
+import type { EventEnvelope, CollectorDefinition } from '../../dsh-quno/src/types.ts'
+import type { CollectorFactory, CollectorRunContext, CollectorRunOutcome } from '../../dsh-quno/src/collectors.ts'
+
+/** Cordis plugin name used by loader diagnostics. */
+export const name = 'dsh-quno-collector-calendar'
+
+/** Waits for the Quno Host to expose the Collector registry. */
+export const inject = ['qunoCollectors']
+
+/** Minimal structural registry face (string-keyed service, instance-agnostic). */
+interface CollectorRegistryFace {
+  register(definition: unknown, factory: unknown): () => Promise<void>
+}
+
+/** The declaration this Collector offers to Quno. */
+export const definition: CollectorDefinition = {
+  type: 'quno/calendar',
+  contractVersion: 'quno.collector/v2',
+  implementationVersion: '0.2.0',
+  displayName: '日历（本地 .ics）',
+  description: '读取本地 iCalendar 文件目录，按 UID + 修订号追踪新增、改期与取消的日程。',
+  eventTypes: [
+    { type: 'calendar/event-updated', summary: '日程新增或改期' },
+    { type: 'calendar/event-cancelled', summary: '日程被删除或取消' },
+  ],
+  configFields: [
+    { key: 'directory', label: '日历目录', type: 'path', required: false, placeholder: '~/Calendar', help: '读取该目录下的 .ics 文件；与单文件二选一' },
+    { key: 'file', label: '单个日历文件', type: 'path', required: false, placeholder: '~/Calendar/work.ics' },
+    { key: 'timeZone', label: '浮动时间所属时区', type: 'string', defaultValue: 'Asia/Shanghai', help: '未带 TZID/Z 的时间按此时区解释' },
+    { key: 'intervalSec', label: '轮询间隔（秒）', type: 'number', min: 30, step: 30, defaultValue: 60, help: '最小 30 秒' },
+    { key: 'lookaheadDays', label: '向后看多少天', type: 'number', min: 1, max: 365, step: 1, defaultValue: 30 },
+    { key: 'maxFiles', label: '最多文件数', type: 'number', min: 1, max: 500, step: 1, defaultValue: 50, advanced: true },
+    { key: 'freshnessThresholdSec', label: '陈旧阈值（秒）', type: 'number', min: 60, step: 60, defaultValue: 600, advanced: true },
+  ],
+  permissions: {
+    reads: ['local iCalendar files under the configured directory or file'],
+    requiresModel: false,
+  },
+  schedule: {
+    defaultIntervalSec: 60,
+    minIntervalSec: 30,
+    maxRunMs: 15_000,
+    quotas: { maxEventsPerRun: 200, maxBytesPerRun: 8 * 1024 * 1024 },
+  },
+  reliability: {
+    checkpoint: 'snapshot',
+    replay: { kind: 'none' },
+    changeCoverage: 'snapshot-diff',
+    gapDetection: 'explicit',
+    readOriginal: true,
+  },
+  // The first run emits the current snapshot (and anything in the lookahead
+  // window) as observed events; it is not a zero-event baseline.
+  firstSync: 'snapshot-events',
+  defaults: {
+    intervalSec: 60,
+    maxFiles: 50,
+    timeZone: 'Asia/Shanghai',
+    lookaheadDays: 30,
+    freshnessThresholdSec: 600,
+  },
+}
+
+/** Validated instance configuration. */
+interface CalendarConfig {
+  readonly directory: string | null
+  readonly file: string | null
+  readonly intervalSec: number
+  readonly maxFiles: number
+  readonly timeZone: string
+  readonly lookaheadDays: number
+}
+
+/** One parsed VEVENT. */
+interface CalendarEvent {
+  readonly uid: string
+  readonly summary: string
+  readonly start: number | null
+  readonly end: number | null
+  readonly allDay: boolean
+  readonly location: string | null
+  readonly organizer: string | null
+  readonly status: string | null
+  readonly description: string | null
+  readonly revision: string
+}
+
+/** Persisted snapshot state (opaque to the Host). */
+interface SnapshotState {
+  readonly events: Record<string, string>
+}
+
+/** Validate the instance configuration. */
+export function validateConfig(raw: unknown): { readonly ok: true; readonly value: CalendarConfig } | { readonly ok: false; readonly message: string } {
+  if (typeof raw !== 'object' || raw === null) return { ok: false, message: '配置必须是对象' }
+  const record = raw as Record<string, unknown>
+  const directory = typeof record['directory'] === 'string' && record['directory'].trim() !== ''
+    ? resolve(expandHome(record['directory'].trim()))
+    : null
+  const file = typeof record['file'] === 'string' && record['file'].trim() !== ''
+    ? resolve(expandHome(record['file'].trim()))
+    : null
+  if (directory === null && file === null) return { ok: false, message: '需要配置 directory 或 file' }
+  if (directory !== null && file !== null) return { ok: false, message: 'directory 与 file 只能二选一' }
+  const intervalSec = numberOr(record['intervalSec'], 60)
+  if (intervalSec < 30) return { ok: false, message: 'intervalSec 不能小于 30' }
+  const maxFiles = numberOr(record['maxFiles'], 50)
+  if (maxFiles < 1 || maxFiles > 500) return { ok: false, message: 'maxFiles 必须在 1-500 之间' }
+  const lookaheadDays = numberOr(record['lookaheadDays'], 30)
+  const timeZone = typeof record['timeZone'] === 'string' && record['timeZone'].trim() !== ''
+    ? record['timeZone'].trim()
+    : 'Asia/Shanghai'
+  try {
+    new Intl.DateTimeFormat('en-GB', { timeZone }).format(new Date())
+  } catch {
+    return { ok: false, message: `未知时区：${timeZone}` }
+  }
+  return { ok: true, value: { directory, file, intervalSec, maxFiles, timeZone, lookaheadDays } }
+}
+
+/** The collector factory: one run is one snapshot-diff pass. */
+export const factory: CollectorFactory<CalendarConfig> = {
+  validateConfig,
+  async probe(config) {
+    const path = config.directory ?? config.file
+    if (path === null) return { ok: false, detail: '未配置路径' }
+    if (!existsSync(path)) return { ok: false, detail: `路径不存在：${path}` }
+    return { ok: true }
+  },
+  async run(ctx): Promise<CollectorRunOutcome> {
+    try {
+      return await runOnce(ctx)
+    } catch (error) {
+      const refusal = ingressRefusalOf(error)
+      if (refusal !== null) {
+        // The generation/lease moved under us: retrying this run can never
+        // succeed — stop scheduling until the instance is reconfigured.
+        if (FATAL_REFUSALS.has(refusal.code)) {
+          return { ok: false, failure: { state: 'degraded', code: refusal.code, message: refusal.message, fatal: true } }
+        }
+        return {
+          ok: false,
+          failure: { state: refusal.retryable ? 'unavailable' : 'degraded', code: refusal.code, message: refusal.message },
+        }
+      }
+      const classified = classify(error)
+      return {
+        ok: false,
+        failure: { state: classified.state, code: classified.code, message: (error as Error).message },
+      }
+    }
+  },
+}
+
+/** Host refusals after which retrying this run is pointless: the instance moved on. */
+const FATAL_REFUSALS: ReadonlySet<string> = new Set(['stale-generation', 'checkpoint-conflict'])
+
+/**
+ * Structurally read a Host ingest refusal. This plugin never value-imports
+ * the Host's `QunoIngressError`: an installed tarball bundles its own copy, so
+ * `instanceof` against it would always be false. The commit face rejects with
+ * an Error named `QunoIngressError` carrying `shape.{code,retryable}`.
+ */
+export function ingressRefusalOf(error: unknown): { readonly code: string; readonly message: string; readonly retryable: boolean } | null {
+  if (!(error instanceof Error) || error.name !== 'QunoIngressError') return null
+  const shape = (error as { shape?: { code?: unknown; retryable?: unknown } }).shape
+  if (typeof shape?.code !== 'string') return null
+  return { code: shape.code, message: error.message, retryable: shape.retryable === true }
+}
+
+/** A backlog that did not fit one run resumes this soon (the Host floor is 1s). */
+const CONTINUATION_MS = 5_000
+
+/** Per-batch headroom for the envelope wrapper beyond the events and the checkpoint. */
+const BATCH_OVERHEAD_BYTES = 4 * 1024
+
+/** One pending change: its envelope and how it moves the snapshot once committed. */
+interface Change {
+  readonly envelope: EventEnvelope
+  readonly uid: string
+  /** The revision the snapshot records after the commit; null = removed. */
+  readonly revision: string | null
+  readonly bytes: number
+}
+
+function change(envelope: EventEnvelope, uid: string, revision: string | null): Change {
+  return { envelope, uid, revision, bytes: Buffer.byteLength(JSON.stringify(envelope), 'utf8') }
+}
+
+/**
+ * One snapshot-diff pass over the configured calendar files.
+ *
+ * The change set is committed in batches that fit the Host's per-batch
+ * limits, up to the run's own budget. The snapshot (the checkpoint) only
+ * advances past COMMITTED changes: a change that did not fit keeps its old
+ * revision — a deferred removal keeps its entry — so the next run detects it
+ * again instead of silently skipping it.
+ */
+async function runOnce(ctx: CollectorRunContext<CalendarConfig>): Promise<CollectorRunOutcome> {
+  const config = ctx.config
+  const startedAt = Date.now()
+  const runKey = `calendar-${String(startedAt)}-${Math.random().toString(36).slice(2, 8)}`
+  const { events, gaps, files } = readCalendar(config)
+  const state = parseState(ctx.checkpoint.value)
+  const current = new Map<string, CalendarEvent>()
+  for (const event of events) current.set(event.uid, event)
+  const changes: Change[] = []
+  for (const event of events) {
+    const previous = state.events[event.uid]
+    if (previous === event.revision) continue
+    changes.push(change(toEnvelope(event, previous === undefined ? 'created' : 'updated'), event.uid, event.revision))
+  }
+  for (const uid of Object.keys(state.events)) {
+    if (current.has(uid)) continue
+    changes.push(change(removalEnvelope(uid, state.events[uid] ?? 'unknown'), uid, null))
+  }
+  const gapReason = gaps.length === 0 ? null : gaps.join('；')
+
+  const snapshot: Record<string, string> = { ...state.events }
+  // Upper bound of every intermediate snapshot: each uid either side knows.
+  const union = { ...state.events, ...Object.fromEntries(events.map(event => [event.uid, event.revision])) }
+  const reserve = Buffer.byteLength(JSON.stringify({ events: union }), 'utf8') + BATCH_OVERHEAD_BYTES
+  const limits = ctx.limits
+  let revision = ctx.checkpoint.revision
+  let emitted = 0
+  let runBytes = 0
+  let batch = 0
+  while (emitted < changes.length && emitted < limits.maxEventsPerRun) {
+    const chunk: Change[] = []
+    let chunkBytes = 0
+    for (const candidate of changes.slice(emitted)) {
+      if (emitted + chunk.length >= limits.maxEventsPerRun || chunk.length >= limits.maxEventsPerBatch) break
+      if (reserve + chunkBytes + candidate.bytes > limits.maxBytesPerBatch) break
+      if (runBytes + chunkBytes + candidate.bytes > limits.maxBytesPerRun) break
+      chunk.push(candidate)
+      chunkBytes += candidate.bytes
+    }
+    if (chunk.length === 0) {
+      if (emitted > 0) break // the run's byte budget is spent; the rest waits
+      return {
+        ok: false,
+        failure: {
+          state: 'degraded',
+          code: 'batch-too-large',
+          message: `单条日程变更（${String(changes[0]?.bytes ?? 0)} 字节）放不进一个批次（上限 ${String(limits.maxBytesPerBatch)} 字节，含检查点 ${String(reserve)} 字节）`,
+        },
+      }
+    }
+    for (const item of chunk) {
+      if (item.revision === null) delete snapshot[item.uid]
+      else snapshot[item.uid] = item.revision
+    }
+    const ack = await ctx.commit({
+      batchKey: `${runKey}-${String(batch)}`,
+      events: chunk.map(item => item.envelope),
+      checkpointAfter: { value: JSON.stringify({ events: snapshot } satisfies SnapshotState), revision },
+      gap: batch === 0 && gapReason !== null ? { reason: gapReason } : null,
+    })
+    revision = ack.checkpointRevision
+    emitted += chunk.length
+    runBytes += chunkBytes
+    batch += 1
+  }
+  const deferred = changes.length - emitted
+  const detail = [
+    ...(gapReason === null ? [] : [gapReason]),
+    ...(deferred > 0 ? [`${String(deferred)} 条日程变更超出单次运行上限，下一次运行继续`] : []),
+  ]
+  return {
+    ok: true,
+    nextRunAtMs: Date.now() + (deferred > 0 ? CONTINUATION_MS : config.intervalSec * 1000),
+    health: {
+      coveredThrough: `${String(files)} file(s)`,
+      ...(detail.length === 0 ? {} : { detail: detail.join('；') }),
+      ...(gapReason === null ? {} : { issues: [{ code: 'read-gap', detail: gapReason }] }),
+      // Queued change is progress, not a fault.
+      ...(deferred > 0 ? { progress: { pendingChanges: deferred } } : {}),
+    },
+  }
+}
+
+/** Map a filesystem error to a classified failure state. */
+function classify(error: unknown): { readonly state: 'unavailable' | 'auth-required' | 'degraded'; readonly code: string } {
+  const code = (error as NodeJS.ErrnoException).code
+  if (code === 'EACCES' || code === 'EPERM') return { state: 'auth-required', code: 'permission-denied' }
+  if (code === 'ENOENT') return { state: 'unavailable', code: 'path-missing' }
+  return { state: 'degraded', code: 'read-failed' }
+}
+
+/** Read and parse every configured calendar file. */
+export function readCalendar(config: CalendarConfig): {
+  readonly events: CalendarEvent[]
+  readonly gaps: string[]
+  readonly files: number
+} {
+  const gaps: string[] = []
+  const files: string[] = []
+  // `?? null`：未经 validateConfig 的存量行（或手工种库）可能缺字段——
+  // undefined 与 null 同样按「未配置」处理，绝不让 undefined 混进路径列表。
+  const file = config.file ?? null
+  const directory = config.directory ?? null
+  if (file !== null) {
+    files.push(file)
+  } else if (directory !== null) {
+    if (!existsSync(directory)) {
+      throw Object.assign(new Error(`日历目录不存在：${directory}`), { code: 'ENOENT' })
+    }
+    const entries = readdirSync(directory).filter(entry => entry.toLowerCase().endsWith('.ics')).sort()
+    if (entries.length > config.maxFiles) {
+      gaps.push(`日历文件数 ${String(entries.length)} 超过上限 ${String(config.maxFiles)}，未处理其余文件`)
+    }
+    for (const entry of entries.slice(0, config.maxFiles)) files.push(join(directory, entry))
+  } else {
+    throw new Error('未配置日历路径')
+  }
+  const byUid = new Map<string, CalendarEvent>()
+  const cutoff = Date.now() - 24 * 60 * 60_000
+  const horizon = Date.now() + config.lookaheadDays * 24 * 60 * 60_000
+  for (const file of files) {
+    let text: string
+    try {
+      const stat = statSync(file)
+      if (!stat.isFile()) continue
+      text = readFileSync(file, 'utf8')
+    } catch (error) {
+      gaps.push(`读取 ${file} 失败：${(error as Error).message}`)
+      continue
+    }
+    for (const event of parseIcs(text, config.timeZone)) {
+      if (event.start !== null && (event.start < cutoff || event.start > horizon)) continue
+      const existing = byUid.get(event.uid)
+      if (existing === undefined || revisionRank(event) > revisionRank(existing)) byUid.set(event.uid, event)
+    }
+  }
+  return {
+    events: [...byUid.values()].sort((left, right) => (left.start ?? 0) - (right.start ?? 0)),
+    gaps,
+    files: files.length,
+  }
+}
+
+function revisionRank(event: CalendarEvent): number {
+  const parsed = Number.parseInt(event.revision.split(':')[0] ?? '0', 10)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function toEnvelope(event: CalendarEvent, change: 'created' | 'updated'): EventEnvelope {
+  const when = event.start === null ? '时间未知' : new Date(event.start).toISOString()
+  return {
+    eventKey: `${event.uid}:${event.revision}`,
+    type: 'calendar/event-updated',
+    subject: { key: event.uid, revision: event.revision, label: event.summary },
+    operation: 'upsert',
+    occurredAt: event.start === null ? null : new Date(event.start).toISOString(),
+    observedAt: new Date().toISOString(),
+    summary: `日历「${event.summary}」${change === 'created' ? '新增' : '改期'}：${when}`,
+    data: {
+      uid: event.uid,
+      title: event.summary,
+      start: event.start === null ? null : new Date(event.start).toISOString(),
+      end: event.end === null ? null : new Date(event.end).toISOString(),
+      allDay: event.allDay,
+      location: event.location,
+      organizer: event.organizer,
+      status: event.status,
+      description: event.description === null ? null : event.description.slice(0, 4000),
+      change,
+    },
+    priority: 'p2',
+    deadline: event.start === null ? null : new Date(event.start).toISOString(),
+    provenance: { kind: 'observed', collector: 'dsh-quno-collector-calendar' },
+    correlationKeys: [`calendar:${event.uid}`],
+  }
+}
+
+function removalEnvelope(uid: string, previousRevision: string): EventEnvelope {
+  return {
+    eventKey: `${uid}:removed:${previousRevision}`,
+    type: 'calendar/event-cancelled',
+    subject: { key: uid, revision: `removed-${previousRevision}` },
+    operation: 'retract',
+    occurredAt: null,
+    observedAt: new Date().toISOString(),
+    summary: '日历事件已删除或取消',
+    data: { uid, previousRevision },
+    priority: 'p2',
+    provenance: { kind: 'observed', collector: 'dsh-quno-collector-calendar' },
+    correlationKeys: [`calendar:${uid}`],
+  }
+}
+
+function parseState(value: string | null): SnapshotState {
+  if (value === null) return { events: {} }
+  try {
+    const parsed = JSON.parse(value) as { events?: Record<string, string> }
+    return { events: parsed.events ?? {} }
+  } catch {
+    return { events: {} }
+  }
+}
+
+/** Parse one iCalendar document into VEVENTs (best-effort, bounded). */
+export function parseIcs(text: string, floatingZone: string): CalendarEvent[] {
+  const unfolded = text.replace(/\r?\n[ \t]/g, '')
+  const lines = unfolded.split(/\r?\n/)
+  const events: CalendarEvent[] = []
+  let current: Record<string, { value: string; params: Record<string, string> }> | undefined
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed.toUpperCase() === 'BEGIN:VEVENT') {
+      current = {}
+      continue
+    }
+    if (trimmed.toUpperCase() === 'END:VEVENT') {
+      if (current !== undefined) {
+        const event = toEvent(current, floatingZone)
+        if (event !== null) events.push(event)
+      }
+      current = undefined
+      continue
+    }
+    if (current === undefined) continue
+    const property = parseProperty(trimmed)
+    if (property === null) continue
+    current[property.name] = { value: property.value, params: property.params }
+  }
+  return events
+}
+
+function parseProperty(line: string): { name: string; value: string; params: Record<string, string> } | null {
+  const colon = findValueColon(line)
+  if (colon < 0) return null
+  const head = line.slice(0, colon)
+  const value = line.slice(colon + 1)
+  const segments = splitParams(head)
+  const property = (segments.shift() ?? '').toUpperCase()
+  if (property === '') return null
+  const params: Record<string, string> = {}
+  for (const segment of segments) {
+    const equals = segment.indexOf('=')
+    if (equals < 0) continue
+    params[segment.slice(0, equals).toUpperCase()] = segment.slice(equals + 1).replace(/^"|"$/g, '')
+  }
+  return { name: property, value, params }
+}
+
+/** The value separator is the first colon outside quoted parameter text. */
+function findValueColon(line: string): number {
+  let quoted = false
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index]
+    if (char === '"') quoted = !quoted
+    else if (char === ':' && !quoted) return index
+  }
+  return -1
+}
+
+function splitParams(head: string): string[] {
+  const out: string[] = []
+  let current = ''
+  let quoted = false
+  for (const char of head) {
+    if (char === '"') quoted = !quoted
+    if (char === ';' && !quoted) {
+      out.push(current)
+      current = ''
+      continue
+    }
+    current += char
+  }
+  out.push(current)
+  return out
+}
+
+function toEvent(
+  properties: Record<string, { value: string; params: Record<string, string> }>,
+  floatingZone: string,
+): CalendarEvent | null {
+  const uid = properties['UID']?.value.trim()
+  if (uid === undefined || uid === '') return null
+  const summary = unescapeText(properties['SUMMARY']?.value ?? '(无标题)')
+  const startProperty = properties['DTSTART']
+  const start = startProperty === undefined ? null : parseIcsDate(startProperty.value, startProperty.params['TZID'], floatingZone)
+  const endProperty = properties['DTEND']
+  let end = endProperty === undefined ? null : parseIcsDate(endProperty.value, endProperty.params['TZID'], floatingZone)
+  if (end === null && start !== null) {
+    const duration = properties['DURATION']?.value
+    end = start + (duration === undefined ? 60 * 60_000 : parseDuration(duration))
+  }
+  const allDay = startProperty !== undefined && /^\d{8}$/.test(startProperty.value)
+  const sequence = properties['SEQUENCE']?.value ?? '0'
+  const modified = properties['LAST-MODIFIED']?.value ?? properties['DTSTAMP']?.value ?? ''
+  const revision = `${sequence}:${modified}:${hash(`${summary}:${String(start)}:${String(end)}:${properties['STATUS']?.value ?? ''}`)}`
+  return {
+    uid,
+    summary,
+    start,
+    end,
+    allDay,
+    location: properties['LOCATION'] === undefined ? null : unescapeText(properties['LOCATION'].value),
+    organizer: properties['ORGANIZER'] === undefined ? null : unescapeText(properties['ORGANIZER'].value),
+    status: properties['STATUS']?.value ?? null,
+    description: properties['DESCRIPTION'] === undefined ? null : unescapeText(properties['DESCRIPTION'].value),
+    revision,
+  }
+}
+
+function parseIcsDate(value: string, timeZoneId: string | undefined, floatingZone: string): number | null {
+  const dateOnly = /^(\d{4})(\d{2})(\d{2})$/.exec(value)
+  if (dateOnly !== null) {
+    return Date.UTC(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+  }
+  const utc = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(value)
+  if (utc !== null) {
+    return Date.UTC(Number(utc[1]), Number(utc[2]) - 1, Number(utc[3]), Number(utc[4]), Number(utc[5]), Number(utc[6]))
+  }
+  const local = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/.exec(value)
+  if (local !== null) {
+    return zonedWallToEpoch({
+      year: Number(local[1]), month: Number(local[2]), day: Number(local[3]),
+      hour: Number(local[4]), minute: Number(local[5]), second: Number(local[6]),
+    }, timeZoneId ?? floatingZone)
+  }
+  return null
+}
+
+function parseDuration(value: string): number {
+  const match = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?)?$/.exec(value.trim())
+  if (match === null) return 60 * 60_000
+  const days = Number(match[1] ?? 0)
+  const hours = Number(match[2] ?? 0)
+  const minutes = Number(match[3] ?? 0)
+  return ((days * 24 + hours) * 60 + minutes) * 60_000
+}
+
+const FORMATTERS = new Map<string, Intl.DateTimeFormat>()
+
+function zoneOffsetMs(epochMs: number, timeZone: string): number {
+  let formatter = FORMATTERS.get(timeZone)
+  if (formatter === undefined) {
+    formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    })
+    FORMATTERS.set(timeZone, formatter)
+  }
+  const parts = formatter.formatToParts(new Date(epochMs))
+  const pick = (type: Intl.DateTimeFormatPartTypes): number => Number(parts.find(part => part.type === type)?.value ?? '0')
+  const asUtc = Date.UTC(pick('year'), pick('month') - 1, pick('day'), pick('hour'), pick('minute'))
+  return asUtc - Math.floor(epochMs / 60_000) * 60_000
+}
+
+function zonedWallToEpoch(
+  wall: { year: number; month: number; day: number; hour: number; minute: number; second: number },
+  timeZone: string,
+): number {
+  const guess = Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute, wall.second)
+  const first = guess - zoneOffsetMs(guess, timeZone)
+  const second = guess - zoneOffsetMs(first, timeZone)
+  return second
+}
+
+function unescapeText(value: string): string {
+  return value
+    .replace(/\\n/gi, '\n')
+    .replace(/\\,/g, ',')
+    .replace(/\\;/g, ';')
+    .replace(/\\\\/g, '\\')
+    .trim()
+    .slice(0, 4000)
+}
+
+function hash(value: string): string {
+  let result = 2166136261
+  for (let index = 0; index < value.length; index += 1) {
+    result ^= value.charCodeAt(index)
+    result = Math.imul(result, 16777619)
+  }
+  return (result >>> 0).toString(16)
+}
+
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? Math.round(value) : fallback
+}
+
+function expandHome(path: string): string {
+  if (!path.startsWith('~')) return path
+  const home = process.env['HOME'] ?? process.env['USERPROFILE'] ?? ''
+  return `${home}${path.slice(1)}`
+}
+
+/** Register the Collector while the plugin is mounted. */
+export function apply(ctx: Context): void {
+  const registry = ctx.get('qunoCollectors') as unknown as CollectorRegistryFace | undefined
+  if (registry === undefined) throw new Error('dsh-quno-collector-calendar: qunoCollectors service is not mounted')
+  ctx.effect(() => registry.register(definition, factory), 'dsh-quno-collector-calendar: registration')
+}
+
+export default { name, inject, apply, definition, factory }

@@ -12,7 +12,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { EffectKind } from '../src/core/model.ts'
 import type { EvalRuntime } from './runtime.ts'
 import type { ModelRole } from './models/gateway.ts'
-import { evalEnvelope, sleep, type EvalOrgan } from './fixtures/organ.ts'
+import { evalEnvelope, sleep, type EvalCollector } from './fixtures/collector.ts'
 import type { EventEnvelope } from '../src/types.ts'
 
 /** The driving actions a case may use. */
@@ -64,8 +64,8 @@ export class ScenarioDriver {
   private readonly compose: () => Promise<EvalRuntime>
   /** Latest active ticket id (for stopTicket/worker session refs). */
   activeTicketId: string | null = null
-  /** The synthetic organ instance id (cases build exchange endpoints from it). */
-  readonly organInstanceId: string
+  /** The synthetic collector instance id (cases build exchange endpoints from it). */
+  readonly collectorInstanceId: string
   /** Outcome of the last lateReport injection. */
   lastLateReport: { refused: boolean; error: string | null } | null = null
   /** Hidden facts for live cases (text builders read them). */
@@ -77,12 +77,12 @@ export class ScenarioDriver {
   constructor(
     initial: EvalRuntime,
     compose: () => Promise<EvalRuntime>,
-    private readonly organ: EvalOrgan,
-    organInstanceId: string,
+    private readonly collector: EvalCollector,
+    collectorInstanceId: string,
   ) {
     this.runtime = initial
     this.compose = compose
-    this.organInstanceId = organInstanceId
+    this.collectorInstanceId = collectorInstanceId
   }
 
   get rt(): EvalRuntime {
@@ -105,7 +105,7 @@ export class ScenarioDriver {
       case 'ingest': {
         const raw = typeof step.envelopes === 'function' ? step.envelopes(this.runtime, this) : step.envelopes
         const envelopes = raw.map(entry => evalEnvelope(entry))
-        await this.organ.ingest(this.organInstanceId, envelopes)
+        await this.collector.ingest(this.collectorInstanceId, envelopes)
         if (step.settle !== false) await this.settle()
         return
       }
@@ -137,7 +137,7 @@ export class ScenarioDriver {
         this.installFault(step.effect, step.error)
         return
       case 'exchangeResponse':
-        this.organ.programResponse(step.payload)
+        this.collector.programResponse(step.payload)
         return
       case 'lateReport': {
         // A worker that finished after the human stopped: the engine must
@@ -173,7 +173,7 @@ export class ScenarioDriver {
           this.runtime.host.engine.requestExchange({
             kind: 'request',
             requester: `ticket:${ticket.id}`,
-            responder: `organ:${this.organInstanceId}`,
+            responder: `collector:${this.collectorInstanceId}`,
             payload: step.payload,
             deadlineMs: 60_000,
             ticketId: ticket.id,
@@ -181,7 +181,7 @@ export class ScenarioDriver {
           })
         } else {
           await this.runtime.host.requestExchange({
-            responder: `organ:${this.organInstanceId}`,
+            responder: `collector:${this.collectorInstanceId}`,
             payload: step.payload,
             timeoutMs: 60_000,
           })

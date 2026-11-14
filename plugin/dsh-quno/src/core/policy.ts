@@ -108,7 +108,7 @@ export function buildPolicy(input: PolicyInput): PolicySnapshot {
     }
 
     // Non-human source traffic (bot, CI, integration) needs an explicit rule:
-    // being observed by a Sense is never an authorization.
+    // being observed by a Collector is never an authorization.
     if (matched.length === 0) {
       return {
         admissible: false,

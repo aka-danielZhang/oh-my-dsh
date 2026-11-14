@@ -208,7 +208,7 @@ function evidenceReadable(eventId: string, snapshot: QunoSnapshot): boolean {
   if (state === null) return false
   const source = state.sources.find(candidate => candidate.id === event.sourceId)
   if (source === undefined) return false
-  const type = state.senseTypes.find(candidate => candidate.type === source.type)
+  const type = state.collectorTypes.find(candidate => candidate.type === source.type)
   return type?.reliability?.readOriginal === true
 }
 

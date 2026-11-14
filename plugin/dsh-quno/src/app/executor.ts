@@ -37,7 +37,7 @@ import type {
   TicketId,
   TicketInputRecord,
 } from '../core/model.ts'
-import type { OrganEndpointView } from '../types.ts'
+import type { CollectorEndpointView } from '../types.ts'
 
 /** Child preset id registered by this plugin. */
 export const EXECUTOR_PRESET = 'quno-task'
@@ -61,10 +61,10 @@ export interface ExecutorDeps {
   readonly maxTokens?: () => number
   readonly defaultCwd: string
   readonly maxWorkers?: number
-  /** Resolve one mounted Organ endpoint for worker-initiated exchanges. */
+  /** Resolve one mounted collector endpoint for worker-initiated exchanges. */
   readonly resolveExchangeResponder?: (endpoint: string, kind: 'request' | 'command') => boolean
   /** The exchange-facing endpoints for worker discovery and refusal directories. */
-  readonly listOrgans?: () => readonly OrganEndpointView[]
+  readonly listCollectors?: () => readonly CollectorEndpointView[]
   /** The structured read-only CLI surface (`quno_cli_call`). */
   readonly cli?: WorkerCliFace
   /** Called after a durable worker state change (UI refresh). */
@@ -494,7 +494,7 @@ export class Executor {
         qunoId: this.deps.qunoId,
         now: this.deps.now,
         ...(this.deps.resolveExchangeResponder === undefined ? {} : { resolveExchangeResponder: this.deps.resolveExchangeResponder }),
-        ...(this.deps.listOrgans === undefined ? {} : { listOrgans: this.deps.listOrgans }),
+        ...(this.deps.listCollectors === undefined ? {} : { listCollectors: this.deps.listCollectors }),
         ...(this.deps.cli === undefined ? {} : { cli: this.deps.cli }),
       }, { ticketId, executorSessionId: `quno-exec-${ticketId}` })
       const presets = this.deps.ctx.get('agentPresets') as unknown as PresetRegistryFace | undefined

@@ -23,8 +23,8 @@ import type {
   EventWire,
   NoticeDetailWire,
   QunoWireState,
-  SenseOptionsPageWire,
-  SenseProbeWire,
+  CollectorOptionsPageWire,
+  CollectorProbeWire,
   TaskActivityWire,
 } from '../api-types.ts'
 
@@ -65,26 +65,26 @@ export interface QunoRemoteFace {
     note?: string
   }): Promise<RemoteResult<QunoWireState>>
   checkNow(): Promise<RemoteResult<CheckNowResult>>
-  createSense(request: {
+  createCollector(request: {
     type: string
     label?: string
     config?: Record<string, unknown>
     desiredState?: 'enabled' | 'paused' | 'disabled'
   }): Promise<RemoteResult<QunoWireState>>
-  senseCommand(request: {
+  collectorCommand(request: {
     instanceId: string
     action: 'pause' | 'resume' | 'disable' | 'remove' | 'reconfigure'
     label?: string
     config?: Record<string, unknown>
   }): Promise<RemoteResult<QunoWireState>>
-  probeSense(request: { instanceId: string }): Promise<RemoteResult<SenseProbeWire>>
-  senseOptions(request: {
+  probeCollector(request: { instanceId: string }): Promise<RemoteResult<CollectorProbeWire>>
+  collectorOptions(request: {
     type: string
     field: string
     config?: Record<string, unknown>
     page?: number
     limit?: number
-  }): Promise<RemoteResult<SenseOptionsPageWire>>
+  }): Promise<RemoteResult<CollectorOptionsPageWire>>
   noticeDetail(request: { notificationId: string }): Promise<RemoteResult<NoticeDetailWire | null>>
   eventDetail(request: { eventId: string }): Promise<RemoteResult<EventDetailWire | null>>
   taskCommand(request: { taskId: string; action: 'resume' | 'abandon' | 'cancel' | 'answer'; text?: string }): Promise<RemoteResult<QunoWireState>>
@@ -97,13 +97,13 @@ export interface QunoRemoteFace {
 export interface QunoSnapshot {
   readonly phase: 'idle' | 'loading' | 'ready' | 'error'
   readonly state: QunoWireState | null
-  /** Recent Sense events (动态 view); a failed fetch keeps the previous list. */
+  /** Recent Collector events (动态 view); a failed fetch keeps the previous list. */
   readonly events: readonly EventWire[]
   /** Whether `events` is current. `error` never rewrites the list to empty. */
   readonly eventsStatus: EventsStatus
   readonly eventsError: string | null
   /** Explicit probe results, keyed by instance id (never merged into health). */
-  readonly probes: Readonly<Record<string, SenseProbeWire>>
+  readonly probes: Readonly<Record<string, CollectorProbeWire>>
   /** Historical notices fetched on demand, keyed by notification id. */
   readonly noticeDetails: Readonly<Record<string, AsyncValue<NoticeDetailWire>>>
   /** Evidence payloads fetched on demand, keyed by event id. */
@@ -227,32 +227,32 @@ export class QunoClientStore {
     return await this.run(() => this.remote.checkNow())
   }
 
-  /** Create one Sense instance. */
-  async createSense(request: {
+  /** Create one Collector instance. */
+  async createCollector(request: {
     type: string
     label?: string
     config?: Record<string, unknown>
     desiredState?: 'enabled' | 'paused' | 'disabled'
   }): Promise<void> {
-    await this.run(() => this.remote.createSense(request))
+    await this.run(() => this.remote.createCollector(request))
   }
 
-  /** Pause/resume/disable/remove/reconfigure one Sense instance. */
-  async senseCommand(request: {
+  /** Pause/resume/disable/remove/reconfigure one Collector instance. */
+  async collectorCommand(request: {
     instanceId: string
     action: 'pause' | 'resume' | 'disable' | 'remove' | 'reconfigure'
     label?: string
     config?: Record<string, unknown>
   }): Promise<void> {
-    await this.run(() => this.remote.senseCommand(request))
+    await this.run(() => this.remote.collectorCommand(request))
   }
 
   /**
    * Run a real probe. The result is stored beside the polled snapshot and is
    * never written into the instance's health.
    */
-  async probeSense(instanceId: string): Promise<SenseProbeWire> {
-    const result = await this.call(() => this.remote.probeSense({ instanceId }))
+  async probeCollector(instanceId: string): Promise<CollectorProbeWire> {
+    const result = await this.call(() => this.remote.probeCollector({ instanceId }))
     this.set({
       ...this.snapshot,
       probes: { ...this.snapshot.probes, [instanceId]: result },
@@ -260,15 +260,15 @@ export class QunoClientStore {
     return result
   }
 
-  /** Discover one field's options from the Sense implementation. */
-  async listSenseOptions(request: {
+  /** Discover one field's options from the Collector implementation. */
+  async listCollectorOptions(request: {
     type: string
     field: string
     config?: Record<string, unknown>
     page?: number
     limit?: number
-  }): Promise<SenseOptionsPageWire> {
-    return await this.call(() => this.remote.senseOptions(request))
+  }): Promise<CollectorOptionsPageWire> {
+    return await this.call(() => this.remote.collectorOptions(request))
   }
 
   /**

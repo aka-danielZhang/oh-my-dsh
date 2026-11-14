@@ -74,6 +74,8 @@ jobs:
         run: pnpm desktop:test
       - name: Test shipped-plugin roster
         run: node --test scripts/shipped-plugins.test.mjs
+      - name: Test plugin dependency-link guard
+        run: node --test scripts/plugin-links.test.mjs
       - name: Test release-notes extractor
         run: node --test scripts/release-notes.test.mjs
       - name: Test runtime npm publish script

@@ -11,11 +11,11 @@
 **Quno 是一个持续关注你的事情、按你指定的节奏整理信息、在值得打扰时主动找你的个人助理。** 它有自己的身份、职责、关注范围、工作节奏和**一条永久主对话**。
 
 - **一个 Quno = 一条永久主对话**：没有「新建会话」，对话只追加、永不重开。身份连续，用户始终知道去哪找它。
-- **三条独立节奏**：采集频率（Sense 决定）、思考频率（用户给 Quno 配置）、通知频率（打扰策略 + Quno 判断）。高频采集 ≠ 高频推理 ≠ 高频通知。
-- **感知靠 Sense/Organ**：感知器按统一契约提交 Trigger，接收、路由与 checkpoint 在同一事务；器官只自治采集，不做全局路由。只读查询有两条面：**同步结构化 CLI**（`quno_cli_call`，能力/操作闭表授权，本地短查询首选）与**异步 Exchange**（器官 `handleRequest` 白名单，真正异步/远端读取）。两者都经发现面取名字（`quno_read.cliCapabilities` / `quno_read.organs`），不猜名字，拒绝时列出真实可用项。
+- **三条独立节奏**：采集频率（Host 按采集器声明与 hint 调度）、思考频率（用户给 Quno 配置）、通知频率（打扰策略 + Quno 判断）。高频采集 ≠ 高频推理 ≠ 高频通知。
+- **感知靠 Collector**：采集器按统一契约（`quno.collector/v2`）实现 `run(ctx)`，由 Host 统一定时调度并推导健康；每次 run 的观察经同一事务性 ingest 提交 Trigger。只读查询有两条面：**同步结构化 CLI**（`quno_cli_call`，能力/操作闭表授权，本地短查询首选）与**异步 Exchange**（采集器 `handleRequest` 白名单，真正异步/远端读取）。两者都经发现面取名字（`quno_read.cliCapabilities` / `quno_read.collectors`），不猜名字，拒绝时列出真实可用项。
 - **判断与执行分离**：Eval 在永久主对话里按 Thread 串行合批判定；actual 工作跑在独立只读 Executor 会话（Ticket/Assignment/WorkerRun），结果经结构化 Report → Router relay → 通知 outbox 回流主对话。
 - **主对话激进压缩 + 可检索历史**：上下文 ~50% 即滚动压缩，摘要带原文指针；全量历史永不删除，靠 `quno_recall` 全文检索召回。长期记忆复用 OhMyMemo。
-- **落点**：一个 dual 插件 `dsh-quno`（preset-owned）+ Sense 插件族 `dsh-quno-sense-<name>`；壳与桥零改动、零新 IPC、不改 harness loop。
+- **落点**：一个 dual 插件 `dsh-quno`（preset-owned）+ 采集器插件族 `dsh-quno-collector-<name>`；壳与桥零改动、零新 IPC、不改 harness loop。
 
 ## 1. 产品定义
 
@@ -25,7 +25,7 @@
 
 | 部件 | 职责 | 不承担 |
 |---|---|---|
-| Sense（感知器） | 感知：按自己节奏观察来源、提交事件 | 不决定是否打扰用户 |
+| Collector（采集器） | 采集：按 Host 调度观察来源、提交事件 | 不决定是否打扰用户 |
 | 事件收件箱 | 保存所见所闻（可重放、可追溯） | 不做判断 |
 | Eval / Decision（永久主对话） | 按 Thread 合批判定来源事件、授权工作、维护关注事项 | 不直接执行 shell/文件/网页；不写长期记忆 |
 | 关注事项 | 记住还没结束的事 | 不是待办列表的替身 |
@@ -35,9 +35,9 @@
 ### 1.1 首版体验示例
 
 1. 创建默认助理「Quno」：关注消息中需要回应的事项、今天的日程、临近截止的待办。
-2. 接入消息与日历两个 Sense，各自按自己的频率工作。
+2. 接入消息与日历两个采集器，Host 按各自声明与 hint 调度。
 3. 设置 Quno 每 5 分钟检查一次，22:00–08:00 不主动打扰。
-4. Sense 发现一段讨论、一次会议改期、一个待办截止变更。
+4. 采集器发现一段讨论、一次会议改期、一个待办截止变更。
 5. Quno 判断三者相关，在主对话里说：
 
 > 明天的评审改到 10:00 了，与你的客户会议冲突。群里还在等你确认时间，建议今天先回复。演示材料仍在今晚 18:00 截止。
@@ -70,7 +70,7 @@
 ## 2. 总体架构
 
 ```text
-外部来源 ──> Sense/Organ（各自节奏；局部采集、预处理、重试、checkpoint）
+外部来源 ──> Collector（Host 调度；局部采集、预处理、重试、checkpoint）
                 │  batch：校验 / 去重 / 持久化 / ACK（同一 SQLite 事务）
                 ▼
           Trigger（只来自 Source 的不可变事件）
@@ -121,7 +121,7 @@ Executor 会话是独立的只读子会话（`quno-task` preset，稳定 id `qun
 | 对象 | 核心字段 | 语义 |
 |---|---|---|
 | QunoDefinition | id、name、persona/instructions、model、mainSessionId、configRevision、acceptMode、autoSourceIds | 持久身份与策略；与某次运行分离 |
-| SenseType / SenseInstance | type、definition、configRevision、checkpoint、health、可选 `organ` 能力 | 感知能力定义 / 一份运行配置（§6） |
+| CollectorType / CollectorInstance | type、definition、configRevision、checkpoint、health、可选 `query` 能力 | 采集能力定义 / 一份运行配置（§6） |
 | Source | sourceId（Host 分配）、scope | 事件来源身份；Trigger 只来自 Source |
 | Trigger | triggerId、sourceId、eventKey、threads[primary,…]、actor、human、addressed、type、occurredAt、data、contentRef、channel、provenance、contentHash | 不可变来源事件；内部对象（Report/Input/Effect/Exchange/Notification）不是 Trigger |
 | Thread | id、sourceId、threadKey、pending、activeEval、correlatedThreads、closed | 时间有序流；primary 负责 Eval，其余只提供 Correlation |
@@ -208,7 +208,7 @@ Executor 会话是独立的只读子会话（`quno-task` preset，稳定 id `qun
 - Assignment 是持久绑定，WorkerRun 是持久回合；桌面退出后 `Executor.reconcile` 对账：turn 已结束的关闭 run，未结束的重新 arm launch Effect。
 - 输入投递使用稳定 message id；已 delivered 未 read 的 Input 在新 Assignment 重投，已 read/acked/answered/handed-back 不重复。
 - 已提交 Decision 而 launch 未执行只恢复 Effect，不重新 Eval；Worker 已完成未 relay 只恢复 relay，不重复执行。
-- 旧 Assignment、旧 fence、旧 organ generation、已结束 Ticket 的晚到写入全部拒绝。
+- 旧 Assignment、旧 fence、旧采集器 run generation、已结束 Ticket 的晚到写入全部拒绝。
 
 ### 5.3 任务投影与用户状态机（2026-11-14 修订）
 
@@ -226,26 +226,26 @@ Executor 会话是独立的只读子会话（`quno-task` preset，稳定 id `qun
   - **只有 `access: 'read'` 的 operation 对 Worker 开放**，`command` 可声明但永不可执行（写操作需独立审批设计）；
   - 参数按声明校验：未知键拒绝（`profile`/`argv`/第二条命令因此无法进 payload）、越界拒绝而非裁剪；profile/凭据只来自实例配置；
   - 授权取 Ticket `Mandate.cli` 的 accept 时快照（capability + 只读 operation），旧 Ticket 无字段即无授权；
-  - target 是该 Sense 类型下 `desiredState != disabled` 的实例；多账号必须显式选 id，禁用/删除才撤销——**采集暂停不影响显式授权的只读查询**；
+  - target 是该采集器类型下 `desiredState != disabled` 的实例；多账号必须显式选 id，禁用/删除才撤销——**采集暂停不影响显式授权的只读查询**；
   - broker 自己强制并发上限、截止时间（不信任 provider 自觉）与输出字符上限；拒绝文案自描述（现有能力/端点/参数/上限）。
 - 首版只读：不写文件、不发外部消息、不下单；产物通过 Report.artifacts 结构化登记。工具名放行 ≠ 权限：`quno-task` guard 仍无 `bash`，`quno_cli_call` 的真正边界在 broker。
 - 容量：初始 4 个 WorkerSlot（active turn 占槽）；等待人工回答/结果验收释放槽；人类 follow-up 可用一个额外槽，wake 优先于新 launch。
 - 对外写操作与审批卡仍是后续阶段；Channel 只保存地址与未来发送能力，当前不执行外部 send。
 
-## 6. 感知层：Sense 契约
+## 6. 采集层：Collector 契约（Host 调度）
 
-**Sense 是 Quno 的感知扩展：在明确授权范围内独立观察一个上下文来源，按自己的节奏识别和整理变化，以统一事件契约提交可追溯的观察结果。** 设计类比：Skill 提供做事知识，Tool 提供操作，Sense 提供持续感知，Quno 负责判断。
+**Collector 是 Quno 的采集扩展：在明确授权范围内观察一个上下文来源，把识别到的变化以统一事件契约提交为可追溯的观察结果。** 设计类比：Skill 提供做事知识，Tool 提供操作，Collector 提供持续采集，Quno 负责判断。与 0.4.0-rc.8 时代的 Sense/Organ 契约（`quno.sense/v1`）的关键差异：**定时归 Host**——插件不持有任何定时器，只实现 `run(ctx)`；健康由 Host 从 run 结果推导，不再接受自报心跳；按需读取面统一改叫 query。决策见 `notes/2026-11-10-quno-collector-redesign.md`。
 
 ### 6.1 与相邻概念的关系
 
-Plugin 承载 Sense；Sense 可以用 MCP/Tool/Hook 取数，也可以直接 REST/文件监听/webhook。MCP 的订阅能力存在与否不改变 Sense 的责任边界；一次工具查询结果不自动构成 Sense。对用户表达统一为「感知器」：「给 Quno 接上一个日历 Sense」。
+Plugin 承载 Collector；Collector 可以用 MCP/Tool/Hook 取数，也可以直接 REST/文件监听/webhook。MCP 的订阅能力存在与否不改变 Collector 的责任边界；一次工具查询结果不自动构成采集。对用户表达统一为「采集器」：「给 Quno 接上一个日历采集器」。
 
 ### 6.2 四个必须区分的对象
 
 | 对象 | 定义 | 例子 |
 |---|---|---|
-| SenseType | 可安装、可复用的感知能力定义（实现 + 能力声明） | `quno/calendar` |
-| SenseInstance | 一份运行配置与生命周期 | 「工作日历同步」，每 60s |
+| CollectorType | 可安装、可复用的采集能力定义（实现 + 能力声明） | `quno/calendar` |
+| CollectorInstance | 一份运行配置与生命周期 | 「工作日历同步」，Host 按 60s 调度 |
 | Source | 实际观察的数据身份与范围（Host 分配 sourceId） | 某账号下一组日历 |
 | Event | 一次不可变观察或派生结果 | 会议从 09:00 改到 10:00 |
 
@@ -256,40 +256,60 @@ Plugin 承载 Sense；Sense 可以用 MCP/Tool/Hook 取数，也可以直接 RES
 | 原则 | 要求 |
 |---|---|
 | 来源无关 | Quno 核心 MUST 不按厂商写分支；接第三个来源不改核心 |
-| 感知自治 | Sense MAY 自定轮询/监听/推送/预处理；MUST 受用户配置与 Host 上限约束 |
+| 调度归 Host | 插件 MUST NOT 自带定时循环；节奏由 Host 调度器决定，插件只在 `run` 返回里 hint 下次运行 |
 | 职责分离 | MUST 只提交观察与提示，不调用调度/通知，不改关注事项 |
 | 事实有出处 | MUST 区分 observed/derived，保留来源引用与覆盖说明 |
 | 可靠交付 | MUST 稳定身份 + 持久 ACK + checkpoint 提交边界 |
 | 可恢复且诚实 | MUST 声明回溯与缺口检测能力；不承诺无法保证的不丢失 |
-| 资源有界 | MUST 有请求/并发/批量/缓存/模型预算上限 |
+| 资源有界 | MUST 受 Host 配额（每次 run 的事件/字节上限）与 `maxRunMs` 超时约束 |
 | 可停可撤销 | MUST 支持暂停/取消/卸载；撤销后旧写入失去资格 |
 | 可观测 | MUST 区分「没有变化」「同步失败」「鉴权失效」「限流」 |
 | 权限清晰 | MUST 声明读取范围，凭据用引用；来源内容不是授权也不是指令 |
 | 可演进 | MUST 分离契约/实现/数据 schema/配置版本 |
-| 接入轻量 | 公共框架 SHOULD 承担校验/重试/指标，Sense 只实现来源特性 |
+| 接入轻量 | 公共框架 SHOULD 承担校验/调度/重试/健康推导，Collector 只实现来源特性 |
 
 「可靠」从接收边界建立：Quno 对已 ACK 内容负责；源端从未保留的瞬时变化不能靠框架凭空恢复。best-effort 来源可接入，但事实必须保留在配置、健康与推理上下文中。
 
-### 6.4 声明契约（SenseType definition）
+### 6.4 声明契约（`quno.collector/v2`）
 
 机器可校验，经插件注册对象提供（不另起配置语言），四组必需声明：
 
-1. **身份与兼容**：type、contractVersion（`quno.sense/v1`，未知主版本拒绝启用）、implementationVersion（semver）、eventSchemas、configSchema。
+1. **身份与兼容**：type、contractVersion（`quno.collector/v2`，未知契约拒绝注册）、implementationVersion（semver）、eventTypes、configFields。
 2. **权限与依赖**：reads、credentialKinds、网络目标或 MCP server/工具依赖、是否需要模型。
-3. **运行与限制**：modes（poll/watch/push/hybrid）、defaultInterval、minInterval、并发、超时、配额。
+3. **schedule（调度与限制）**：defaultIntervalSec（无 hint 时的默认间隔）、minIntervalSec（只约束无 hint 默认间隔）、maxRunMs（单次 run 超时，超时强 abort）、quotas.maxEventsPerRun/maxBytesPerRun。
 4. **可靠性能力**：`checkpoint = cursor|snapshot|none`；`replay = bounded|none`（含窗口）；`changeCoverage = all-changes|snapshot-diff|sampled`；`gapDetection = explicit|partial|none`；`readOriginal`。可声明 none，不可省略后假定具备；snapshot-diff 不得宣称 all-changes。
 
 实际访问权限 = 声明范围 ∩ 用户授权 ∩ Host 允许范围；声明本身不构成授权。凭据值不进 definition。
 
-### 6.5 运行接口与生命周期
+### 6.5 三面模型与运行生命周期
 
-拟议接口（非已有 DSH API）：`registerSense(definition, factory)` → disposer；Sense 侧 `validate / probe / start(runtime, signal)→handle / stop`；Host 受限入口 `ingestBatch / reportHealth`；可选 `readOriginal / replay`。
+一个 Collector 类型 = 一份声明 + 一个工厂，三个面：
 
-- runtime 只下发：绑定身份、授权配置、凭据访问、checkpoint、限额、受限 ingress、日志、取消信号。**不下发** Quno 通知服务。
-- 三层状态分离：期望状态（enabled/paused/disabled）× 生命周期（starting/running/stopping/stopped/failed）× 健康（healthy/degraded/rate-limited/auth-required/unavailable/unknown）。
-- 每次启动发新运行 generation，同实例只有一个可写 generation；暂停/撤销/新代启动后旧代晚到提交拒绝。已提交事务保持有效；stop 不回滚过去。
-- 配置变更走「校验 → 撤销旧运行资格 → 停止 → 存新 revision → 启动」统一重启语义。
-- 暂停不删 checkpoint；停用保留配置与历史；删除实例不级联删其他 Quno 的事项与证据。
+```text
+Collector（就一个东西）
+├─ 接入面  validateConfig / probe / listOptions      （可选，形状不变）
+├─ 采集面  run(ctx) — Host 调度调用，多次 commit 合法，返回 outcome
+└─ 查询面  query.handleRequest（可选，= 原 organ.handleRequest）
+```
+
+工厂接口（`register(definition, factory) → disposer`）：
+
+- `run(ctx)`：一次采集尝试。ctx 下发 instanceId/sourceId/type/config、**runId（本次 run 的 generation 栅栏）**、checkpoint（含 `checkpoint-entries/v1` 分条读面）、limits（`maxEventsPerRun/maxBytesPerRun` 为声明的单次运行配额；`maxEventsPerBatch/maxBytesPerBatch` 为 Host 单次 commit 的批次上限，插件据此分批而不必值导入 Host 常量）、logger、`commit(batch)`（唯一写面，一次 run 可多次 commit，提交与事件/checkpoint/回执同事务）与 abort signal。返回 outcome：
+  - `{ ok: true, nextRunAtMs?, health? }`——成功；`nextRunAtMs` 是下次运行 hint；
+  - `{ ok: false, failure: { state: 'auth-required'|'rate-limited'|'unavailable'|'degraded', code, message, retryAfterMs?, fatal? }, health? }`——失败；`fatal: true` 表示 Host 停止调度该实例，直至改配/重启用。
+  - `health` extras 只报 Host 推不出来的东西：detail / coveredThrough / sourceLagSec / progress / issues。
+- `mount(m: { instanceId, config }) → disposer?`：实例启用/改配时挂载、停用/改配/卸载时回收。需要常驻实例态的采集器（如按需查询面的注册表）在这里绑定。
+
+**Host 调度规则**（`collectors.ts` 内的采集调度器，与 2s pass 循环分开；每实例单发 one-shot timer，最早到期优先）：
+
+- 首次运行：启用/改配/boot 即跑（wake）。
+- 成功：`next = clamp(nextRunAtMs ?? now+defaultIntervalSec, [now+1s, now+24h])`。hint 只受 24h 上限约束，**允许远小于 minIntervalSec 的续跑**（积压续跑 5s、令牌等待、1s 下限）；`minIntervalSec` 只约束无 hint 时的默认间隔。
+- 失败非 fatal：`failures+1`，`next = max(now+interval, retryAfterMs ?? backoffMs(failures))`（确定性退避 + attempt 抖动）。
+- 失败 fatal / 超时（`maxRunMs`，强 abort signal）：lifecycle=failed，不再排程，直至改配/重启用。
+- 健康由 Host 从 run 结果推导：state/code/consecutiveFailures/nextRetryAt/lastAttemptAt/lastSuccessAt 直接落列；extras 合并进 `health_json`（与旧自报形状 wire 兼容）。两次 run 之间保持上次推导结果，`stale` 仍按 lastSuccessAt 阈值算；**运行间隔之外无心跳**。成功 run 是否降级只看插件报告的 `issues`：单批 gap（含 yzj「首轮只钉基线不回放」这类声明过的常规进度）由 ingress 记入缺口视图，不作为降级输入。
+- 生命周期词表：`idle`（两次 run 之间）| running | stopped | failed（`starting/stopping` 为历史值保留）。期望状态仍是 enabled/paused/disabled，三层状态分离不变。
+
+**栅栏与重启语义**：每次 run `bumpGeneration` 发新 runId，同实例同一时刻只有一个可写 generation；ingress `assertWritable` 语义不变（generation + desiredState + configRevision 三查），所以暂停/撤销/改配/下一次 run 启动后，旧 run 晚到提交被拒。栅栏是 **generation 级**：两次 run 之间，最近一次 run 的 commit 面在下一次 run 起跑前仍可写（规范的采集器只在 `run` 内提交）；run 超时被强停时 Host 立即再 bump 一次 generation，撤销这个从此不会再被下一次 run 栅栏的写面。已提交事务保持有效；stop 不回滚过去。配置变更走「停 run → 回收 mount → 存新 revision → 挂载 → 立即 run」统一重启语义。暂停不删 checkpoint；停用保留配置与历史；删除实例不级联删其他 Quno 的事项与证据。
 
 ### 6.6 交付执行约束（对事件流 §7 的补充）
 
@@ -298,49 +318,47 @@ Plugin 承载 Sense；Sense 可以用 MCP/Tool/Hook 取数，也可以直接 RES
 3. 空批次合法：无变化可提交空 events + checkpointAfter，只推进游标不建事件不唤醒模型。
 4. 批次幂等：batchId 来源内稳定，同 batchId 内容不一致报冲突。
 5. 游标不倒退：checkpointRevision CAS + generation 拒绝旧写入；不比较 opaque 上游 cursor 大小。
-6. 错误可分类：validation / identity-conflict / stale-generation / checkpoint-conflict / quota-exceeded / temporarily-unavailable + retryable/retryAfter。
+6. 错误可分类：validation / identity-conflict / stale-generation / checkpoint-conflict / quota-exceeded / temporarily-unavailable + retryable/retryAfter。`stale-generation`/`checkpoint-conflict` 对 run 是 fatal（停排），三个内置采集器统一此语义。
 7. 毒数据不静默跳过：必须越过时先持久诊断（身份、失败、缺口）再显式推进 checkpoint。
 8. 分页溢出（「最近 100 条」型 API）必须检测并分页或报告缺口；支持「覆盖未知」。
+9. 超出单次运行配额或单批上限的变更集：按批提交可容纳的前缀，checkpoint（含条件请求校验器）只推进到已提交部分，余量以续跑 hint 交给下一次 run——不得整批越过上限被拒、不得静默跳过（2026-11-10 起 calendar/feed 遵守，yzj 按页提交天然在限内）。
 
 ### 6.7 健康与成本
 
-健康汇报至少：lastAttemptAt、lastSuccessfulSyncAt、lastEventAt、连续失败数、错误分类、下次重试；支持时给 coveredThrough/sourceLag。字段语义固定：lastSuccessfulSyncAt ≠ 捕捉全部变化；lastEventAt 长期不变可能正常。freshnessThreshold 是实例配置，Sense 建议默认值，无全局常量。
-
-健康心跳不进事件洪流；持续失联由 Host 归并成一条来源异常事项，恢复后关闭。请求速率、队列字节、事件量、错误、模型成本分别计量；模型预算用尽只许切已声明验证过的降级模式，否则暂停报 degraded。
+健康行字段固定：lastAttemptAt、lastSuccessAt、lastEventAt、连续失败数、错误分类、下次重试——全部由 Host 从 run 结果推导；extras 提供 coveredThrough/sourceLag/progress/issues（语义沿用：lastSuccessAt ≠ 捕捉全部变化；lastEventAt 长期不变可能正常；progress 是调度压力不是故障，issues 才是 fault）。freshnessThreshold 是实例配置，采集器建议默认值，无全局常量。持续失联由 Host 归并成一条来源异常事项，恢复后关闭。请求速率、队列字节、事件量、错误、模型成本分别计量；模型预算用尽只许切已声明验证过的降级模式，否则暂停报 degraded。
 
 ### 6.8 隔离边界
 
-首版 Sense 插件是**可信代码**：同进程 Cordis 生命周期 ≠ 安全沙箱；协议合规与代码信任是两个条件。不可信第三方 Sense 需独立进程/受限执行环境（后续）。MCP-backed Sense 必须绑定具体 server 与只读工具并验证其行为（叫 "search" 不保证无副作用）。业务写（回消息、改待办、标已读）不属于采集权限；传输层 ACK/游标续订须声明。
+首版 Collector 插件是**可信代码**：同进程 Cordis 生命周期 ≠ 安全沙箱；协议合规与代码信任是两个条件。不可信第三方 Collector 需独立进程/受限执行环境（后续）。MCP-backed Collector 必须绑定具体 server 与只读工具并验证其行为（叫 "search" 不保证无副作用）。业务写（回消息、改待办、标已读）不属于采集权限；传输层 ACK/游标续订须声明。
 
 ### 6.9 命名
 
-- 类型 ID：`<publisher>/<name>`（如 `quno/calendar`），publisher 是命名空间不是已验证身份。
-- 插件包：`dsh-quno-sense-<name>`，遵守目录名 === 包名约定，`plugin:new` 生成。
-- 服务：拟议 `ctx.qunoSenses`（注册与生命周期）、`ctx.qunoIngress`（受限接收）。
+- 类型 ID：`<publisher>/<name>`（如 `quno/calendar`），publisher 是命名空间不是已验证身份；`quno.event/v1` 事件契约不变。
+- 插件包：`dsh-quno-collector-<name>`（2026-11-10 起由 `dsh-quno-sense-<name>` 改名），遵守目录名 === 包名约定，`plugin:new` 生成。
+- 服务：`ctx.qunoCollectors`（注册与生命周期）；旧 `ctx.qunoIngress` 受限接收入口已删除（唯一使用者是评测器，改走 run ctx 的 commit 面）。
+- 实例 id：新实例前缀 `col-`；存量 `sense-<ts>-<rand>` id 一律不改（store v4 迁移只做 RENAME，不重写数据）。
 
-### 6.10 Sense 编写最小面与打包分发
+### 6.10 Collector 编写最小面与打包分发
 
-写一个 Sense 不应该是大工程。以 `dsh-quno-sense-feed` 为蓝本，**一个 Sense = 三个文件 + 一个压缩包**：
+写一个 Collector 不应该是大工程。以 `dsh-quno-collector-feed` 为蓝本，**一个 Collector = 三个文件 + 一个压缩包**：
 
-- **三个文件起步**：`package.json`（`name: dsh-quno-sense-<name>`、`dsh.bundle.patch`、`files` 白名单）、`cordis.patch.yml`（一行挂 host 行）、`src/index.ts`（definition + factory）。骨架经 `plugin:new` 生成（host-only），删减即用；类型从 `../dsh-quno/src/{types,senses}.ts` type-only import，跨包不引实现符号。
-- **声明保持最小**：`eventTypes` / `configFields` 只声明真实用到的；`reliability` 五项必须填（`checkpoint` / `replay` / `changeCoverage` / `gapDetection` / `readOriginal`，`contracts.ts` 里均为非 optional）但**诚实报低完全合法**（`checkpoint: none`、`replay: {kind: none}`、`readOriginal: false` 都是一等公民）；`factory` 只有 `start(runtime)` 必需，`validateConfig` / `probe` 可选。Sense 拿到的 runtime 只有 `checkpoint` / `signal` / `limits` / `logger` / `ingress.{ingestBatch, reportHealth}`——不管调度、不碰存储、不碰通知。
-- **分发单元 = 单压缩包**：`pnpm pack` 出 tarball（`files` 白名单：`lib/index.js` + `cordis.patch.yml` + `README.md`）；安装 `dsh plugin --profile web add <tarball|目录>`；随桌面发货标 `dsh.desktop.ship: true`（进首启 Profile 事务与 revision manifest）。这是契约：任何 Sense 都应是「一个压缩包给谁谁就能装」。
-- 演进项：`plugin:new` 增加 `--face sense` 模板（后续），把「蓝本复制」变成脚手架。
+- **三个文件起步**：`package.json`（`name: dsh-quno-collector-<name>`、`dsh.bundle.patch`、`files` 白名单）、`cordis.patch.yml`（一行挂 host 行）、`src/index.ts`（definition + factory）。骨架经 `plugin:new` 生成（host-only），删减即用；类型从 `../dsh-quno/src/{types,collectors}.ts` type-only import，跨包不引实现符号。
+- **声明保持最小**：`eventTypes` / `configFields` 只声明真实用到的；`reliability` 五项必须填但**诚实报低完全合法**（`checkpoint: none`、`replay: {kind: none}`、`readOriginal: false` 都是一等公民）；`factory` 只有 `run(ctx)` 必需，`validateConfig` / `probe` / `listOptions` / `mount` 可选。Collector 拿到的 ctx 只有 checkpoint / signal / limits / logger / commit——不管调度、不碰存储、不碰通知。
+- **分发单元 = 单压缩包**：`pnpm pack` 出 tarball（`files` 白名单：`lib/index.js` + `cordis.patch.yml` + `README.md`）；安装 `dsh plugin --profile web add <tarball|目录>`；随桌面发货标 `dsh.desktop.ship: true`（进首启 Profile 事务与 revision manifest）。这是契约：任何 Collector 都应是「一个压缩包给谁谁就能装」。
+- 演进项：`plugin:new` 增加 `--face collector` 模板（后续），把「蓝本复制」变成脚手架。
 
-### 6.11 云之家群聊 Sense（dsh-quno-sense-yzj）设计
+### 6.11 云之家群聊 Collector（dsh-quno-collector-yzj）设计
 
-首个「消息」来源，补上首版体验示例（§1.1）的核心感知面。**经宿主机 `yzj-cli` 采集**：登录态、凭据、API 细节全由 yzj-cli 承担，Sense 不碰 token、不直接发 HTTP。
+首个「消息」来源，补上首版体验示例（§1.1）的核心采集面。**经宿主机 `yzj-cli` 采集**：登录态、凭据、API 细节全由 yzj-cli 承担，Collector 不碰 token、不直接发 HTTP。
 
-> **状态（2026-10-30）**：focused 模式（0.2.0）与采集调度改造（0.3.0：分片工作队列、账户请求桶、水位跳过、初始化退避分类、`checkpoint-entries/v1` 分条 checkpoint 与迁移、Scheduler 分析准入门、结构化健康字段）已实现；实施记录与遗留清单见 [实施记录](notes/2026-10-30-quno-sense-yzj-collection-redesign-impl.md)，调度改造设计见 [改造方案](notes/2026-10-30-quno-sense-yzj-collection-scheduling-redesign.md)。登录态核验依据见 [设计 v2](notes/2026-10-29-quno-sense-yzj-mentions-direct-design-v2.md)；本节为实现后收敛口径，与包内 README 一致。**Host 通用能力**：`checkpoint-entries/v1`（`sense_checkpoint_entries` 表 + `ingestBatch.checkpointPatch` 同事务 patch + runtime 分条读面）属 dsh-quno 的 Sense 通用扩展，任意 Sense 可在能力声明缺失时回退单 blob 检查点。
-
-> **后续改造（2026-10-30，待评审、待实现）**：针对实机容量超限、初始化阻塞与调度欠账，拟改为持续有界采集队列、Host 分条 checkpoint、Quno 自动分析合并及进度/故障/覆盖分离。该方案涉及本节及 §6.7、§7.2、§8.1 的后续扩展，明确需要通用存储与事务能力，尚未替代以下当前实现契约。详见 [云之家 Sense 采集调度、容量与健康展示改造方案](notes/2026-10-30-quno-sense-yzj-collection-scheduling-redesign.md)。
+> **状态（2026-11-10）**：包名由 `dsh-quno-sense-yzj` 改为 `dsh-quno-collector-yzj` 并迁到 `quno.collector/v2`。focused 模式（0.2.0）与采集调度改造（0.3.0：分片工作队列、账户请求桶、水位跳过、初始化退避分类、`checkpoint-entries/v1` 分条 checkpoint 与迁移、结构化健康字段）的行为语义**原样保留**：`createWorker`/`round.ts` 的行为不变（仅 `provenance.collector` 等包名字符串随改名变更），既有 worker 单测原样通过；**worker 跨 run 存活**——实例槽位由 `mount` 建立、由其 disposer（暂停/停用/删除/改配/卸载）回收，worker 的 deps 经 getter 指向当前 run（commit 面、abort 信号、日志、健康收集），batchKey 命名空间冻结为 worker 创建时的 runId（ACK 不确定的原样重试跨 run 仍命中同一回执），fatal 或在中止信号下结束的轮次会丢弃 worker、下次 run 从持久 checkpoint 重建——否则每次 run 都会判定「到期发现」，把共享请求桶耗在目录页上；`run(ctx)` = 一次 `runRound`，outcome 映射 `nextWorkAtMs → nextRunAtMs`、`failed → failure`（分类取自该轮捕获的健康报告现值，`nextRetryAt` 并入 `retryAfterMs`）、`fatal → fatal`；worker 内七类健康报告集中为 run 返回的 extras（progress/issues/sourceLagSec/detail）；`registerOrganInstance` 迁到 `mount`/dispose；`takeToken` 每分钟 30 次/每 profile 桶不变（采集与 query 继续共享）。实施记录见 [实施记录](notes/2026-10-30-quno-collector-yzj-collection-redesign-impl.md)，调度改造设计见 [改造方案](notes/2026-10-30-quno-collector-yzj-collection-scheduling-redesign.md)。登录态核验依据见 [设计 v2](notes/2026-10-29-quno-sense-yzj-mentions-direct-design-v2.md)。**Host 通用能力**：`checkpoint-entries/v1`（`collector_checkpoint_entries` 表 + `commit.checkpointPatch` 同事务 patch + run ctx 分条读面）属 dsh-quno 的通用扩展，任意采集器可在能力声明缺失时回退单 blob 检查点。
 
 **形态与范围**
 
-- poll 模式；两种采集模式（`collectionMode`）：**focused（默认，新建实例显式写入）**与 **selected-groups（0.1.x 兼容，旧配置缺字段一律按旧规则校验必选群）**。端到端时延 = 采集间隔 + 思考节奏 + 通知策略（§1 三种节奏），不宣称实时。
-- **focused（@我 + 私聊）**：每轮 `whoami` 绑定身份（与实例绑定的 `(orgId, openId)` 不一致即停止，报 `account-changed`，须人工处理），扫描「最近会话」目录，只提交：①多人群中他人发送且 `param.desc[]` 存在 `{type:"at", data:selfOpenId}` 的 text/richText 消息（@all 不算；正文手写「@姓名」无结构证据不算；`extFields` 的 openId 是表情/编辑结构不算；既 @我 又 @all 按直接 @我 接收）；②`groupType = 1` 私聊中他人的消息。其余为已验证非命中，游标照常推进。@ 结构用姓名/正则补足证据被明确禁止。
+- Host 定时调度；两种采集模式（`collectionMode`）：**focused（默认，新建实例显式写入）**与 **selected-groups（0.1.x 兼容，旧配置缺字段一律按旧规则校验必选群）**。端到端时延 = 采集调度 + 思考节奏 + 通知策略（§1 三种节奏），不宣称实时。
+- **focused（@我 + 私聊）**：每轮 `whoami` 绑定身份（与实例绑定的 `(orgId, openId)` 不一致即 fatal 停排，报 `account-changed`，须人工处理），扫描「最近会话」目录，只提交：①多人群中他人发送且 `param.desc[]` 存在 `{type:"at", data:selfOpenId}` 的 text/richText 消息（@all 不算；正文手写「@姓名」无结构证据不算；`extFields` 的 openId 是表情/编辑结构不算；既 @我 又 @all 按直接 @我 接收）；②`groupType = 1` 私聊中他人的消息。其余为已验证非命中，游标照常推进。@ 结构用姓名/正则补足证据被明确禁止。
 - **selected-groups**：采集所选群聊全部新消息，事件保持 0.1.x data 形状（`p2`、无 `chatType`）。
-- 只读边界不变：不发送消息、不标已读、不下载附件、不用已读状态筛选（§6.5 业务写边界）。
+- 只读边界不变：不发送消息、不标已读、不下载附件、不用已读状态筛选（§6.8 业务写边界）。
 - 多账号/配置空间经 yzj-cli 全局 `--profile <name>` 隔离（默认 `default`），与 §6.2「多账号 = 多实例」对齐。
 
 **目录发现与公平调度**
@@ -348,11 +366,11 @@ Plugin 承载 Sense；Sense 可以用 MCP/Tool/Hook 取数，也可以直接 RES
 - 每轮读 recent 第 1 页（新活动）+ 从持久 `discovery.nextPage` 跨轮续扫（每轮最多 `maxDiscoveryPages` 页）；扫到 `more:false` 完成本遍、下轮从第 2 页重开。目录页码续扫只改善公平性，不证明无漏（`sampled / gapDetection: partial` 的来源）。
 - 跟踪上限 200 个会话，插件自限 checkpoint 160 KiB UTF-8（Host 硬上限 200,000 字符）；超容量**拒绝而非裁剪**，未纳入会话计为显式 `directory-capacity` 欠账。已知会话暂时不在 recent 仍保留游标；无积压的缺席会话至少每 30 分钟进入一次探测候选。
 - 私聊/群聊两条 lane 各占一半会话预算（默认每轮 20 个），闲置互借；lane 内最早到期/最久未服务优先，ACK 后更新服务时间；单会话级 degraded 故障退避，不占满预算。
-- 每轮预算：CLI 调用 ≤106（1 身份 + 5 目录 + 20×5 消息）、软截止 120s（到点不再起新调用，单次 deadline 取 `min(20s, 剩余)`，超时 kill）；`definition.runtime.timeoutMs: 30000` 只约束 probe/start 生命周期操作，不是后台轮次预算。
+- 每轮预算：CLI 调用 ≤106（1 身份 + 5 目录 + 20×5 消息）、软截止 120s（到点不再起新调用，单次 deadline 取 `min(20s, 剩余)`，超时 kill）；`definition.schedule.maxRunMs: 30000` 只约束单次 run 的 Host 超时（worker 软截止 30s 在此之内），`BudgetExhausted` 的成功续跑经 `nextWorkAtMs` hint 续排。
 
 **初始化（从启用时刻开始）**
 
-- 首个候选批次先持久化 owner 绑定与 `focusedSince`（启用时刻；当前 SenseRuntime 不提供实例创建时间，以「首次启用 focused 的持久时间」替代），**然后**才发消息请求。
+- 首个候选批次先持久化 owner 绑定与 `focusedSince`（启用时刻；run ctx 不提供实例创建时间，以「首次启用 focused 的持久时间」替代），**然后**才发消息请求。
 - 每个新会话独立读一个 newest 窗口：时间可证升序时钉最新边界，窗口内晚于 `focusedSince` 且命中的消息提交，更早的是基线不回放；窗口最早时间仍晚于 `focusedSince` 且 `more:true` 时显式报 `init-window-exceeded`（首版不做更早补采）。时间不可证（缺时间/乱序）则只建基线、不钉游标、下轮重试——绝不猜边界。空会话建 `initialized:true, cursor:null`，后续仍走 newest + `focusedSince` 过滤。
 - 已有旧模式游标的会话切 focused 后沿用该游标（切换过滤模式不清空来源历史）；0.1.x v1 checkpoint 自动迁移为 v2（游标/seen/钉扎时间全保留），损坏或未知版本的检查点 fail loud，绝不归零重建。
 
@@ -367,7 +385,7 @@ Plugin 承载 Sense；Sense 可以用 MCP/Tool/Hook 取数，也可以直接 RES
 | 用途 | 命令 |
 |---|---|
 | 身份绑定（每轮第一步） | `yzj-cli --profile <p> whoami`（防 profile 被外部切换后仍用缓存身份） |
-| 探活（probe，生命周期用） | `yzj-cli --profile <p> contact user get` |
+| 探活（probe，接入面用） | `yzj-cli --profile <p> contact user get` |
 | 目录扫描 | `im group recent --limit 20 --page <n>` |
 | 建基线 | `im message list --group-id <G> --type newest --limit 20` |
 | 增量采集 | `im message list --group-id <G> --msg-id <cursor> --type new --limit 20` |
@@ -375,8 +393,8 @@ Plugin 承载 Sense；Sense 可以用 MCP/Tool/Hook 取数，也可以直接 RES
 
 **事件与 checkpoint**
 
-- 事件类型 `im.message.created`，schema `quno.yzj-im.message/v1`；`eventKey = yzj:<groupId>:<msgId>`。focused 群聊 @我 事件：`priority: p1`（来源建议）、`correlationKeys: [yzj-group:<id>, yzj-mentioned-me]`、data 带 `chatType/direction/mentionedMe/mentionEvidence/textTruncated`；私聊同信封（`chatType: direct`、`mentionedMe: null`、`correlationKeys` 带 `yzj-direct:<id>`）；selected-groups 保持 v1 形状。正文 ≤4000 字符、summary ≤200、`p1` 只是来源建议，Sense 不判「必须回复」。
-- checkpoint 为 Host 不解释的版本化 JSON（v2）：owner / focusedSince / discovery（nextPage、sweepStartedAt、lastSweepCompletedAt）/ 每会话（groupType、label、cursor、initialized、seen 环 ≤20、needsCatchUp、retryNotBefore、gap 标记）/ coverage。worker 在整个 generation 内持有 `{state, revision}`（`runtime.checkpoint` 只是起始快照）；ACK 不确定时用**完全相同**的 batchKey/body 原样重试，CAS 冲突/stale generation 停止 worker。batchKey = generation + 轮内序号 + 冻结内容 hash。
+- 事件类型 `im.message.created`，schema `quno.yzj-im.message/v1`；`eventKey = yzj:<groupId>:<msgId>`。focused 群聊 @我 事件：`priority: p1`（来源建议）、`correlationKeys: [yzj-group:<id>, yzj-mentioned-me]`、data 带 `chatType/direction/mentionedMe/mentionEvidence/textTruncated`；私聊同信封（`chatType: direct`、`mentionedMe: null`、`correlationKeys` 带 `yzj-direct:<id>`）；selected-groups 保持 v1 形状。正文 ≤4000 字符、summary ≤200、`p1` 只是来源建议，Collector 不判「必须回复」。
+- checkpoint 为 Host 不解释的版本化 JSON（v2）：owner / focusedSince / discovery（nextPage、sweepStartedAt、lastSweepCompletedAt）/ 每会话（groupType、label、cursor、initialized、seen 环 ≤20、needsCatchUp、retryNotBefore、gap 标记）/ coverage。worker 在一次 run 内持有 `{state, revision}`（`ctx.checkpoint` 只是起始快照；跨 run 通过 checkpoint-entries 与根 checkpoint 续接）；ACK 不确定时用**完全相同**的 batchKey/body 原样重试，CAS 冲突/stale generation 停止调度。batchKey = runId + 轮内序号 + 冻结内容 hash。
 
 **可靠性声明（诚实版）**
 
@@ -386,35 +404,35 @@ Plugin 承载 Sense；Sense 可以用 MCP/Tool/Hook 取数，也可以直接 RES
 | replay | `bounded` | `type old` 有界回翻；窗口取决于服务端保留，声明未知窗口 |
 | changeCoverage | `sampled` | cursor 翻页完整采集新增；**编辑/撤回不可观测**；目录页码续扫 + recent 有限覆盖不证明无漏 |
 | gapDetection | `partial` | 目录截断/调度欠账/初始化窗口/容量/协议异常/身份冲突显式报缺口 |
-| readOriginal | `false` | 入库载荷截断（正文 ≤2000/4000 字符）且编辑/撤回不可观测，不构成可读原文；按需结构化查询（organ `handleRequest` 白名单）另行支持，与本声明正交（2026-11-08 定稿，见 `notes/2026-11-08-quno-organ-on-demand-read-plan.md`） |
+| readOriginal | `false` | 入库载荷截断（正文 ≤2000/4000 字符）且编辑/撤回不可观测，不构成可读原文；按需结构化查询（query `handleRequest` 白名单）另行支持，与本声明正交（2026-11-08 定稿，见 `notes/2026-11-08-quno-organ-on-demand-read-plan.md`） |
 
-**按需读取（organ `handleRequest`，2026-11-08 起）**：封闭 op 白名单——`im.group.recent`（limit≤20、page≤10）、`im.group.search`（keyword≤64、limit≤20、page≤10）、`im.message.list`（groupId≤64、limit≤50；当前 CLI 无 `--page`，v1 只回最新窗口）。枚举外 op 与越界参数一律 `failExchange('unsupported-op' | 'invalid-args')` 不重试；与轮询共享 instance 级每分钟请求预算，耗尽 `rate-limited` 可重试；profile 取自运行实例配置，payload 不得指定。端点 `organ:<instanceId>` 经 `quno_read.organs` 发现，不猜端点名。
+**按需读取（query `handleRequest`，2026-11-08 起）**：封闭 op 白名单——`im.group.recent`（limit≤20、page≤10）、`im.group.search`（keyword≤64、limit≤20、page≤10）、`im.message.list`（groupId≤64、limit≤50；当前 CLI 无 `--page`，v1 只回最新窗口）。枚举外 op 与越界参数一律 `failExchange('unsupported-op' | 'invalid-args')` 不重试；与采集共享 per-profile 每分钟请求预算，耗尽 `rate-limited` 可重试；profile 取自运行实例配置（`mount` 绑定），payload 不得指定。端点 `collector:<instanceId>` 经 `quno_read.collectors` 发现，不猜端点名。
 
-**同步结构化查询（`quno_cli_call`，2026-11-13 起）**：同一批 op 同时以 Host 能力 `yzj` 声明给 Worker，`capability` + `operation` + 声明参数同步返回结果——本地短查询不再走异步往返。两条面共用 `runYzjOperation` 的 argv 构造、`classifyRun` 失败分类与 per-profile 每分钟预算，因此不可能出现「异步面受限、同步面放开」的口径漂移。差异只在生命周期与传输：organ 面随运行代际存活（暂停即 `instance-not-running`），能力面随实例**配置**存活（暂停仍可被显式授权的 Worker 查询，禁用/删除才撤销）；失败终态在 organ 面走 Exchange 错误消息 + 请求方唤醒，在能力面直接作为工具错误返回给同一回合，由 Worker 自行修正参数或如实 `blocked`。
+**健康分类**（两层判定：先看 CLI 进程级信号，再看 API 业务码。失败时 stdout 为空、stderr 单行 `{"success":false,"error":{type,subtype,message,hint,code}}`；分类在 worker 内完成，经 run 的 failure/outcome 上交 Host）：
 
-**健康分类**（两层判定：先看 CLI 进程级信号，再看 API 业务码。失败时 stdout 为空、stderr 单行 `{"success":false,"error":{type,subtype,message,hint,code}}`）：
+**同步结构化查询（`quno_cli_call`，2026-11-13 起）**：同一批 op 同时以 Host 能力 `yzj` 声明给 Worker，`capability` + `operation` + 声明参数同步返回结果——本地短查询不再走异步往返。两条面共用 `runYzjOperation` 的 argv 构造、`classifyRun` 失败分类与 per-profile 每分钟预算，因此不可能出现「异步面受限、同步面放开」的口径漂移。差异只在生命周期与传输：query 面随运行代际存活（暂停即 `instance-not-running`），能力面随实例**配置**存活（暂停仍可被显式授权的 Worker 查询，禁用/删除才撤销）；失败终态在 query 面走 Exchange 错误消息 + 请求方唤醒，在能力面直接作为工具错误返回给同一回合，由 Worker 自行修正参数或如实 `blocked`。
 
-- **进程级**：exit 3（如本地未登录 `credentials_missing`——**此时没有 errorCode**，只认 errorCode 会把登出态漏成「未知错误」）→ `auth-required`，引导 `yzj-cli auth login`（无浏览器环境 `--device`）；exit 4（网络/超时）→ `unavailable`，**429/限流单独报 `rate-limited`**（无 retry-after 时指数退避，最大 30 分钟）；exit 2 与 exit 5 → `degraded`（实现侧 bug，不甩给来源）。
+- **进程级**：exit 3（如本地未登录 `credentials_missing`——**此时没有 errorCode**，只认 errorCode 会把登出态漏成「未知错误」）→ `auth-required`，引导 `yzj-cli auth login`（无浏览器环境 `--device`）；exit 4（网络/超时）→ `unavailable`，**429/限流单独报 `rate-limited`**（`retryAfterMs` 交 Host 退避，最大 30 分钟）；exit 2 与 exit 5 → `degraded`（实现侧 bug，不甩给来源）。
 - **API 级**（exit 1）：10000400/93001/43001 → `auth-required`；429 → `rate-limited`；其他按 `message`/`hint` 归类。
 - **成功判定**：exit 0 **且** 信封 `success: true`。CLI 不存在 → probe 即失败。
-- **覆盖口径**：`lastSuccessfulSyncAt` 只表示有成功闭环；目录未扫完（`directory-truncated`）、会话欠账（`round-deferred`）、容量（`directory-capacity`）、初始化窗口（`init-window-exceeded`）、相关性 unknown、身份冲突各自以代码显示，不统一写成「登录失败」，也不在安静轮次里被抹平。
+- **覆盖口径**：lastSuccessAt 只表示有成功闭环；目录未扫完（`directory-truncated`）、会话欠账（`round-deferred`）、容量（`directory-capacity`）、初始化窗口（`init-window-exceeded`）、相关性 unknown、身份冲突各自以 issue 代码显示，不统一写成「登录失败」，也不在安静轮次里被抹平。
 
 **运行环境依赖**：宿主机已安装并登录 yzj-cli；桌面 sidecar 的 PATH 分层已覆盖 host CLI 解析（见 `electron-shell-contract.md` sidecar 节）。one-node 下 yzj-cli 经 node-shim 解析，shim 死路径会表现为「CLI 不可执行/未登录」——probe 把「CLI 不可用」与「未登录」区分开。
 
 **definition 草案**（等价展示，以代码注册对象为准）：
 
 ```yaml
-contractVersion: quno.sense/v1
+contractVersion: quno.collector/v2
 type: quno/yzj-im
-implementationVersion: 0.2.0
+implementationVersion: 0.4.0
 displayName: 云之家群聊
-modes: [poll]
-eventSchemas: [{ type: im.message.created, schema: quno.yzj-im.message/v1 }]
+eventTypes: [{ type: im.message.created, schema: quno.yzj-im.message/v1 }]
 configFields: [collectionMode(默认 focused), groupIds(focused 白名单可空/legacy 必选), yzjProfile(默认 default),
   intervalSec(默认300/最小60), maxConversationsPerCheck(默认20), maxDiscoveryPages(默认5),
   maxPagesPerGroup(默认5), freshnessThresholdSec(默认900)]
 permissions: { reads: [云之家候选会话的全部增量消息（经 yzj-cli；@识别需读候选群新消息，仅命中提交）], credentialKinds: [yzj-cli-login] }
-collection: { defaultIntervalSec: 300, minIntervalSec: 60, concurrency: 1 }
+schedule: { defaultIntervalSec: 300, minIntervalSec: 60, maxRunMs: 30000, quotas: { maxEventsPerRun: 200 } }
+query: { handleRequest: 三 op 白名单（见上） }
 firstSync: baseline-only
 reliability: { checkpoint: cursor, replay: bounded(窗口未知), changeCoverage: sampled, gapDetection: partial, readOriginal: false }
 ```
@@ -436,13 +454,13 @@ CloudEvents 风格的来源/类型/主体/时间/数据分离，首版用自有�
 | 血缘 | provenance.kind = observed/derived；derived 必须有输入引用、处理器版本、覆盖说明 |
 | 关系 | 可扩展 correlationKeys/supersedesEventIds/parentEventIds；引用须可验证 |
 
-接收端补充 eventId、绑定身份验证后的 sourceId、receivedAt、单调 ingestSeq、内容 hash、senseConfigRevision；提交方不能伪造 sourceId。跨来源不凭文本相似去重；语义合并在关注事项层做。
+接收端补充 eventId、绑定身份验证后的 sourceId、receivedAt、单调 ingestSeq、内容 hash、collectorConfigRevision；提交方不能伪造 sourceId。跨来源不凭文本相似去重；语义合并在关注事项层做。
 
-允许 Sense 预处理（原始变化 / 规则抽取 / 模型窗口摘要均合法），派生事件标注输入引用、窗口、完整性、处理器版本，模型抽取再标置信度；首次产出即固定，重试不重采样。无法回读原文时降低结论强度。预处理模型调用计入来源成本，便宜规则优先。
+允许 Collector 预处理（原始变化 / 规则抽取 / 模型窗口摘要均合法），派生事件标注输入引用、窗口、完整性、处理器版本，模型抽取再标置信度；首次产出即固定，重试不重采样。无法回读原文时降低结论强度。预处理模型调用计入来源成本，便宜规则优先。
 
 ### 7.2 提交、ACK 与 checkpoint
 
-拟议方法：`registerSense`、`ingestBatch`、`reportHealth`。首版 transport = 同 Host Cordis 插件调用；外部 HTTP push 后续加（同语义 + 来源 token + 限额）。
+方法：`register`（接入面）与 run ctx 的 `commit`（唯一写面）。首版 transport = 同 Host Cordis 插件调用；外部 HTTP push 后续加（同语义 + 来源 token + 限额）。
 
 批次语义：
 
@@ -450,14 +468,14 @@ CloudEvents 风格的来源/类型/主体/时间/数据分离，首版用自有�
 2. 全部有效才返回 durable ACK（逐条 accepted/duplicate）。
 3. 任一无效整批拒绝，不推进 checkpoint，返回错误下标与原因。
 4. ACK 丢失原样重试返回已有结果；只写内存不能 ACK。
-5. 上游游标由 Sense 理解，Host 只存 opaque checkpoint；不可暂停的 webhook 需 durable spool 或依赖源端重试，否则健康状态明确报可能丢失。
+5. 上游游标由采集器理解，Host 只存 opaque checkpoint；不可暂停的 webhook 需 durable spool 或依赖源端重试，否则健康状态明确报可能丢失。
 
 首版限额（待真实负载校准）：单事件 64 KiB、每批 100 条且 ≤1 MiB。
 
 ### 7.3 Intake 与订阅
 
 - 事件日志只存一次；每 Quno 独立 Trigger，`(source_id, event_key)` 唯一，同键不同内容显式冲突，不覆盖。
-- `Engine.receive` 是唯一领域接收命令，在 Sense 批次的同一 SQLite 事务（T1）内执行：规范时间/字段 → scope 过滤（保留 Trigger + Disposition）→ 写 Trigger/Thread/Correlation → 按 Subscription fan-out 幂等 TicketInput（owned/context）→ 计算 followupOwners → 无 Owner 的 Trigger 入 primary Thread.pending → 提交后唤醒 Eval/Assignment。
+- `Engine.receive` 是唯一领域接收命令，在采集批次的同一 SQLite 事务（T1）内执行：规范时间/字段 → scope 过滤（保留 Trigger + Disposition）→ 写 Trigger/Thread/Correlation → 按 Subscription fan-out 幂等 TicketInput（owned/context）→ 计算 followupOwners → 无 Owner 的 Trigger 入 primary Thread.pending → 提交后唤醒 Eval/Assignment。
 - 订阅是 Ticket ↔ Thread 关系（`subscriptions`），不是「某 Quno 订阅某 source」。owned 接管人类 follow-up；context 只提供输入，不恢复已结束 Ticket。
 - 人类 stop 过的 Ticket 不再接收新 Input；非人类 stop 的 ended Ticket 可由 owned 人类消息在同一 Mandate 下恢复，恢复前 revalidate。bot/CI 只交给 live Ticket，不恢复 ended Ticket。
 - 同一 Trigger 每个 Ticket 至多 handback 一次；所有 Owner 释放后才回到 primary Thread Eval。
@@ -485,7 +503,7 @@ CloudEvents 风格的来源/类型/主体/时间/数据分离，首版用自有�
 - 所有提交后动作走持久 Effect（Action Outbox）：`eval-delivery`、`assignment-launch`、`input-delivery`、`router-relay`、`notice`、`exchange-delivery`（`channel-reply` 预留）。同 kind/key 合并并递增 generation；执行完成/失败按 seq/generation 校验，旧执行不能覆盖新 payload；pause/shutdown 保留等待行。
 - **Report relay 沟通准入（2026-11-14）**：`router-relay` 只在 `reportRelayWorthy` 为真时登记——`ready`/`failed` 必须 relay，带问题的 `blocked`/`waiting` 必须 relay，普通 `progress`、静默 `waiting` 与 `dropped` 不 relay（只更新任务投影）。Effect key 仍为 `ticket.id`（单行合并、新报告覆盖未投递旧报告）；已过期、已取消请求方的投递前复查沿用 Exchange 终态口径。
 - **Exchange 终态必须可送达（2026-11-13）**：`failed` / `expired` 都是终态，先在 `exchange_messages` 落一条 `kind = 'error'` 的持久证据（`{ outcome, reason, responder }`，按 `(exchange, kind, hash)` 幂等），再唤醒请求方——Ticket 请求方得到 `TicketInput`，Router 请求方得到 `router-relay` Effect。过期**不是**静默状态变化；晚到的响应只作证据，不产生第二次唤醒。`relayExchange` 未读到终态时抛 `EffectRetryError` 让 Effect 保留重试，handler 返回「无事可做」只允许用于已结束/已取消的请求方，绝不把「投不出去」当成完成。
-- 用户配置：检查间隔（默认 300s，最小 60s）、时区、工作时段、安静时段；暂停停自动投递，Sense 继续接收。`checkIntervalSec` 是普通 Eval 的最大等待/合并节奏，不是模型轮询周期。
+- 用户配置：检查间隔（默认 300s，最小 60s）、时区、工作时段、安静时段；暂停停自动投递，采集器继续按调度运行。`checkIntervalSec` 是普通 Eval 的最大等待/合并节奏，不是模型轮询周期。
 - **只读 Watchdog**：按需检查超时 Eval、连续失败的 Effect、长时间无 active Eval 的 pending Thread、输入未投递且无 WorkerRun 的 Ticket，只报告不修改提示词/权限/Policy/状态；报告进入 `quno_status`，由人或 Effect 重试决定后续动作。
 
 ### 8.4 预算与容量
@@ -580,7 +598,7 @@ Notice:    pending → prepared → inbox-durable → presented
 ## 11. 持久化与保留
 
 - 目录 `$DSH_HOME/quno/`：`quno.sqlite` + 附件快照 `blobs/`。不向 OhMyMemo 目录或 DSH Session 文件塞事件队列。
-- 目标表：`qunos`、`sense_types/instances/batches/sense_checkpoint_entries`、`sources`、`events`（即 Trigger 存储）、`trigger_threads`、`threads`、`thread_pending`、`trigger_dispositions`、`evals`、`decisions`、`subscriptions`（Ticket↔Thread）、`tickets`、`assignments`、`worker_runs`、`ticket_inputs`、`input_attempts`、`exchanges`、`exchange_messages`、`effects`、`attention_items/history/attention_links`、`notification_outbox/attempts`、`feedback`。
+- 目标表：`qunos`、`collector_types/instances/batches/checkpoint_entries`、`sources`、`events`（即 Trigger 存储）、`trigger_threads`、`threads`、`thread_pending`、`trigger_dispositions`、`evals`、`decisions`、`subscriptions`（Ticket↔Thread）、`tickets`、`assignments`、`worker_runs`、`ticket_inputs`、`input_attempts`、`exchanges`、`exchange_messages`、`effects`、`attention_items/history/attention_links`、`notification_outbox/attempts`、`feedback`。
 - 旧 `deliveries`/`runs`/`tasks` 只用于迁移与 legacy 只读展示，不再进入目标写路径；来源过滤器旧表已改名 `source_subscriptions`。
 - 关键唯一键：events `(source_id, event_key)`；threads `(quno_id, source_id, thread_key)`；trigger_threads `(trigger_id, thread_id)`；subscriptions `(ticket_id, thread_id)`；effects `(kind, key)`；exchange_messages `(exchange_id, kind, content_hash)`；ticket_inputs 稳定 id；assignments/worker_runs 有序索引。
 - 用插件自有 SQLite repository（DSH storage KV 无多表事务契约）；单 Host 写锁 + WAL + `synchronous=FULL`；schema 版本化迁移（当前 v3），升级前备份，重复迁移无副作用。
@@ -595,7 +613,7 @@ Notice:    pending → prepared → inbox-durable → presented
 
 ## 13. UI 与 Remote
 
-> **当前口径（2026-10-27）**：侧栏仍是原生面板行（无页签、不重写 WorkspaceBrowser）；胶囊在会话头右上工具区，点击出三行概要并可带 `view` 打开右栏；接入向导是 `shell.overlay` 里的三栏大 Modal；右栏面板支持 Sense 详情钻取、关注完结分组与事件详情；主动汇报卡按 Turn 绑定；任务详情支持取消。下文保留 2026-10-23 的沿革记录，冲突处以本段与 §13.4–§13.7、§13.10、§20 为准（决策记录见 `docs/notes/2026-10-27-quno-interaction-completion.md`）。
+> **当前口径（2026-10-27）**：侧栏仍是原生面板行（无页签、不重写 WorkspaceBrowser）；胶囊在会话头右上工具区，点击出三行概要并可带 `view` 打开右栏；接入向导是 `shell.overlay` 里的三栏大 Modal；右栏面板支持采集器详情钻取、关注完结分组与事件详情；主动汇报卡按 Turn 绑定；任务详情支持取消。下文保留 2026-10-23 的沿革记录，冲突处以本段与 §13.4–§13.7、§13.10、§20 为准（决策记录见 `docs/notes/2026-10-27-quno-interaction-completion.md`）。
 >
 > 本节于 2026-10-23 两次修订。第一版交互改版建立在 `sidebar.workspaces.sessionListView` 槽上，经核实该槽**在 fork 源码中不存在**（仅以未合入 note 形式存在；dsh-thread 与 dsh-quno 的注册均为永不触发的 dormant 注册），`registerMessageProjection` 实为 Host 侧 LLM 消息投影而非 UI 通道——两处事实性错误已在偏差 #11 更正。同日的第一版落地方案（占用 `sidebar.workspaces` 主槽 + 自绘精简会话列表）经用户纠偏与实机验证后，改为本节的 **work / Quno 页签制**（偏差 #13）：fork 增加 `sidebar.workspaces.alternate` 接缝槽并发布 `v0.2.1-rc.2+zw.6`，stock 浏览区原样保留为「work」页签，Quno 独享「Quno」页签。以下挂载点均已对照 fork `v0.2.1-rc.2+zw.6` 源码与实机（scratch `DSH_HOME` + 真实浏览器 DOM 断言）验证。
 
@@ -618,7 +636,7 @@ Notice:    pending → prepared → inbox-durable → presented
 - **右栏默认收起，胶囊在对话框里**：Quno 面板（动态/关注/任务）挂在右栏，但**不自动展开**；常态入口是正文右上角的悬浮胶囊（实时计数，不在会话头按钮区），点击出三行概要，按行打开右栏（§13.5）。
 - **任务从对话里长出来**：`quno_task` 任务卡嵌在引起它的那条回复里；点卡片 → 右栏面板打开并定位该任务的实时运行视图（§13.6）。
 
-视图内容分工：设置页承担**配置**（单页表单、无内部页签：基本/通知/角色与模型/感知来源/高级，自动保存；关注/任务/运行实时态全部迁到右栏），不承担主对话入口；右栏面板承担**实时状态**（Sense 健康、关注事项、任务、运行）；「为什么提醒/没提醒」的证据与规则摘要在面板的动态视图可查（可审计结论依据，不暴露模型内部推理）。
+视图内容分工：设置页承担**配置**（单页表单、无内部页签：基本/通知/角色与模型/采集来源/高级，自动保存；关注/任务/运行实时态全部迁到右栏），不承担主对话入口；右栏面板承担**实时状态**（采集器健康、关注事项、任务、运行）；「为什么提醒/没提醒」的证据与规则摘要在面板的动态视图可查（可审计结论依据，不暴露模型内部推理）。
 
 ### 13.2 左侧栏改版：work / Quno 页签（fork 接缝）
 
@@ -668,12 +686,12 @@ Notice:    pending → prepared → inbox-durable → presented
 2. **实体注册**：keyed 槽 `sidebar.right.pane.tab`（body，key = `dsh-quno/panel`）+ `sidebar.right.pane.tab.title`（chip 标题，含运行中任务计数）。
 
 - **面板内四视图**（组件内页签，设置页两页签同款 useState 模式）：
-  - **动态**：各 Sense 实例一行（按钮）→ **Sense 详情**；信息缺口；最近事件摘要，事件行 → **事件详情**（`eventDetail` 按需读取，payload 有界）。
+  - **动态**：各采集器实例一行（按钮）→ **采集器详情**；信息缺口；最近事件摘要，事件行 → **事件详情**（`eventDetail` 按需读取，payload 有界）。
   - **关注**：open/waiting/snoozed 列表 + 已处理/延后/不再关注按钮（`actAttention`，带 expectedRevision 防并发）；折叠分组「已完结」读 resolved/dismissed/expired，并显示完成时间；证据引用按 `reliability.readOriginal` 与事件 `pruned` 决定能否点开原文，不可读时只展示摘要与血缘。
   - **任务**：进行中/已结束列表；点击进入任务详情（§13.6，取消/续跑/子会话/产物）。
   - **运行**：Eval/Decision 与 WorkerRun 分列筛选——状态、来源 Thread/Ticket、超时次数、错误；通知列表（title/status/body/why/时间）；顶部「立即检查」复用 `checkNow()`。大正文只经 `evalDetail`/`ticketDetail` 按需加载。
-- **Sense 详情**（`sense-detail.tsx`，设置页与面板共用）：三轴状态（期望/生命周期/健康）分开展示；`healthy + stale` 显示「连接正常，但数据可能陈旧」；上次尝试/成功/事件/重试/连续失败/错误码/覆盖范围/来源延迟/检查点版本；能力声明（模式、间隔、超时、配额、权限、可靠性五项、首轮语义）；配置（secret 掩码）；本实例缺口；操作（暂停/恢复/停用/探测/编辑/删除）。声明缺失时显示「声明不可用」，不把未知补成支持。
-- **导航参数**：`SidebarRightTabParamsMap.qunoPanel = { taskId?, senseId?, runId?, view? }`；`view` 为 `'sense' | 'attention' | 'task' | 'runs'`；`narrowPanelParams` 校验并丢弃非法值；实例删除后详情显示「实例不存在」并可返回，不崩溃。
+- **采集器详情**（`collector-detail.tsx`，设置页与面板共用）：三轴状态（期望/生命周期/健康）分开展示；`healthy + stale` 显示「连接正常，但数据可能陈旧」；上次尝试/成功/事件/重试/连续失败/错误码/覆盖范围/来源延迟/检查点版本；能力声明（调度、间隔、run 超时、配额、权限、可靠性五项、首轮语义）；配置（secret 掩码）；本实例缺口；操作（暂停/恢复/停用/探测/编辑/删除）。声明缺失时显示「声明不可用」，不把未知补成支持。
+- **导航参数**：`SidebarRightTabParamsMap.qunoPanel = { taskId?, collectorId?, runId?, view? }`；`view` 为 `'collectors' | 'attention' | 'task' | 'runs'`；`narrowPanelParams` 校验并丢弃非法值；实例删除后详情显示「实例不存在」并可返回，不崩溃。
 - **数据源**：现有 `remote.quno.state` + 15 秒轮询 store（增 `eventsRecent`；任务列表连同 `plan`/`prompt` 摘要随 `state()` 下发，见偏差 #14）；新增按需只读 `noticeDetail` / `eventDetail`（有界缓存，不进轮询）；实时性升级路径为 typert stream（`@Remote({mode:'stream'})`），v1 不阻塞在轮询上。
 - **右栏默认收起（2026-10-23 定稿，取代自动展开）**：进入 quno 主会话**不再自动 openTab**；面板打开入口只有两个——对话内胶囊（§13.5）与任务卡（§13.6）。用户手动展开后面板留在该会话右栏（dockkit 每会话一棵 dock 树，原生记忆）；手动关闭后不回弹。其他会话右栏内容不动；push/fullscreen/float/分栏/折叠全部吃 dockkit 原生能力，零自研。原「进入会话自动展开」的 watcher（含 600ms 有界重试）随之移除。
 - **2026-10-28 状态体系改造（决策记录 `docs/notes/2026-10-28-quno-state-system.md`）**：四个视图按「页面状态 → 列表/详情」重排，`QunoCard` 不再承担全部页面容器。
@@ -681,7 +699,7 @@ Notice:    pending → prepared → inbox-durable → presented
   - **动态页状态机**（`panel-state.ts` 纯函数 + 单测）：`loading / load-failed / install-guide / first-connect / all-paused / syncing / empty / list`；首次同步中不显示「没有新变化」，后台刷新失败保留列表并出陈旧 callout，来源行只给一个最高优先级状态。
   - **展示原语**：列表统一 `PanelListRow`（状态点 + 标题 + 元信息 + 钻取箭头）；详情统一 `DetailHeader + DetailSection`；空态分四级——`PanelEmpty`（整页）、`InlineEmpty`（分区）、`MissingState`（对象不存在）、`Callout`（需要解释的状态）；`LoadingRows` 只用于首次加载。
   - **关注页**：保留卡片但去掉左色条，不显示 `topicKey`，状态本地化；操作失败留在原卡上提示冲突，不跳回列表。
-  - **Sense 详情**：默认只给身份、状态、上次成功同步、声明驱动的配置摘要、当前异常与主操作（暂停/恢复、编辑、探测）；三轴、检查点版本、尝试/重试时间、延迟与覆盖、连续失败、错误码、可靠性五项、权限原始声明与原始配置收进「诊断信息」折叠；停用与删除移入独立危险区（确认按钮为「取消 / 确认删除」）。
+  - **采集器详情**：默认只给身份、状态、上次成功同步、声明驱动的配置摘要、当前异常与主操作（暂停/恢复、编辑、探测）；三轴、检查点版本、尝试/重试时间、延迟与覆盖、连续失败、错误码、可靠性五项、权限原始声明与原始配置收进「诊断信息」折叠；停用与删除移入独立危险区（确认按钮为「取消 / 确认删除」）。
   - **任务页**：按「需要你（question/blocked/failed 待决定）/ 进行中（accepted/running/waiting）/ 已结束」分组，空组不渲染；详情按状态条件渲染（概览 + 当前活动 + 需要你（回答入口）+ 结果与产物 + **执行记录（全状态可进，运行中默认展开）** + 诊断折叠），无内容不留空标题；任务不存在用独立 `taskMissing`。执行记录是右栏内只读时间线（`taskActivity` Remote：白名单事件 + 脱敏 + 有界分页），无 composer、无编辑、无 steer；打开原始执行会话只在诊断折叠里。旧 Wire 缺新字段时按 legacy status 回退投影。
   - **运行页**：只负责思考运行，通知正文不再堆叠；`runId` 真正消费为运行详情页（状态、触发方式、起止、耗时、模型与成本、处置/延后/汇报数、错误）。运行状态统一映射：`claimed/running → 进行中`、`committed → 已提交`、`failed → 失败`、`interrupted → 已中断`、其他 → 未知状态；手动检查无工作时明确写「没有可处理内容，本次未调用模型」，不创建虚假运行记录。
 
@@ -810,9 +828,9 @@ Notice:    pending → prepared → inbox-durable → presented
 - **为什么不是设置弹窗**：原生设置弹窗宽度约 800px，容纳不下「类型 300 + 表单 + 说明 240」三栏；挂 `settings.onboarding` 会误入全局首次启动流程。
 - **形态**：应用内大 Modal，`shell.overlay` 注册宿主（不随总开关消失），宽度 `min(1120px, calc(100vw - 64px))`；`≥980px` 三栏，`720–979px` 右栏说明下移，`<720px` 类型卡改为顶部下拉；头尾固定、中栏滚动。
 - **草稿归属**：向导宿主持有草稿；切换列/缩放/轮询不清空；有未保存修改时关闭需二次确认；Escape 同路径。
-- **创建闭环**：校验通过 → 保存 → 显示「已创建，正在首次同步」+ 当前三轴状态；不先报成功。编辑复用同一表单，走 `senseCommand({action:'reconfigure'})` 的统一重启语义。
-- **字段驱动**：`SenseConfigField` 支持 `min/max/step`、静态 `options`、`multiple`（字符串列表）、`discover`（远程选项）、`advanced`（折叠组）与 `secret`（留空保持，清空是独立动作）。跨字段规则由 Host 返回完整错误，客户端不猜。
-- **云之家「最近群聊」**：`discover: true` 的 `groupIds` 经 `senseOptions` → `im group recent` 分页；只有 `groupType: 2`（多人群聊）可选，私聊/助手/系统通知/未识别类型显示但禁用并给出原因。`auth-required` 显示 `yzj-cli auth login` 引导，不自动执行登录、不接触 token。
+- **创建闭环**：校验通过 → 保存 → 显示「已创建，正在首次同步」+ 当前三轴状态；不先报成功。编辑复用同一表单，走 `collectorCommand({action:'reconfigure'})` 的统一重启语义。
+- **字段驱动**：`CollectorConfigField` 支持 `min/max/step`、静态 `options`、`multiple`（字符串列表）、`discover`（远程选项）、`advanced`（折叠组）与 `secret`（留空保持，清空是独立动作）。跨字段规则由 Host 返回完整错误，客户端不猜。
+- **云之家「最近群聊」**：`discover: true` 的 `groupIds` 经 `collectorOptions` → `im group recent` 分页；只有 `groupType: 2`（多人群聊）可选，私聊/助手/系统通知/未识别类型显示但禁用并给出原因。`auth-required` 显示 `yzj-cli auth login` 引导，不自动执行登录、不接触 token。
 
 - **2026-10-28 修订**：类型卡只保留类型图标、名称与一句话能力说明（不再显示实例数量）；选项按钮用字段语义「选择{字段} / 收起 / 重试」，未选择时显示「尚未选择{字段}」；选项请求以 `type + field + 草稿配置 + page` 为键，键已变化的旧响应直接丢弃；密钥字段区分「未配置 / 已配置保持不变 / 将替换 / 将清除」四种状态；脏表单关闭按钮为「继续编辑 / 放弃修改」；创建结果按真实阶段展示（正在启动 / 等待登录 / 首次同步中 / 已就绪 / 启动失败及原因），不先报成功。
 
@@ -830,7 +848,7 @@ Notice:    pending → prepared → inbox-durable → presented
 | 探测成功 | 只说明可达性，不写成同步成功 |
 | 取消任务 | 「已取消」+「晚到结果不会改回状态」；不改写完成通知 |
 | 加载失败 | 「读取失败」+ 重试；不写成「没有内容」 |
-| 对象不存在 | 事件/任务/运行/Sense 各有独立 missing 文案，不复用其他对象 |
+| 对象不存在 | 事件/任务/运行/采集器各有独立 missing 文案，不复用其他对象 |
 | 首次同步中 | 「首次同步进行中」，不写「目前没有新变化」 |
 | 初始数据未读回 | 首次加载用骨架行；后台刷新失败保留旧内容 + 陈旧提示，不清空列表 |
 | 手动检查无工作 | 「没有可处理内容，本次未调用模型」 |
@@ -844,7 +862,7 @@ Notice:    pending → prepared → inbox-durable → presented
 
 ### 14.1 包结构
 
-一个核心安装单元（`pnpm run plugin:new -- dsh-quno --face dual --preset-owned`），内部按「纯领域 / 宿主适配 / 产品面」分层；Sense 按需独立插件：
+一个核心安装单元（`pnpm run plugin:new -- dsh-quno --face dual --preset-owned`），内部按「纯领域 / 宿主适配 / 产品面」分层；采集器按需独立插件：
 
 ```text
 dsh-quno
@@ -866,16 +884,16 @@ dsh-quno
   app/assessor    主对话 Eval/Report 投递
   app/turn-kind   回合分类与记忆门禁依据
   app/watchdog    只读运行健康检查（不修改状态）
-  organs          Sense 适配（ThreadResolver / 可选 Exchange；handleRequest 走封闭白名单，拒绝可指导）
+  collectors      采集层（registry + Host 调度器 + mount 生命周期 + 健康推导；query.handleRequest 走封闭白名单，拒绝可指导）
   scheduler       有界 pass、到期与退避
   recall          对象图与全文召回
   service         Cordis 组合根与窄接口装配
   api + client    Remote、设置页、四面板与小部件
 
-dsh-quno-sense-<name>   各来源感知器（日历、订阅源、云之家群聊）
+dsh-quno-collector-<name>   各来源采集器（日历、订阅源、云之家群聊）
 ```
 
-边界：`core` 不做 I/O，不 import `app/organs/client`；`organs` 不 import `app` 私有实现；Client 只消费 Wire 类型；所有注册随 Cordis effect 回收。
+边界：`core` 不做 I/O，不 import `app/collectors/client`；`collectors` 不 import `app` 私有实现；Client 只消费 Wire 类型；所有注册随 Cordis effect 回收。
 
 ### 14.2 能力映射（核对基线 `v0.2.1-rc.2+zw.4`）
 
@@ -911,7 +929,7 @@ dsh-quno-sense-<name>   各来源感知器（日历、订阅源、云之家群�
 |---|---|
 | 永久对话 | 任意重启/压缩后身份、记忆、话题连续；无新建会话入口 |
 | 主对话只路由 | 执行型请求的唯一工具调用为 `quno_task start`（Eval 回合为 `quno_eval_decide accept`），返回后立即应答「已交后台」；主 preset 无 shell/文件/网页/Skill/Goal 工具 |
-| 第三方工具不可用 | Worker 无对应通道时必须明确 blocked/failed/waiting 并如实回流；端点经 `quno_read.organs` 发现、不猜端点名，`organAdvertises` 校验「实例挂载且类型声明对应 handler」，拒绝文案列出真实可用端点（endpoint + label）；不得虚构 `organ:*` 已挂载、桌面更新根因或第三方查询结果；白名单外 payload 被 organ 拒绝且原因回流（`organ-whitelist-reject`）；真实来源正向读取单独验收（`third-party-cli-live-read`，保持 blocked），不用合成 Organ 冒充 |
+| 第三方工具不可用 | Worker 无对应通道时必须明确 blocked/failed/waiting 并如实回流；端点经 `quno_read.collectors` 发现、不猜端点名，`queryAdvertises` 校验「实例挂载且类型声明 `handleRequest`」，拒绝文案列出真实可用端点（endpoint + label）；不得虚构 `collector:*` 已挂载、桌面更新根因或第三方查询结果；白名单外 payload 被 organ 拒绝且原因回流（`organ-whitelist-reject`）；真实来源正向读取单独验收（`third-party-cli-live-read`，保持 blocked），不用合成 Organ 冒充 |
 | 结构化 CLI 读取（P0 发布门） | Worker 经 `quno_read.cliCapabilities` 发现能力 → `quno_cli_call` 在**同一回合**拿到真实子进程结果 → Report 引用事实 → 主对话只汇报一次（`cli-capability-read`，实例处于**暂停**态仍可查询）；带 `profile`/`argv` 的 payload 被拒且**零进程启动**，纠正参数后成功（`cli-capability-refuse`）；鉴权失败等 CLI 失败作为工具错误回到同回合，Worker 如实 `blocked` 并带一个具体问题（`cli-capability-failure`）；能力/操作/参数/账号越权一律在启动前拒绝 |
 | Exchange 失败回流（P0 发布门） | `failed`/`expired` 落 `error` 证据并唤醒请求方；Router 侧失败各注入**一次** relay、不得声称查询成功（`exchange-failure-relay`）；Ticket 侧失败成为可修正的 Input；晚到响应不重复唤醒 |
 | Ticket 正常回流 | 主对话立即回应 → 任务卡进度 → Worker Report 经 Router relay 自然语言汇报 + 卡片定格 |
@@ -965,9 +983,9 @@ dsh-quno-sense-<name>   各来源感知器（日历、订阅源、云之家群�
 | 断网/磁盘满 | 不假 ACK、不静默跳 cursor |
 | 两个 Quno 订阅同一事件（未来） | 独立消费互不影响 |
 
-### 15.3 Sense 接入门槛（S01–S14，一致性 runner 属实现期交付）
+### 15.3 Collector 接入门槛（S01–S14 + Host 调度，tests/collector-gates + collector-scheduler）
 
-声明协商失败即拒启 / 无聊天无模型仍按模式观察 / 重试同身份 / 崩溃各边界可对账 / 旧 generation 拒绝 / 空同步不唤醒模型 / 分页溢出报缺口 / 背压不假 ACK / stop 幂等释放 / 凭据轮换不重建身份 / 派生血缘固定 / 升级不重发历史 / 单 Sense 故障不阻塞其他 / 无业务副作用。
+声明协商失败即拒启 / run ctx 只含 checkpoint+commit 等采集面 / 重试同身份 / 崩溃各边界可对账 / 旧 run context 写入拒绝（generation 栅栏）/ 空同步不唤醒模型 / 分页溢出报缺口 / 背压不假 ACK / 暂停幂等释放 mount / 凭据轮换不重建身份 / 派生血缘固定 / 升级不重发历史 / 单采集器故障不阻塞其他 / 无业务副作用。调度单测另钉：启用即跑、hint 钳制 [now+1s, now+24h]、`retryAfterMs` 优先于退避梯、fatal/超时停排、健康推导（issues 降级成功 run、extras 透传）。
 
 ### 15.4 质量指标
 
@@ -991,7 +1009,7 @@ dsh-quno-sense-<name>   各来源感知器（日历、订阅源、云之家群�
 - **交互改版（2026-10-23 落地，work/Quno 制）**：§13 全面重写两次后定稿——fork zw.6 增 `sidebar.workspaces.alternate` 接缝，「work」（stock 原样）/「Quno」（联系人视图）双页签；主对话铬件净化（双席位标记 + 接缝 CSS）；右栏 Quno 面板（动态/关注/任务 + `eventsRecent`）；收起态实时胶囊；任务卡 → 面板联动。实机（scratch `DSH_HOME` + 真实浏览器 DOM 断言）全链路通过；偏差 #12–#15。
 - **Super-agent 内核重构—已完成 2026-11-05**：Trigger/Thread/Eval/Decision/Mandate/Ticket/Assignment/WorkerRun/Input/Exchange/Effect 领域内核、SQLite v3 迁移、Effect outbox、SessionTransport（followup/steer/inject + 稳定 messageId）、只读 Executor、主对话 Eval Router 与按回合门禁全部落地；旧 Analyzer/Router/Runner/TaskOrchestrator 写路径删除。实现与验收证据见 §18.1，设计依据见 `docs/notes/2026-11-05-quno-superagent-program-design.md`。
 - **dsh-thread 退役—已执行 2026-11-03**：见 §16.1——功能整体不需要，**不依赖 Quno 进度、无能力平价要求**，随桌面 0.4.0-rc.8 下船（插件整包删除 + `src/install.ts` 退役事务清理存量安装）；执行记录见 `docs/notes/2026-11-03-retire-dsh-thread.md`。
-- **后续明确延期**：审批卡与对外写操作、多 Quno 配置 UI 与跨 Quno 通知仲裁、独立 HTTP push、多设备、复杂 cron、Sense 商店、自然语言编译 Sense。
+- **后续明确延期**：审批卡与对外写操作、多 Quno 配置 UI 与跨 Quno 通知仲裁、独立 HTTP push、多设备、复杂 cron、采集器商店、自然语言编译采集器。
 - **明确不做**：云端常驻/关机继续运行（产品决策，§17）。
 
 ### 16.1 dsh-thread 退役路径
@@ -1030,7 +1048,7 @@ dsh-quno-sense-<name>   各来源感知器（日历、订阅源、云之家群�
 |---|---|---|---|
 | 1 | `dsh-quno` 为 preset-owned，preset YAML 行挂载 | **profile 行**（dual）+ Host 启动时 `ctx.get('agentPresets').register` 程序化注册 `quno` / `quno-task` | 浏览器半边必须挂 profile；`dsh-agent-preset` 在 profile 根不可解析，YAML preset 行无法落地 |
 | 2 | `preset-snippet.yml` | 不随包；preset 由代码注册 | 同上；声明式副本会与代码漂移 |
-| 3 | 统一 `quno` 服务 | `quno` + `qunoSenses` + `qunoIngress` 三个服务 | Sense 只拿代际化 ingress，避免接触调度/通知/存储 |
+| 3 | 统一 `quno` 服务 | `quno` + `qunoSenses` + `qunoIngress` 三个服务（**2026-11-10 已取代**：现为 `quno` + `qunoCollectors`，`qunoIngress` 删除，见 §6.9） | Sense 只拿代际化 ingress，避免接触调度/通知/存储 |
 | 4 | 分析会话由 runner 直接创建 | 经 `ctx.agents.create({meta:{origin:'subagent'}})` 创建隐藏会话；读取用 `sessionQuery` | 复用官方隐藏会话语义；live `snapshotEvents` 仅测试回退 |
 | 5 | 首批 Sense：建议消息 + 日历 | **日历（本地 .ics）+ RSS/Atom** | 基座没有「双向消息源」插件；订阅源与日历都是真实、可离线验证的感知面 |
 | 6 | 通知频控按「已生成通知」计数 | 按**已投递/可能已投递**计数（`inbox-durable` 起） | 否则一次积压的 N 条 pending 会立刻触发小时上限，把所有通知延后 |
@@ -1068,9 +1086,9 @@ dsh-quno-sense-<name>   各来源感知器（日历、订阅源、云之家群�
 
 - **能力层**：新增 `src/cli-broker.ts`（`CliCapabilityBroker`，Host 服务 `ctx.qunoCli`，`src/index.ts` 提供）。授权 = 已注册能力的只读 operation ∩ Ticket `Mandate.cli` 快照 ∩ 有可用 target；参数闭表校验、并发/截止/输出上限由 broker 自行强制（截止时间用 `Promise.race`，不信任 provider）。`Mandate.cli` 为可选字段，旧 Ticket 读回 `undefined` 即无授权，不需要数据迁移。
 - **Worker 面**：`app/worker-tools.ts` 新增 `quno_cli_call`，`quno_read` 输出新增 `cliCapabilities` 发现面，`WORKER_TOOL_NAMES` 同步放行工具名；主对话 preset 仍未挂 CLI 工具。
-- **yzj**：`src/organ.ts` 抽出 `runYzjOperation`/`planYzjOperation` 作为唯一执行路径，异步 organ 面改为兼容适配；新增 `src/capability.ts` 声明三个只读 op 与 target 解析，`apply` 内以 effect 注册能力。
+- **yzj**：`plugin/dsh-quno-collector-yzj/src/organ.ts` 抽出 `runYzjOperation` 作为唯一执行路径，异步 query 面改为兼容适配；新增 `src/capability.ts` 声明三个只读 op 与 target 解析，`apply` 内以 effect 注册能力（target 为 `qunoCollectors` 下的实例）。
 - **回流正确性**：`Engine.settleExchangeFailure` 统一失败/过期终态（error 消息 + 请求方唤醒），`assessor.relayExchange` 改读终态证据并在未终态时抛 `EffectRetryError`，relay 改 `queue` 不打断 Router 当前回合。
-- **验证**：`dsh-quno` 203 项、`dsh-quno-sense-yzj` 61 项 node:test 全绿；scripted 链路评测 25 通过 + 9 blocked、0 fail，新增四条 P0（`cli-capability-read`/`cli-capability-refuse`/`cli-capability-failure`/`exchange-failure-relay`）。实施记录与四处设计判断见 [2026-11-13 结构化 CLI 能力层与结果回流修复](notes/2026-11-13-quno-cli-capability-and-result-delivery.md)。
+- **验证**：`dsh-quno` 219 项、`dsh-quno-collector-yzj` 66 项 node:test 全绿；scripted 链路评测 25 通过 + 9 blocked、0 fail，新增四条 P0（`cli-capability-read`/`cli-capability-refuse`/`cli-capability-failure`/`exchange-failure-relay`）。实施记录与四处设计判断见 [2026-11-13 结构化 CLI 能力层与结果回流修复](notes/2026-11-13-quno-cli-capability-and-result-delivery.md)。
 
 ### 18.3 2026-11-14 主对话降噪与统一任务投影落地（P0+P1）
 
@@ -1113,14 +1131,14 @@ dsh-quno-sense-<name>   各来源感知器（日历、订阅源、云之家群�
 
 ## 20. 交互补全落地（2026-10-27）
 
-按交互稿补全 Sense 详情、接入向导、胶囊概要、按 Turn 绑定的汇报卡、关注完结分组与任务取消。核心约束：**不重写原生侧栏、不伪造运行状态、不把视觉缺槽误判成必须接管整个对话或设置页**。
+按交互稿补全采集器详情、接入向导、胶囊概要、按 Turn 绑定的汇报卡、关注完结分组与任务取消。核心约束：**不重写原生侧栏、不伪造运行状态、不把视觉缺槽误判成必须接管整个对话或设置页**。
 
 | 交互 | 落点 | 语义 |
 |---|---|---|
-| Sense 详情钻取 | 右栏面板（复用任务详情的「列表→详情→返回」） | 三轴状态、健康/新鲜度、能力声明、配置、缺口、暂停/恢复/停用/探测/编辑/删除 |
+| 采集器详情钻取 | 右栏面板（复用任务详情的「列表→详情→返回」） | 三轴状态、健康/新鲜度、能力声明、配置、缺口、暂停/恢复/停用/探测/编辑/删除 |
 | 接入向导 | `shell.overlay` 三栏 Modal | 字段驱动表单 + 草稿保护 + 「已创建，正在首次同步」；不挂 `settings.onboarding` |
-| 字段选项发现 | `senseOptions` + `SenseFactory.listOptions` | 只允许 `discover` 字段；草稿配置可发现；云之家最近群聊仅多人群聊可选 |
-| 真实探测 | `probeSense` | 不重启、不改配置版本、不推进检查点、不写健康、不报同步成功 |
+| 字段选项发现 | `collectorOptions` + `CollectorFactory.listOptions` | 只允许 `discover` 字段；草稿配置可发现；云之家最近群聊仅多人群聊可选 |
+| 真实探测 | `probeCollector` | 不重启、不改配置版本、不推进检查点、不写健康、不报同步成功 |
 | 胶囊概要 | `conversation.session.header.utilities` | 三行概要 → 带 `view` 打开右栏；外部点击/Escape/展开自动关闭 |
 | 汇报卡 | `ConversationNodeDefinition` + `turnDataSource` | 绑定 `source.notificationId` 所在 Turn；历史重载可恢复；快照外按需 `noticeDetail` |
 | 历史证据 | `eventDetail` | 按需、有界（8KB）；已 prune 明确标注 |
@@ -1139,4 +1157,5 @@ dsh-quno-sense-<name>   各来源感知器（日历、订阅源、云之家群�
 - 2026-10-29 §6.11 扩展设计 v2（待实现）：登录态验证结构化 @、私聊方向与分页；修订目录续扫、初始化、过滤分类及容量限制。方案与剩余验收门见 [登录态核验版设计](notes/2026-10-29-quno-sense-yzj-mentions-direct-design-v2.md)，保留旧稿为决策历史。
 - 2026-10-30 主对话只路由：真实会话证实主 agent 在拥有 `quno_task` 的情况下仍直接执行后，主 preset 移除直接执行工具，所有实际工作强制立即委派并快速应答；`quno_task` 同时支持持久任务状态与结果查询（实证与验收见 `docs/notes/2026-10-30-quno-main-routing-only.md`）。
 - 2026-11-05 内核重构：目标设计终稿见 `docs/notes/2026-11-05-quno-superagent-program-design.md`；同日按 P0–P5 落地领域内核、SQLite v3、Effect outbox、SessionTransport、只读 Executor 与 Eval Router，旧 Analyzer/Delivery/Task 写路径删除，契约收敛回本文（§2–§3、§5、§7.3、§8、§11、§14.1、§15、§18.1）。
+- 2026-11-10 采集层重构：Sense/Organ（`quno.sense/v1`，插件自带定时器 + 自报健康）退役为统一 Collector 契约（`quno.collector/v2`）——Host 统一调度（单发 timer、hint 钳制、退避、fatal 停排）、`run(ctx)` 三面模型、健康由 Host 推导、`mount` 生命周期；`senses.ts` 重写为 `collectors.ts`，store v3→v4 四表 RENAME，`organ:` 端点改 `collector:`，`quno_read.organs` 改 `collectors`，插件族改名 `dsh-quno-collector-<name>`；本文 §6、§14.1、§15.3 已收敛到新契约。决策与实施见 `docs/notes/2026-11-10-quno-collector-redesign.md`。
 - 2026-11-14 Router/Worker 交互定稿与 P0+P1 落地：一个事实源三种投影、用户状态机、relay 沟通准入、第一人称 Router、内部输入入队前后隐藏（含 QueueDock 过滤 seam 插件侧实现）、只读执行记录（`taskActivity` Remote + 脱敏分页）；契约收敛 §2/§5/§8/§10/§13/§15，落地记录见 §18.3（设计见 `docs/notes/2026-11-14-quno-router-worker-product-and-program-design.md`，实施记录见 `docs/notes/2026-11-14-quno-router-worker-implementation.md`）。

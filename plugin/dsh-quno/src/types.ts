@@ -15,11 +15,11 @@ export type QunoId = string
 /** One immutable observation in the event log. */
 export type EventId = string
 
-/** One Quno-owned source identity (stable across Sense restarts and token refreshes). */
+/** One Quno-owned source identity (stable across collector restarts and token refreshes). */
 export type SourceId = string
 
-/** One Sense install configuration. */
-export type SenseInstanceId = string
+/** One collector install configuration. */
+export type CollectorInstanceId = string
 
 /** One durable attention item. */
 export type AttentionItemId = string
@@ -61,10 +61,14 @@ export type NoticeStatus =
   | 'retryable-failure'
   | 'delivery-blocked'
 
-/** Sense lifecycle axes kept separate: desired state, runtime lifecycle, health. */
-export type SenseDesiredState = 'enabled' | 'paused' | 'disabled'
-export type SenseLifecycle = 'starting' | 'running' | 'stopping' | 'stopped' | 'failed'
-export type SenseHealthState =
+/** Collector lifecycle axes kept separate: desired state, runtime lifecycle, health. */
+export type CollectorDesiredState = 'enabled' | 'paused' | 'disabled'
+/**
+ * `idle` is the resting state between two scheduled runs; `running` covers a
+ * run in flight; `failed` means the Host stopped scheduling (fatal or timeout).
+ */
+export type CollectorLifecycle = 'idle' | 'starting' | 'running' | 'stopping' | 'stopped' | 'failed'
+export type CollectorHealthState =
   | 'healthy'
   | 'degraded'
   | 'rate-limited'
@@ -107,7 +111,7 @@ export interface QunoRecord {
 
 /** User-owned behaviour knobs (persisted as JSON on the quno row). */
 export interface QunoConfig {
-  /** Master switch: paused still ingests (Sense keeps observing), but no model run and no proactive notice. */
+  /** Master switch: paused still ingests (Collector keeps observing), but no model run and no proactive notice. */
   readonly enabled: boolean
   /** Thinking cadence in seconds. Product floor is 60 (tests may use less through an explicit override). */
   readonly checkIntervalSec: number
@@ -173,7 +177,7 @@ export interface QunoRetention {
 export interface SourceRecord {
   readonly id: SourceId
   readonly qunoId: QunoId
-  readonly instanceId: SenseInstanceId
+  readonly instanceId: CollectorInstanceId
   readonly type: string
   readonly scope: string | null
   readonly createdAt: number
@@ -202,7 +206,7 @@ export interface EventRecord {
   readonly supersedesEventIds: readonly string[]
   readonly parentEventIds: readonly string[]
   readonly contentHash: string
-  readonly senseConfigRevision: number
+  readonly collectorConfigRevision: number
   readonly expiresAt: number | null
   readonly prunedAt: number | null
 }
@@ -406,20 +410,20 @@ export interface NoticeAttemptRecord {
   readonly at: number
 }
 
-/** One Sense instance row. */
-export interface SenseInstanceRecord {
-  readonly id: SenseInstanceId
+/** One collector instance row. */
+export interface CollectorInstanceRecord {
+  readonly id: CollectorInstanceId
   readonly qunoId: QunoId
   readonly type: string
   readonly label: string
   readonly config: Record<string, unknown>
   readonly configRevision: number
-  readonly desiredState: SenseDesiredState
-  readonly lifecycle: SenseLifecycle
-  readonly health: SenseHealthState
-  readonly healthDetail: SenseHealthDetail | null
+  readonly desiredState: CollectorDesiredState
+  readonly lifecycle: CollectorLifecycle
+  readonly health: CollectorHealthState
+  readonly healthDetail: CollectorHealthDetail | null
   readonly generation: number
-  readonly checkpoint: SenseCheckpoint
+  readonly checkpoint: CollectorCheckpoint
   readonly lastAttemptAt: number | null
   readonly lastSuccessAt: number | null
   readonly lastEventAt: number | null
@@ -431,14 +435,14 @@ export interface SenseInstanceRecord {
 }
 
 /** Opaque upstream position and its compare-and-swap revision. */
-export interface SenseCheckpoint {
+export interface CollectorCheckpoint {
   readonly value: string | null
   readonly revision: number
 }
 
-/** Health fields a Sense reports; `lastSuccessAt !== everything` is the point. */
-export interface SenseHealthDetail {
-  readonly state: SenseHealthState
+/** Health fields the Host derives from run outcomes; `lastSuccessAt !== everything` is the point. */
+export interface CollectorHealthDetail {
+  readonly state: CollectorHealthState
   readonly detail?: string
   readonly lastAttemptAt?: number | null
   readonly lastSuccessfulSyncAt?: number | null
@@ -457,8 +461,8 @@ export interface SenseHealthDetail {
   readonly issues?: readonly { readonly code: string; readonly detail: string; readonly count?: number }[]
 }
 
-/** One asynchronous Exchange handed to a Source/Organ implementation. */
-export interface OrganExchangeRequest {
+/** One asynchronous Exchange handed to a collector's query implementation. */
+export interface CollectorExchangeRequest {
   readonly exchangeId: string
   readonly endpoint: string
   readonly payload: unknown
@@ -468,20 +472,20 @@ export interface OrganExchangeRequest {
 }
 
 /**
- * One discoverable organ endpoint, as `quno_read.organs` and the refusal
- * directories advertise it. Only instances whose type declares at least one
- * exchange handler appear here — a listed endpoint is one the gate will let
+ * One discoverable collector endpoint, as `quno_read.collectors` and the
+ * refusal directories advertise it. Only instances whose type declares a
+ * query handler appear here — a listed endpoint is one the gate will let
  * through.
  */
-export interface OrganEndpointView {
+export interface CollectorEndpointView {
   readonly endpoint: string
   readonly label: string
   readonly type: string
-  readonly capabilities: { readonly request: boolean; readonly command: boolean }
+  readonly capabilities: { readonly request: boolean }
   readonly health: string
 }
 
-export interface SenseTypeRecord {
+export interface CollectorTypeRecord {
   readonly type: string
   readonly contractVersion: number
   readonly implementationVersion: string
@@ -539,15 +543,15 @@ export interface NotificationCandidate {
   readonly title?: string
 }
 
-/** A Sense's machine-checkable declaration. */
-export interface SenseDefinition {
+/** A collector's machine-checkable declaration. */
+export interface CollectorDefinition {
   readonly type: string
   readonly contractVersion: string
   readonly implementationVersion: string
   readonly displayName: string
   readonly description: string
   readonly eventTypes: readonly { readonly type: string; readonly summary?: string }[]
-  readonly configFields?: readonly SenseConfigField[]
+  readonly configFields?: readonly CollectorConfigField[]
   readonly permissions: {
     readonly reads: readonly string[]
     readonly credentialKinds?: readonly string[]
@@ -555,13 +559,11 @@ export interface SenseDefinition {
     readonly mcp?: readonly string[]
     readonly requiresModel?: boolean
   }
-  readonly runtime: {
-    readonly modes: readonly ('poll' | 'watch' | 'push' | 'hybrid')[]
+  readonly schedule: {
     readonly defaultIntervalSec: number
     readonly minIntervalSec: number
-    readonly concurrency: number
-    readonly timeoutMs: number
-    readonly quotas?: { readonly maxEventsPerCheck?: number; readonly maxBytesPerCheck?: number }
+    readonly maxRunMs: number
+    readonly quotas?: { readonly maxEventsPerRun?: number; readonly maxBytesPerRun?: number }
   }
   readonly reliability: {
     readonly checkpoint: 'cursor' | 'snapshot' | 'none'
@@ -571,34 +573,26 @@ export interface SenseDefinition {
     readonly readOriginal: boolean
   }
   /** Honest first-synchronization semantics; omission means "unknown". */
-  readonly firstSync?: SenseFirstSync
+  readonly firstSync?: CollectorFirstSync
   readonly defaults?: Record<string, unknown>
-  /** Optional Organ capabilities beyond producing Triggers. */
-  readonly organ?: OrganCapabilitiesDeclaration
+  /** Optional on-demand query capabilities beyond producing Triggers. */
+  readonly query?: QueryCapabilitiesDeclaration
 }
 
-/** Thread/context capabilities a Source can declare (structurally the core contract). */
-export interface OrganCapabilitiesDeclaration {
-  resolveThreads?(event: EventEnvelope): { readonly status: 'resolved'; readonly threads: readonly { readonly source: string; readonly id: string }[] } | { readonly status: 'unresolved'; readonly reason: string }
-  handleRequest?(request: OrganExchangeRequest): Promise<void> | void
-  handleCommand?(request: OrganExchangeRequest): Promise<void> | void
-  readOriginal?(request: {
-    readonly triggerId: string
-    readonly part: 'self' | 'thread' | 'root' | 'parent'
-    readonly cursor: string | null
-    readonly signal: AbortSignal
-  }): Promise<{ readonly items: readonly unknown[]; readonly nextCursor: string | null; readonly truncated: boolean }>
+/** The on-demand read face a collector can declare (structurally the core contract). */
+export interface QueryCapabilitiesDeclaration {
+  handleRequest?(request: CollectorExchangeRequest): Promise<void> | void
 }
 
 /** One static choice a field offers. */
-export interface SenseConfigChoice {
+export interface CollectorConfigChoice {
   readonly value: string
   readonly label: string
   readonly description?: string
 }
 
-/** Declarative UI hint for one Sense config key (the generic JSON fallback stays available). */
-export interface SenseConfigField {
+/** Declarative UI hint for one collector config key (the generic JSON fallback stays available). */
+export interface CollectorConfigField {
   readonly key: string
   readonly label: string
   readonly type: 'string' | 'path' | 'url' | 'number' | 'boolean'
@@ -614,11 +608,11 @@ export interface SenseConfigField {
   /** Stepper increment for a `number` field. */
   readonly step?: number
   /** Static choices; `value` is what gets persisted. */
-  readonly options?: readonly SenseConfigChoice[]
+  readonly options?: readonly CollectorConfigChoice[]
   /** The field accepts a list of strings (an array value). */
   readonly multiple?: boolean
   /**
-   * The field's choices come from the Sense's optional `listOptions`, not from
+   * The field's choices come from the Collector's optional `listOptions`, not from
    * a static list. The Host refuses discovery for fields without this flag.
    */
   readonly discover?: boolean
@@ -628,17 +622,17 @@ export interface SenseConfigField {
 
 /**
  * What the first synchronization of a fresh instance really does. Kept
- * explicit because the three shipped Senses differ, and a single generic
+ * explicit because the three shipped collectors differ, and a single generic
  * sentence would be a lie for at least one of them.
  */
-export type SenseFirstSync =
+export type CollectorFirstSync =
   | 'baseline-only'
   | 'snapshot-events'
   | 'current-window-events'
   | 'unknown'
 
 /** One discovered option for a field that supports remote discovery. */
-export interface SenseOption {
+export interface CollectorOption {
   /** Stable identifier saved into the configuration. */
   readonly value: string
   /** Human-readable name. */
@@ -651,7 +645,7 @@ export interface SenseOption {
   readonly disabledReason?: string
 }
 
-/** One event envelope submitted by a Sense. */
+/** One event envelope submitted by a collector. */
 export interface EventEnvelope {
   readonly eventKey: string
   readonly type: string
@@ -729,15 +723,13 @@ export interface IngestBatch {
   /**
    * `checkpoint-entries/v1`: keyed state entries committed in the SAME SQLite
    * transaction as the events, the root checkpoint and the batch receipt.
-   * Absent = the Sense keeps a single-blob checkpoint.
+   * Absent = the collector keeps a single-blob checkpoint.
    */
   readonly checkpointPatch?: {
     readonly upserts?: readonly CheckpointEntryPatch[]
     readonly deletes?: readonly string[]
   } | null
-  /** False when the Sense knows it read a partial page. */
-  readonly complete?: boolean
-  /** Explicit coverage gap the Sense detected (pagination overflow, upstream hole). */
+  /** Explicit coverage gap the collector detected (pagination overflow, upstream hole). */
   readonly gap?: {
     readonly from?: string
     readonly to?: string
@@ -774,13 +766,13 @@ export interface QunoErrorShape {
   readonly index?: number
 }
 
-/** Health facade over one registered Sense type as the UI sees it. */
-export interface SenseTypeView {
+/** Health facade over one registered collector type as the UI sees it. */
+export interface CollectorTypeView {
   readonly type: string
   readonly displayName: string
   readonly description: string
   readonly contractVersion: string
   readonly implementationVersion: string
-  readonly definition: SenseDefinition
-  readonly instances: readonly SenseInstanceRecord[]
+  readonly definition: CollectorDefinition
+  readonly instances: readonly CollectorInstanceRecord[]
 }

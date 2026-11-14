@@ -1,7 +1,7 @@
 /**
  * The Real Runtime Composer (design §3): mounts the production agent-loop
  * topology (testkit + production AgentLoop + a real JSONL session persistence
- * backend), the real QunoHost over a scratch SQLite home, the fixture FS/organ
+ * backend), the real QunoHost over a scratch SQLite home, the fixture FS/collector
  * surface and the model gateway — then hands the pieces to cases and checks.
  *
  * Every Quno write path here is the real one: Engine commands, the Effect
@@ -28,7 +28,7 @@ import { apply as applyTaskGuard } from '../src/task-guard.ts'
 import { ModelGateway } from './models/gateway.ts'
 import type { ModelRole, NodeContext, NodeRefs } from './models/gateway.ts'
 import type { ModelPlan } from './plan.ts'
-import { EvalOrgan } from './fixtures/organ.ts'
+import { EvalCollector } from './fixtures/collector.ts'
 import { registerFixtureTools } from './fixtures/fs.ts'
 import { JsonlSessionPersistence } from './persistence.ts'
 
@@ -62,10 +62,10 @@ export interface ComposeOptions {
   readonly plan: ModelPlan
   readonly clock: VirtualClock
   readonly persistence: JsonlSessionPersistence
-  readonly organ: EvalOrgan
-  /** The organ instance/source created for this attempt (set by the runner). */
-  organInstanceId: string
-  organSourceId: string
+  readonly collector: EvalCollector
+  /** The collector instance/source created for this attempt (set by the runner). */
+  collectorInstanceId: string
+  collectorSourceId: string
   /** Restart bookkeeping, shared across the compositions of one attempt. */
   readonly restarts: { readonly at: number }[]
 }
@@ -103,7 +103,7 @@ export class EvalRuntime {
     // The production loop: agents.create/resume below go through its factory.
     await mountAgentLoopTestHarness(ctx)
 
-    // Virtual timer service (scheduler + sense retries use it).
+    // Virtual timer service (scheduler + collectors retries use it).
     ctx.provide('timer', {
       timeout: (callback: () => void, delayMs: number): (() => void) => {
         const dispose = clock.timer.setTimeout(callback, delayMs)
@@ -207,10 +207,7 @@ export class EvalRuntime {
     // The quno service must be provided before the main agent mounts its
     // preset (the preset setup resolves it).
     ctx.provide('quno', host)
-    ctx.provide('qunoSenses', host.senses)
-    ctx.provide('qunoIngress', {
-      ingest: (instanceId: string, generation: number, batch: unknown) => host.senses.ingest(instanceId, generation, batch),
-    })
+    ctx.provide('qunoCollectors', host.collectors)
 
     // The permanent conversation must be resident BEFORE host.start(): the
     // startup recovery (reconcile + effects kick) resolves the Router as the
@@ -241,8 +238,8 @@ export class EvalRuntime {
 
     await host.start()
 
-    // The synthetic organ registers on the real senses service (provided above).
-    this.options.organ.mountOn(ctx)
+    // The synthetic collector registers on the real collectors service (provided above).
+    this.options.collector.mountOn(ctx)
 
     host.store.setMainSession(host.qunoId, 'quno-main', 'ok', this.now())
     // The delegated worker resolves its model through the Quno profile.

@@ -13,7 +13,7 @@ import type { RecallResult } from './recall.ts'
 import type { QunoStatusSummary } from './host-face.ts'
 
 /** One declarative config field, as the browser renders it. */
-export interface SenseFieldWire {
+export interface CollectorFieldWire {
   readonly key: string
   readonly label: string
   readonly type: string
@@ -31,8 +31,8 @@ export interface SenseFieldWire {
   readonly advanced?: boolean
 }
 
-/** One Sense instance in the settings view. */
-export interface SenseWire {
+/** One Collector instance in the settings view. */
+export interface CollectorWire {
   readonly id: string
   readonly type: string
   readonly label: string
@@ -59,7 +59,7 @@ export interface SenseWire {
   readonly consecutiveFailures: number | null
   readonly errorCode: string | null
   readonly checkpointRevision: number
-  readonly configFields: readonly SenseFieldWire[]
+  readonly configFields: readonly CollectorFieldWire[]
 }
 
 /** One attention item in the settings view. */
@@ -196,7 +196,7 @@ export interface TaskActivityWire {
   readonly note?: string
 }
 
-/** One ingested Sense event in the panel's recent-events summary. */
+/** One ingested Collector event in the panel's recent-events summary. */
 export interface EventWire {
   readonly id: string
   /** Owning source, for readOriginal / gating decisions. */
@@ -458,7 +458,7 @@ export interface EventDetailWire {
 }
 
 /** One discovered option. */
-export interface SenseOptionWire {
+export interface CollectorOptionWire {
   readonly value: string
   readonly label: string
   readonly description?: string
@@ -467,16 +467,16 @@ export interface SenseOptionWire {
 }
 
 /** Result of one field-option discovery page. */
-export interface SenseOptionsPageWire {
+export interface CollectorOptionsPageWire {
   readonly ok: boolean
-  readonly options: readonly SenseOptionWire[]
+  readonly options: readonly CollectorOptionWire[]
   readonly more: boolean
   readonly detail?: string
   readonly error?: { readonly code: string; readonly message: string }
 }
 
 /** Result of one explicit probe. */
-export interface SenseProbeWire {
+export interface CollectorProbeWire {
   readonly ok: boolean
   readonly code: string
   readonly message: string
@@ -484,23 +484,21 @@ export interface SenseProbeWire {
   readonly durationMs: number
 }
 
-/** One registered Sense type (even before an instance exists). */
-export interface SenseTypeWire {
+/** One registered Collector type (even before an instance exists). */
+export interface CollectorTypeWire {
   readonly type: string
   readonly displayName: string
   readonly description: string
   readonly implementationVersion: string
   readonly contractVersion: string
   readonly registered: boolean
-  readonly configFields: readonly SenseFieldWire[]
+  readonly configFields: readonly CollectorFieldWire[]
   /** `null` when the declaration is unavailable (historical type / plugin unloaded). */
-  readonly runtime: {
-    readonly modes: readonly string[]
+  readonly schedule: {
     readonly defaultIntervalSec: number
     readonly minIntervalSec: number
-    readonly concurrency: number
-    readonly timeoutMs: number
-    readonly quotas: { readonly maxEventsPerCheck: number | null; readonly maxBytesPerCheck: number | null } | null
+    readonly maxRunMs: number
+    readonly quotas: { readonly maxEventsPerRun: number | null; readonly maxBytesPerRun: number | null } | null
   } | null
   /** `null` when the declaration is unavailable. */
   readonly permissions: {
@@ -543,8 +541,8 @@ export interface QunoWireState {
   }
   readonly config: QunoConfig
   readonly main: { readonly sessionId: string | null; readonly state: string; readonly live: boolean }
-  readonly senses: readonly SenseWire[]
-  readonly senseTypes: readonly SenseTypeWire[]
+  readonly collectors: readonly CollectorWire[]
+  readonly collectorTypes: readonly CollectorTypeWire[]
   readonly sources: readonly SourceWire[]
   readonly gaps: readonly { readonly sourceId: string; readonly at: number; readonly reason: string }[]
   readonly attention: readonly AttentionWire[]
@@ -604,14 +602,14 @@ export const actAttentionInput = z.object({
   note: z.string().max(2000).optional(),
 })
 
-export const createSenseInput = z.object({
+export const createCollectorInput = z.object({
   type: z.string().min(1).max(200),
   label: z.string().max(100).optional(),
   config: z.record(z.string(), z.unknown()).optional(),
   desiredState: z.enum(['enabled', 'paused', 'disabled']).optional(),
 })
 
-export const senseCommandInput = z.object({
+export const collectorCommandInput = z.object({
   instanceId: z.string().min(1).max(200),
   action: z.enum(['pause', 'resume', 'disable', 'remove', 'reconfigure']),
   label: z.string().max(100).optional(),
@@ -631,11 +629,11 @@ export const taskActivityInput = z.object({
   limit: z.number().int().min(1).max(100).optional(),
 })
 
-export const probeSenseInput = z.object({
+export const probeCollectorInput = z.object({
   instanceId: z.string().min(1).max(200),
 })
 
-export const senseOptionsInput = z.object({
+export const collectorOptionsInput = z.object({
   type: z.string().min(1).max(200),
   field: z.string().min(1).max(100),
   /** Draft configuration; discovery must not require a complete instance config. */

@@ -26,6 +26,14 @@ export interface LiveEvalCase {
   readonly fixtures: (seed: number, rt: EvalRuntime) => HiddenFacts
   /** Config/policy preparation (acceptMode, quiet hours, …). */
   readonly policy?: (rt: EvalRuntime, facts: HiddenFacts) => Promise<void>
+  /**
+   * Mount the synthetic eval collector instance (default true). `false`
+   * models a world with NO third-party source: `quno_read.collectors` comes
+   * back empty, so the worker has nothing to probe and must report the
+   * capability gap from discovery alone. Set false only for cases whose
+   * subject is the absence of a source — never to make a check pass.
+   */
+  readonly mountEvalCollector?: boolean
   /** Driving timeline: user turns, ingests, faults, waits. */
   readonly steps: readonly EvalStep[]
   /**

@@ -1,6 +1,6 @@
 /**
- * dsh-quno host entry: the always-on Quno Host service, its Sense registry and
- * the restricted ingress facade.
+ * dsh-quno host entry: the always-on Quno Host service and its Collector
+ * registry.
  *
  * The profile row stays thin on purpose: state, scheduling, analysis,
  * delivery and task orchestration all live in `./service.ts`; the browser half
@@ -16,7 +16,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import TYPERT_HOST from './typert.host.ts'
 import { QunoHost, type QunoPluginConfig } from './service.ts'
-import type { QunoSensesService } from './senses.ts'
+import type { QunoCollectorsService } from './collectors.ts'
 import type { CliCapabilityBroker } from './cli-broker.ts'
 
 /** Cordis plugin name used by loader diagnostics. */
@@ -48,12 +48,8 @@ declare module '@deepseek-ai/cordis' {
   interface Context {
     /** The process-wide Quno orchestrator. */
     quno: QunoHost
-    /** Sense registration and lifecycle. */
-    qunoSenses: QunoSensesService
-    /** Generation-checked restricted ingestion entry. */
-    qunoIngress: {
-      ingest: (instanceId: string, generation: number, batch: unknown) => unknown
-    }
+    /** Collector registration and lifecycle. */
+    qunoCollectors: QunoCollectorsService
     /** Structured read-only CLI capabilities registered by host plugins. */
     qunoCli: CliCapabilityBroker
   }
@@ -77,14 +73,10 @@ export async function apply(ctx: Context, config: QunoPluginConfig = {}): Promis
   const host = new QunoHost(ctx, { ...config, ...(root === undefined ? {} : { root }) }, logger)
 
   // Provided before any await so the preset rows (which inject `quno`) and the
-  // Sense plugins (which inject `qunoSenses`) can mount in the same boot.
+  // Collector plugins (which inject `qunoCollectors`) can mount in the same boot.
   ctx.provide('quno', host)
-  ctx.provide('qunoSenses', host.senses)
+  ctx.provide('qunoCollectors', host.collectors)
   ctx.provide('qunoCli', host.cli)
-  ctx.provide('qunoIngress', {
-    ingest: (instanceId: string, generation: number, batch: unknown) =>
-      host.senses.ingest(instanceId, generation, batch),
-  })
 
   const disposeSessionEvents = ctx.on('session/event', (session, event) => {
     host.observeSession(String(session.id), event)

@@ -24,7 +24,7 @@ import { aggregateUsage } from './usage.ts'
 import { virtualClock, EvalRuntime, writeEvidence } from './runtime.ts'
 import { JsonlSessionPersistence } from './persistence.ts'
 import { ScenarioDriver } from './driver.ts'
-import { EvalOrgan } from './fixtures/organ.ts'
+import { EvalCollector } from './fixtures/collector.ts'
 import { TraceRecorder } from './trace.ts'
 import { caseReport, writeReports } from './report.ts'
 import type { CaseReport, RunReport } from './report.ts'
@@ -356,7 +356,7 @@ async function runAttemptShared(input: {
   const home = mkdtempSync(join(tmpdir(), `quno-eval-${entry.id}-`))
   const clock = virtualClock()
   const persistence = new JsonlSessionPersistence(join(home, 'sessions'))
-  const organ = new EvalOrgan()
+  const collector = new EvalCollector()
   const recordingFile = join(attemptDir, 'model-requests.jsonl')
 
   // Live mounts the PRODUCTION adapter (llm-pi-ai over the pi-ai catalog);
@@ -391,7 +391,7 @@ async function runAttemptShared(input: {
   }
 
   const trace = new TraceRecorder({ runId, caseId: entry.id, attempt }, attemptDir, clock.now)
-  const composeOptions = { runId, caseId: entry.id, attempt, home, evidenceDir: attemptDir, gateway, plan: input.modelPlan, clock, persistence, organ, organInstanceId: '', organSourceId: '', restarts: [] as { at: number }[] }
+  const composeOptions = { runId, caseId: entry.id, attempt, home, evidenceDir: attemptDir, gateway, plan: input.modelPlan, clock, persistence, collector, collectorInstanceId: '', collectorSourceId: '', restarts: [] as { at: number }[] }
   const runtime = new EvalRuntime(composeOptions)
   let active: EvalRuntime = runtime
   const startedAt = Date.now()
@@ -400,9 +400,14 @@ async function runAttemptShared(input: {
   try {
     await runtime.start()
     gateway.setContextResolver((sessionId, role) => resolveNodeContext(active, sessionId, role))
-    const instanceId = await organ.createInstance(rtSenses(runtime))
-    composeOptions.organInstanceId = instanceId
-    composeOptions.organSourceId = organ.sourceIdOf(instanceId)
+    // Live cases may opt out of the synthetic source (mountEvalCollector:
+    // false) to model the absence of any third-party source.
+    const wantsCollector = !(isLiveCase(entry) && entry.mountEvalCollector === false)
+    const instanceId = wantsCollector
+      ? await collector.createInstance(rtCollectors(runtime), {}, () => runtime.options.clock.fireDue(10))
+      : ''
+    composeOptions.collectorInstanceId = instanceId
+    composeOptions.collectorSourceId = instanceId === '' ? '' : collector.sourceIdOf(instanceId)
     const driver = new ScenarioDriver(
       runtime,
       async () => {
@@ -411,7 +416,7 @@ async function runAttemptShared(input: {
         active = fresh
         return fresh
       },
-      organ,
+      collector,
       instanceId,
     )
     if (isLive) {
@@ -539,9 +544,9 @@ async function runAttempt(entry: EvalCase, options: RunCaseOptions & { readonly 
   })
 }
 
-/** Get the senses service face the organ needs (typed narrowly). */
-function rtSenses(rt: EvalRuntime): { createInstance(input: { type: string; config: Record<string, unknown> }): { readonly ok: boolean; readonly instance?: { readonly id: string }; readonly error?: unknown } } {
-  return rt.host.senses
+/** Get the collectors service face the eval collector needs (typed narrowly). */
+function rtCollectors(rt: EvalRuntime): { createInstance(input: { type: string; config: Record<string, unknown> }): { readonly ok: boolean; readonly instance?: { readonly id: string }; readonly error?: unknown } } {
+  return rt.host.collectors
 }
 
 /** Record each check as its stage's terminal trace event. */

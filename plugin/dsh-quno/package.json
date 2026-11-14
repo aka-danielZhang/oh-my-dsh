@@ -1,7 +1,7 @@
 {
   "name": "dsh-quno",
-  "version": "0.2.1",
-  "description": "Quno: a persistent personal assistant with one lifelong conversation, Sense perception, an event inbox, attention tracking, a unified notification outbox and delegated background tasks",
+  "version": "0.3.0",
+  "description": "Quno: a persistent personal assistant with one lifelong conversation, Host-scheduled collectors, an event inbox, attention tracking, a unified notification outbox and delegated background tasks",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

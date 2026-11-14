@@ -256,7 +256,7 @@ export const exchangeCases: readonly EvalCase[] = [
     tags: ['eval', 'policy'],
     model: { router: 'scripted', worker: 'scripted' },
     setup: async (rt) => {
-      await rt.host.updateConfig({ patch: { acceptMode: 'observe', autoSourceIds: [rt.options.organSourceId] } })
+      await rt.host.updateConfig({ patch: { acceptMode: 'observe', autoSourceIds: [rt.options.collectorSourceId] } })
     },
     steps: [
       { kind: 'script', role: 'router', build: () => toolTurn('quno_eval', {}, 'pc-eval-1') },
@@ -280,9 +280,9 @@ export const exchangeCases: readonly EvalCase[] = [
   },
   {
     id: 'exchange-roundtrip',
-    title: 'Worker 经 Exchange 向 Organ 读取，结果回流',
+    title: 'Worker 经 Exchange 向采集器读取，结果回流',
     priority: 'p1',
-    requirement: 'quno_exchange → organ 响应 → 结果作为 TicketInput 回到 worker → report 引用结果',
+    requirement: 'quno_exchange → 采集器响应 → 结果作为 TicketInput 回到 worker → report 引用结果',
     tags: ['exchange', 'worker'],
     model: { router: 'scripted', worker: 'scripted' },
     setup: async (rt) => {
@@ -298,7 +298,7 @@ export const exchangeCases: readonly EvalCase[] = [
       worker: [],
     },
     steps: [
-      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `organ:${drv.organInstanceId}`, payload: { query: 'today' } }, 'er-worker-exchange-1') },
+      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `collector:${drv.collectorInstanceId}`, payload: { query: 'today' } }, 'er-worker-exchange-1') },
       { kind: 'script', role: 'worker', build: () => textTurn('已发起异步读取。') },
       { kind: 'script', role: 'worker', build: () => toolTurn('quno_worker_report', { state: 'ready', summary: '日历数据：今天有 2 个事件。' }, 'er-worker-ready-1') },
       { kind: 'script', role: 'worker', build: () => textTurn('已提交。') },
@@ -327,9 +327,9 @@ export const exchangeCases: readonly EvalCase[] = [
   },
   {
     id: 'organ-discovery',
-    title: 'Worker 经 quno_read.organs 发现端点并成功交换',
+    title: 'Worker 经 quno_read.collectors 发现端点并成功交换',
     priority: 'p1',
-    requirement: 'Worker 先 quno_read 发现真实挂载的 organ 端点（发现链路为真），quno_exchange 命中该端点，结果回流进报告；不再靠猜端点名',
+    requirement: 'Worker 先 quno_read 发现真实挂载的采集器端点（发现链路为真），quno_exchange 命中该端点，结果回流进报告；不再靠猜端点名',
     tags: ['exchange', 'worker', 'discovery'],
     model: { router: 'scripted', worker: 'scripted' },
     setup: async (rt) => {
@@ -338,9 +338,9 @@ export const exchangeCases: readonly EvalCase[] = [
     scripts: {
       router: [
         toolTurn('quno_eval', {}, 'od-eval-1'),
-        toolTurn('quno_eval_decide', { kind: 'accept', title: '读取 organ 数据', goal: '通过 organ 异步读取数据并汇报。' }, 'od-decide-1'),
+        toolTurn('quno_eval_decide', { kind: 'accept', title: '读取采集器数据', goal: '通过采集器异步读取数据并汇报。' }, 'od-decide-1'),
         textTurn('已受理。'),
-        textTurn('organ 数据读取完成。'),
+        textTurn('采集器数据读取完成。'),
       ],
       worker: [],
     },
@@ -349,13 +349,13 @@ export const exchangeCases: readonly EvalCase[] = [
       { kind: 'script', role: 'worker', build: (rtv) => {
         // The endpoint comes from the SAME discovery face the tool exposes —
         // the scripted worker does not hardcode it.
-        const organ = rtv.host.organEndpoints().at(-1)
-        return toolTurn('quno_exchange', { responder: organ?.endpoint ?? 'organ:none', payload: { op: 'im.group.recent' } }, 'od-exchange-1')
+        const endpoint = rtv.host.collectorEndpoints().at(-1)
+        return toolTurn('quno_exchange', { responder: endpoint?.endpoint ?? 'collector:none', payload: { op: 'im.group.recent' } }, 'od-exchange-1')
       } },
       { kind: 'script', role: 'worker', build: () => textTurn('已发起异步读取。') },
-      { kind: 'script', role: 'worker', build: () => toolTurn('quno_worker_report', { state: 'ready', summary: 'organ 返回数据 1 条。' }, 'od-ready-1') },
+      { kind: 'script', role: 'worker', build: () => toolTurn('quno_worker_report', { state: 'ready', summary: '采集器返回数据 1 条。' }, 'od-ready-1') },
       { kind: 'script', role: 'worker', build: () => textTurn('已提交。') },
-      { kind: 'ingest', envelopes: [imMention('od-trigger-1', '@Quno 用 organ 查一下数据', Date.parse('2026-11-06T09:50:00Z'))] },
+      { kind: 'ingest', envelopes: [imMention('od-trigger-1', '@Quno 用采集器查一下数据', Date.parse('2026-11-06T09:50:00Z'))] },
     ],
     checks: (rt) => {
       const repo = rt.host.repo
@@ -364,14 +364,14 @@ export const exchangeCases: readonly EvalCase[] = [
       const calls = toolCalls(rt, sessionId)
       const results = toolResults(rt, sessionId)
       const exchanges = repo.listExchanges(rt.host.qunoId, { limit: 10 })
-      const organViews = rt.host.organEndpoints()
+      const collectorViews = rt.host.collectorEndpoints()
       const readIndex = calls.findIndex(call => call.name === 'quno_read')
       const exchangeIndex = calls.findIndex(call => call.name === 'quno_exchange')
       return {
         chain: [
           check('worker.execution', 'discovered-before-exchange', readIndex >= 0 && exchangeIndex > readIndex, 'quno_read precedes quno_exchange', calls.map(call => call.name)),
-          check('worker.execution', 'organs-carry-mounted-endpoint', results.some(text => text.includes('"organs"') && organViews.length > 0 && organViews.every(organ => text.includes(organ.endpoint))), 'organs list the mounted endpoint', { views: organViews.map(organ => organ.endpoint) }),
-          check('worker.execution', 'endpoint-from-discovery', exchanges.length === 1 && organViews.some(organ => exchanges[0]?.responder === organ.endpoint), 'responder is a listed endpoint', exchanges.map(exchange => exchange.responder)),
+          check('worker.execution', 'collectors-carry-mounted-endpoint', results.some(text => text.includes('"collectors"') && collectorViews.length > 0 && collectorViews.every(view => text.includes(view.endpoint))), 'collectors list the mounted endpoint', { views: collectorViews.map(organ => organ.endpoint) }),
+          check('worker.execution', 'endpoint-from-discovery', exchanges.length === 1 && collectorViews.some(view => exchanges[0]?.responder === view.endpoint), 'responder is a listed endpoint', exchanges.map(exchange => exchange.responder)),
           check('worker.execution', 'organ-answered', exchanges[0]?.status === 'responded' || exchanges[0]?.status === 'consumed', 'responded/consumed', exchanges[0]?.status ?? 'none'),
           check('worker.report', 'report-completed', ticket?.ended?.outcome === 'completed', 'completed', ticket?.ended?.outcome ?? 'open'),
         ],
@@ -382,31 +382,31 @@ export const exchangeCases: readonly EvalCase[] = [
   },
   {
     id: 'organ-whitelist-reject',
-    title: '白名单外 payload 被 organ 拒绝且原因回流',
+    title: '白名单外 payload 被采集器拒绝且原因回流',
     priority: 'p1',
-    requirement: '未知 op、越界 limit、写意图 payload 均被 failExchange（unsupported-op/invalid-args），原因作为 response Input 回流且无成功交换；白名单矩阵本体由 dsh-quno-sense-yzj 包内测试钉死，此处验证拒绝链路',
+    requirement: '未知 op、越界 limit、写意图 payload 均被 failExchange（unsupported-op/invalid-args），原因作为 response Input 回流且无成功交换；白名单矩阵本体由 dsh-quno-collector-yzj 包内测试钉死，此处验证拒绝链路',
     tags: ['exchange', 'worker', 'third-party', 'whitelist'],
     model: { router: 'scripted', worker: 'scripted' },
     setup: async (rt) => {
       await rt.host.updateConfig({ patch: { acceptMode: 'auto' } })
-      rt.options.organ.setWhitelist(true)
+      rt.options.collector.setWhitelist(true)
     },
     scripts: {
       router: [
         toolTurn('quno_task', {
           title: '整理云之家会话',
-          prompt: '通过只读云之家 organ 查询最近会话并整理。',
+          prompt: '通过只读云之家采集器查询最近会话并整理。',
         }, 'ow-delegate-1'),
         textTurn('好，我来整理会话，完成后告诉你。'),
-        textTurn('三条查询都被 organ 以白名单理由拒绝，无法整理会话。'),
+        textTurn('三条查询都被采集器以白名单理由拒绝，无法整理会话。'),
       ],
       worker: [],
     },
     steps: [
-      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `organ:${drv.organInstanceId}`, payload: { op: 'im.message.send', params: { groupId: 'g1', text: 'hi' } } }, 'ow-exchange-send') },
-      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `organ:${drv.organInstanceId}`, payload: { op: 'im.group.recent', params: { limit: 99 } } }, 'ow-exchange-overbound') },
-      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `organ:${drv.organInstanceId}`, payload: { op: 'im.status.post' } }, 'ow-exchange-unknown') },
-      { kind: 'script', role: 'worker', build: () => toolTurn('quno_worker_report', { state: 'blocked', summary: '三条查询均被 organ 白名单拒绝（unsupported-op/invalid-args）。', question: { question: '是否调整查询范围后重试？' } }, 'ow-blocked-1') },
+      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `collector:${drv.collectorInstanceId}`, payload: { op: 'im.message.send', params: { groupId: 'g1', text: 'hi' } } }, 'ow-exchange-send') },
+      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `collector:${drv.collectorInstanceId}`, payload: { op: 'im.group.recent', params: { limit: 99 } } }, 'ow-exchange-overbound') },
+      { kind: 'script', role: 'worker', build: (_rt, drv) => toolTurn('quno_exchange', { responder: `collector:${drv.collectorInstanceId}`, payload: { op: 'im.status.post' } }, 'ow-exchange-unknown') },
+      { kind: 'script', role: 'worker', build: () => toolTurn('quno_worker_report', { state: 'blocked', summary: '三条查询均被采集器白名单拒绝（unsupported-op/invalid-args）。', question: { question: '是否调整查询范围后重试？' } }, 'ow-blocked-1') },
       { kind: 'script', role: 'worker', build: () => textTurn('已如实报告。') },
       // A Human turn is what carries quno_task delegation (the routing guard
       // refuses quno_task on Eval turns); no ingest is needed for this case.
@@ -425,7 +425,7 @@ export const exchangeCases: readonly EvalCase[] = [
           check('worker.execution', 'three-exchanges-attempted', exchanges.length === 3, 3, exchanges.map(exchange => exchange.responder)),
           check('worker.execution', 'all-refused-never-responded', exchanges.length > 0 && exchanges.every(exchange => exchange.status === 'failed'), 'all failed', exchanges.map(exchange => exchange.status)),
           check('input.delivery', 'reasons-relayed', inputs.length === 3 && inputs.every(input => /异步读取失败：(unsupported-op|invalid-args)：/.test(input.text ?? '')), 'refusal reasons as response inputs', inputs.map(input => (input.text ?? '').slice(0, 80))),
-          // The organ refusal is asynchronous: it reaches the worker as a
+          // The collector refusal is asynchronous: it reaches the worker as a
           // response Input turn, not as a quno_exchange tool result.
           check('worker.execution', 'refusal-visible-to-worker', sessionEvents(rt, sessionId).some(event => JSON.stringify(event).includes('异步读取失败')), 'refusal reasons reach the worker session', sessionEvents(rt, sessionId).filter(event => JSON.stringify(event).includes('异步读取失败')).slice(0, 3).map(event => JSON.stringify(event).slice(0, 120))),
           check('worker.report', 'blocked-not-ready', report?.state === 'blocked', 'blocked', report?.state ?? 'none'),
@@ -441,7 +441,7 @@ export const exchangeCases: readonly EvalCase[] = [
     id: 'third-party-tool-unavailable',
     title: '第三方 CLI 通道未接入时明确失败，不伪造查询结果',
     priority: 'p1',
-    requirement: 'Worker 无 shell 且猜测的 organ 不存在：工具拒绝可观测、无 Exchange 假成功、blocked 如实回流',
+    requirement: 'Worker 无 shell 且猜测的采集器端点不存在：工具拒绝可观测、无 Exchange 假成功、blocked 如实回流',
     tags: ['exchange', 'worker', 'third-party', 'capability'],
     model: { router: 'scripted', worker: 'scripted' },
     scripts: {
@@ -454,10 +454,10 @@ export const exchangeCases: readonly EvalCase[] = [
         textTurn('当前没有已接入的云之家按需查询通道，无法查询最近会话；需要先接入该能力或由你提供命令输出。'),
       ],
       worker: [
-        toolTurn('quno_exchange', { responder: 'organ:shell', payload: { command: 'yzj-cli im group recent --limit 20 --page 1' } }, 'tu-worker-exchange-1'),
+        toolTurn('quno_exchange', { responder: 'collector:shell', payload: { command: 'yzj-cli im group recent --limit 20 --page 1' } }, 'tu-worker-exchange-1'),
         toolTurn('quno_worker_report', {
           state: 'blocked',
-          summary: 'Worker 没有 shell，organ:shell 也未挂载，无法查询云之家最近会话。',
+          summary: 'Worker 没有 shell，collector:shell 也未挂载，无法查询云之家最近会话。',
           question: { question: '是否先接入云之家只读查询能力，或提供命令输出？' },
         }, 'tu-worker-blocked-1'),
         textTurn('已如实报告能力缺失。'),
@@ -475,7 +475,7 @@ export const exchangeCases: readonly EvalCase[] = [
       const report = ticket === undefined ? undefined : repo.listAssignmentsByTicket(ticket.id).at(-1)?.report
       return {
         chain: [
-          check('worker.execution', 'missing-organ-refused', workerResults.some(text => /no mounted Organ|没有挂载|unknown-responder/.test(text)), 'unknown-responder refusal', workerResults),
+          check('worker.execution', 'missing-organ-refused', workerResults.some(text => /no mounted collector|没有挂载|unknown-responder/.test(text)), 'unknown-responder refusal', workerResults),
           check('worker.execution', 'no-shell-or-fake-exchange', workerCalls.every(call => call.name !== 'bash') && exchanges.length === 0, 'no bash and no persisted exchange', { calls: workerCalls.map(call => call.name), exchanges: exchanges.map(exchange => exchange.status) }),
           check('worker.report', 'blocked-not-ready', report?.state === 'blocked', 'blocked', report?.state ?? 'none'),
         ],
@@ -495,7 +495,7 @@ export const exchangeCases: readonly EvalCase[] = [
     model: { router: 'scripted', worker: 'scripted' },
     setup: async (rt) => {
       // authorize the source so the eval turn actually runs (observe mode).
-      await rt.host.updateConfig({ patch: { acceptMode: 'observe', autoSourceIds: [rt.options.organSourceId] } })
+      await rt.host.updateConfig({ patch: { acceptMode: 'observe', autoSourceIds: [rt.options.collectorSourceId] } })
     },
     steps: [
       { kind: 'script', role: 'router', build: () => toolTurn('memory_remember', { content: '不该被写入的记忆' }, 'mi-mem-1') },

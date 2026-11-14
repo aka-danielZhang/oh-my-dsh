@@ -138,7 +138,7 @@ const QUNO_GUIDANCE = `# 你是 Quno
 - accept 需要 title 与 goal，并写清依据；ignore/stop 也要给出原因。
 - 当前自动策略是 off / observe / auto：observe 下 inferred 工作只记录 would_accept，不会创建任务；这是期望行为，不要试图绕过。
 - 需要告诉用户时用 quno_notify；不要在 Eval 回合写长期记忆、创建提醒或直接执行。
-- 不要等待异步结果；需要的读取先用 quno_read 的 organs 列表查到可用 organ 端点（不要猜端点名），再用 quno_exchange 发起，结果会作为后续输入回来。
+- 不要等待异步结果；需要的读取先用 quno_read 的 collectors 列表查到可用采集器端点（不要猜端点名），再用 quno_exchange 发起，结果会作为后续输入回来。
 
 ## 你只路由，不执行
 - 凡需要独立执行或依赖外部证据的任务，都必须交给任务执行层：Human Turn 用 quno_task start；Eval 回合用 quno_eval_decide accept。
@@ -912,12 +912,12 @@ export function apply(ctx: Context): void {
 	})));
 	tools.push(ctx.tools.register(defineTool({
 		name: "quno_exchange",
-		description: "向已注册的 Source/Organ 发起一次受限异步读取（不会阻塞本轮）。立即返回 requestId；结果稍后作为 Eval/汇报输入回来。",
+		description: "向已注册采集器的按需查询面发起一次受限异步读取（不会阻塞本轮）。立即返回 requestId；结果稍后作为 Eval/汇报输入回来。",
 		parameters: {
 			responder: {
 				type: "string",
 				required: true,
-				description: "organ:<instanceId>，从 quno_read 的 organs 列表获取；不要猜端点名"
+				description: "collector:<instanceId>，从 quno_read 的 collectors 列表获取；不要猜端点名"
 			},
 			kind: {
 				type: "string",
@@ -1039,7 +1039,7 @@ export function apply(ctx: Context): void {
 	})));
 	tools.push(ctx.tools.register(defineTool({
 		name: "quno_mute",
-		description: "短期静默：在指定时间内不主动打扰用户（只影响 Quno 通知，不影响 Sense 采集与分析）。用于\"今天别提醒\"\"接下来两小时别打扰\"这类短期指令；不要把它们写进长期记忆。",
+		description: "短期静默：在指定时间内不主动打扰用户（只影响 Quno 通知，不影响 Collector 采集与分析）。用于\"今天别提醒\"\"接下来两小时别打扰\"这类短期指令；不要把它们写进长期记忆。",
 		parameters: {
 			minutes: {
 				type: "integer",
@@ -1247,8 +1247,8 @@ function renderStatus(status: ReturnType<QunoServiceFace['statusSummary']>) {
 		`任务：进行中 ${String(status.tasks.running)}，需要处理 ${String(status.tasks.interrupted)}`
 	];
 	if (!status.watchdog.healthy) parts.push(`运行时健康：${status.watchdog.findings.map((finding: { code: string; count: number }) => `${finding.code}(${String(finding.count)})`).join("，")}`);
-	if (status.senses.length > 0) parts.push(`来源：${status.senses.map((sense: { label: string; type: string; health: string; stale?: boolean }) => `${sense.label}=${sense.stale ? "陈旧" : sense.health}`).join("，")}`);
-	else parts.push("来源：尚未配置感知器");
+	if (status.collectors.length > 0) parts.push(`来源：${status.collectors.map((collectors: { label: string; type: string; health: string; stale?: boolean }) => `${collectors.label}=${collectors.stale ? "陈旧" : collectors.health}`).join("，")}`);
+	else parts.push("来源：尚未配置采集器");
 	return parts.join("\n");
 }
 export { HIDE_GLOBAL_TOOLS, MAIN_ROUTING_TOOLS, QUNO_GUIDANCE };
