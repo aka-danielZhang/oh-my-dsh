@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.2.7] - 2026-11-15
+
+### Changed
+
+- Migrated connection status to the official `connectionStatusOf(fiber)` handle on the 0.2.2-rc.3 baseline: the fork-only `mcp-client/status` event retired with the fork's 0.2.2-rc.3+zw.1 merge, and the upstream client now carries the status surface natively. The dependency resolves back to the official registry package (`@deepseek-ai/dsh-mcp-client@0.2.2-rc.3`), shrinking the fork publish set by one.
+- The spawn config is built in the schema-input shape, so new transport-option defaults (`closeTimeoutMs`, `expandTemplates`) materialize through `McpClient.Config` instead of being hardcoded here.
+
 ## [0.2.6] - 2026-09-07
 
 ### Fixed

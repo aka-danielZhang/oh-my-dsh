@@ -1,6 +1,6 @@
 {
   "name": "dsh-mcp-settings",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Settings-driven MCP server manager, inventory Remote, and Web settings UI for DeepSeek Harness",
   "type": "module",
   "packageManager": "pnpm@11.7.0",

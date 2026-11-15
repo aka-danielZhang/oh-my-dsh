@@ -2,6 +2,14 @@
 
 Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的，不在这里重复。发版时 `scripts/release-notes.mjs` 抽取对应 `## [version]`（没有则回退 `## [Unreleased]
 
+## [0.4.0-rc.10] - 2026-11-15
+
+### Changed
+
+- runtime 升级到 fork `v0.2.2-rc.3+zw.1`（上游 0.2.2 整线并入）：Node 24.9、pi-ai 1.3.0、Web Search 默认 DeepSeek Search API、设置页与侧栏多处上游更新；fork 扩展面新增会话头整槽链式替换、会话级队列展示过滤与只读查看提交门（`session/setInteractionMode`）。fork 立仓补丁 `mcp-client/status` 事件随上游官方 status 面落地退役，fork 发布面收敛到 17 包。
+- 随包插件更新：`dsh-mcp-settings` 0.2.7（连接状态迁官方 `connectionStatusOf`，依赖回归官方 registry 包）、`dsh-ohmymemo` 0.3.3 与 `dsh-web-search-toggle` 0.1.5（0.2.2 agent 工厂与 prompt 组装面适配）；其余随包插件内容不变，全部按新基线重建。
+- Quno 及其采集器继续不随 Desktop 交付（本分支一度打开的随包开关随本轮关闭；runtime 为其预留的扩展面在无插件时保持惰性），待实机验收后回归。
+
 ## [0.4.0-rc.9] - 2026-11-06
 
 ### Changed

@@ -47,7 +47,7 @@
       "platform": "web"
     },
     "desktop": {
-      "ship": true
+      "ship": false
     }
   },
   "scripts": {
