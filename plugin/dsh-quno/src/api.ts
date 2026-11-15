@@ -11,7 +11,7 @@
 
 import { localClock, zonedToEpoch } from './util.ts'
 import type { QunoHost } from './service.ts'
-import { presentTask } from './presentation.ts'
+import { presentTask, workerLabelOf } from './presentation.ts'
 import type {
   AttentionWire,
   EvalDetailWire,
@@ -678,6 +678,7 @@ function toTaskWire(repo: DomainRepository, ticket: TicketRecord): TaskWire {
     title: ticket.title,
     status,
     presentationStatus: presentation.status,
+    workerLabel: workerLabelOf(ticket.id),
     activityKind: presentation.activityKind,
     lastActivityAt: presentation.lastActivityAt,
     canCancel: presentation.canCancel,
@@ -718,6 +719,7 @@ export async function buildWorkerDetail(
     return {
       ticketId: request.ticketId,
       title: '',
+      workerLabel: workerLabelOf(request.ticketId),
       status: 'dropped',
       executorSessionId: null,
       canStop: false,
@@ -734,6 +736,7 @@ export async function buildWorkerDetail(
   return {
     ticketId: ticket.id,
     title: ticket.title,
+    workerLabel: workerLabelOf(ticket.id),
     status: presentation.status,
     executorSessionId: assignment?.executorSessionId ?? null,
     canStop: presentation.canCancel,

@@ -37,3 +37,21 @@
 - fork：通用 `interactionMode` 字段 + SessionController Host 提交门（v2 §9.4）；QueueDock seam 上收（§18.3 沿用）；会话头 chrome 整头接管评估。
 - 实机验收轮：§15.1 两行实机验收 + 键盘/读屏/窄屏。
 - P2：真实活动标签细化、persistent resultRevision 合并、详情期刷新提速。
+
+## 同日第二轮：v2 全量核对与补齐
+
+逐节核对 v2 后补齐的缺口：
+
+| v2 条目 | 补齐实现 |
+|---|---|
+| §6.2 隐藏凭据/环境变量 | 新增 `src/redaction.ts`（纯：denylist 递归 + 凭据文本模式 scrub + 有界）与 `client/tool-cards.tsx`——`quno_cli_call`/`quno_exchange` keyed toolview 遮蔽 stock 原始参数卡；模型幻觉出的未声明 `token` 参数与自由文本密钥一律 `=<已脱敏>` |
+| §7.3 读屏语义 | 工作列表改语义化 `ul/li`（每行一个 button）；行状态文本加 `role="status"`（实际变化才播报） |
+| §4.2 aria-expanded | 「工作」入口按右栏状态输出 `aria-expanded` |
+| §6.3 缺失页焦点 | 缺失页键盘进入时聚焦「返回 Quno」（keyboard 随 WorkerMissing 传递） |
+| §9.1/§10 WorkerProjection 增量 | `workerLabel` 进 `TaskWire`（可选）与 `WorkerDetailWire`（必填），client 优先取 wire、派生兜底 |
+| §2.3/§2.4 视觉规格 | 摘要正文 14px/22px；按钮换 stock 原语，删除手写 `#fff` 字面色 |
+| §13 必加评测 | 新增 `worker-missing-session-no-auto-create`（P0 门，scripted 全绿） |
+
+**8 条必加评测覆盖映射**（v2 §13）：`main-conversation-no-worker-leak` ≈ 存量 `main-task-quiet-success`（LEAK_MARKERS 断言同口径）；`worker-missing-session-no-auto-create` 本轮新增（scripted）；`worker-navigation-does-not-restart`/`worker-result-once-after-restart` 的状态层语义由存量 `worker-restart`/`worker-handback` 覆盖（relay-once/不重启执行）；`work-entry-count-and-empty-state`/`worker-list-open-and-return-keyboard`/`worker-list-narrow-and-long-content`/`worker-inspect-reject-submission-while-events-continue`（依赖 fork 提交门）为 DOM 层 L4，实机验收轮执行。
+
+**核对后仍明确的剩余项（全部依赖 fork 流程）**：§9.4 Host 提交门（通用 `interactionMode` + SessionController 门）、§6.1 stock 会话头 chrome 隐藏（single 槽整头替换）、§10 QueueDock 上收（v1 插件侧克隆退役）。插件侧无法安全实现这三项，需走 `docs/harness-bump/README.md` 的 fork 合并 → zw 发版 → 本仓 bump revision 流程。

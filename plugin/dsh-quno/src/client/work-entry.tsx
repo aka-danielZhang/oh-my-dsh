@@ -39,6 +39,11 @@ export function QunoWorkEntry(props: WorkEntryProps): React.ReactElement | null 
   const preset = props.useSessions(sessions => sessions.byId[props.sessionId]?.projectionValues?.agentPreset)
   if (preset !== 'quno') return null
   const counts = workEntryCounts(snapshot.state?.tasks ?? null)
+  // v2 §4.2 aria-expanded: the right column is the disclosure target. The
+  // shell state is not a subscribable face, so this reads the DOM at render —
+  // the store tick re-renders the row and keeps the value approximately live.
+  const expanded = typeof document !== 'undefined'
+    && document.querySelector('[data-quno-panel]') !== null
   return (
     <button
       type="button"
@@ -46,6 +51,7 @@ export function QunoWorkEntry(props: WorkEntryProps): React.ReactElement | null 
       data-tone={counts.needsYou > 0 ? 'warn' : 'accent'}
       data-quno-work-entry=""
       aria-label={workEntryAriaLabel(counts, props.t)}
+      aria-expanded={expanded}
       onClick={() => { props.face?.openTab(QUNO_PANEL_KIND, { params: { view: 'task' } }) }}
     >
       <span aria-hidden="true">{props.t('workEntry')}</span>

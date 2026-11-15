@@ -736,6 +736,7 @@ Notice:    pending → prepared → inbox-durable → presented
 - **只读边界**：接管是组件级（不是 CSS 隐藏），用户提交路径在 UI 上不存在；程序输入（TicketInput/Worker 输出/flush）不经 composer，天然不受影响（v2 §9.4）。**Host 侧提交门未建**：基线 prompt 路径无模式拒绝，通用 `interactionMode` 字段 + SessionController 提交门走 fork 流程（§18.4 后续项，v2 §9.4 预留分支）；在 fork 落地前不得声称 Host 级只读。
 - **导航（v2 §3/§9.3）**：client-only（`work-navigation.ts`），不进 SQLite、不触发 launch/resume/stop；returnContext（mainSessionId/右栏/滚动）走 window sessionStorage，丢失降级为普通返回（主会话 id 恒以轮询快照为准）；`workerDetail` Remote 由 Host 按 ticketId 解析 executorSessionId 并回显身份，客户端不传任意 sessionId；打开失败/未分配/不存在分别呈现诚实缺失页（v2 §5.4），绝不自动创建会话。
 - **焦点纪律（v2 §6.3）**：键盘激活（click `detail===0`）才移动焦点——进入 Worker 聚焦「返回 Quno」（一次性 sessionStorage 旗标），返回主对话聚焦「工作」入口；鼠标不抢焦点。
+- **工具卡脱敏（v2 §6.2）**：`quno_cli_call`/`quno_exchange` 的 keyed toolview 卡（`tool-cards.tsx`）遮蔽 stock 卡，只渲染 `capability.operation` + denylist 红action 参数摘要 + 有界结果（`redaction.ts`，模型幻觉出的未声明凭据参数与自由文本密钥一律 `=<已脱敏>`）；一条 redaction 法则、两个载体（卡与 v1 时间线同源）。
 - **样式**：`QUNO_WORK_CSS`（`data-plugin-css` 幂等），只用 `--dsw-*` token；1100/720/480px 三档响应式，长 ID `overflow-wrap: anywhere`。
 - 运行日志的逐行 follow（`ctx.jobs` Remote stream）v1 未接，任务详情以结果/计划/产物 + 子会话入口呈现（偏差 #14）。
 
@@ -764,6 +765,7 @@ Notice:    pending → prepared → inbox-durable → presented
 | `shell.overlay`（id `quno-onboarding`） | 三栏接入向导（创建/编辑同一表单，`min(1120px, viewport-64px)`） | 2026-10-27 新增 |
 | Typert Remote `quno` | `taskActivity` 退役（v2 §10 不自绘 transcript）；新增 `workerDetail`（ticketId → executorSessionId，Host 侧解析 + 身份回显）；`taskCommand` 增 `answer`（回答进同一 Ticket） | 2026-11-05 新增 detail 面，2026-11-15 修订 |
 | `conversation.composer`（chain elect，priority -10） | executor 会话只读接管：只读说明 + 可折叠任务摘要（§13.6b；subagent 只读 composer 同型先例） | 2026-11-15 新增 |
+| `tool.call.toolview` key `quno_cli_call`/`quno_exchange` | 脱敏工具卡（§13.6b）：denylist 参数 + 有界结果，遮蔽 stock 原始参数卡 | 2026-11-15 新增 |
 | `settings.section` / `settings.general.item` | Quno 设置页 / 总开关 | 已落地 |
 | Typert Remote `quno` | 11 方法（含新增 `eventsRecent`；任务列表随 `state()` 携带 plan/prompt） | 已落地 |
 
@@ -974,6 +976,7 @@ dsh-quno-collector-<name>   各来源采集器（日历、订阅源、云之家�
 | progress 不打扰（P0 发布门） | `task-report-progress-no-chat`：两条 progress 只更新任务投影，主对话恰好一次结果 relay |
 | 工作入口与 Worker 列表（实机验收，v2 §13） | 顶栏「工作」计数正确（needs-you 不叠加）、空态可进、无横向滚动；Worker 行一一对应、状态真实；行直开原生会话、无嵌套按钮 |
 | Worker 只读会话（实机验收，v2 §13） | 打开正确 executorSessionId；原生内容 + 无 composer（chain 接管）；返回导航不触发 launch/resume/stop；程序事件继续追加；伪造 sessionId 读不到其他任务 |
+| Worker 缺失不自动创建（P0 发布门） | `worker-missing-session-no-auto-create`：未知 ticket 返回 `unknown-ticket` 且 executorSessionId 为 null；重复读取幂等、repo 零新增；不创建任何会话 |
 | 队列显示过滤 | 程序输入不进 QueueDock；真实用户排队消息可编辑/删除/steer；`presentation: 'internal'` 与已注册 kind 双信号过滤 |
 
 ### 15.2 事件流与判断（沿用事件流设计验收表）
@@ -1128,6 +1131,7 @@ dsh-quno-collector-<name>   各来源采集器（日历、订阅源、云之家�
 - **退役**：`taskActivity` Remote（`buildTaskActivity`/`taskActivityForClient`/`taskActivityInput`/`TaskActivityWire`）、`activity.ts` 投影、`task-activity.tsx` 自绘时间线、`task-detail.tsx` 中间页（摘要并入会话内折叠）、`tool.call.toolview` 任务卡置空（注册保留遮蔽 stock）；evals 两个 taskActivity 用例随投影退役，桌面 DOM 验收转为 §15.1 实机行。
 - **只读边界与偏差**：composer 接管是组件级客户端半边（v2 §9.4）；**Host 提交门未建**——基线 prompt 路径无模式拒绝，通用 `interactionMode` + SessionController 提交门按 fork 流程补（后续项，见下）；QueueDock fork 上收项沿用 §18.3。与会话头相关的 v2 细项（隐藏 stock 会话头 chrome 的完整自定义头）依赖 single 槽整体替换，插件侧不可安全实现，记 fork 收敛。
 - **验证**：`pnpm run typecheck` 0 错、`pnpm test` 238 项全绿（新增 `tests/work-surface.test.ts` 8 项：入口计数/行活动/composer 选择器/往返上下文/缺失原因映射/焦点旗标）、`pnpm run build` 通过；scripted evals 全量通过无新增失败（退役 2 例后 16 例 runnable 全绿，9 例既有 blocked 与改动前一致）。桌面 DOM/键盘/窄屏实机验收未执行（§15.1 实机行）。
+- **同日补齐（v2 全量核对）**：`redaction.ts` + `quno_cli_call`/`quno_exchange` 脱敏卡（§6.2 凭据/幻觉参数不出检查视图）；工作列表 ul/li 语义 + 行状态 `role=status`（§7.3）；「工作」入口 `aria-expanded`（§4.2）；缺失页键盘聚焦返回按钮（§6.3）；`workerLabel` 进 TaskWire/WorkerDetailWire（§9.1/§10）；摘要正文按 §2.4 规格改 14px/22px、按钮换 stock 原语（§2.3 无字面色值）；新增评测 `worker-missing-session-no-auto-create`（P0 门）。
 - **未做/后续**：fork——通用 `interactionMode` 字段 + Host 提交门（v2 §9.4）；实机验收轮（Electron + scratch DSH_HOME）；L4 用例 `worker-list-open-and-return-keyboard` 等 8 项；P2 活动与复杂状态。
 
 ## 19. 文档沿革

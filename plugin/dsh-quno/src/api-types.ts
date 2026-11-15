@@ -105,6 +105,8 @@ export interface TaskWire {
    * it is absent on stale cached snapshots, which then fall back to `status`.
    */
   readonly presentationStatus?: string
+  /** Display-only Worker label derived from the ticket id (v2 §9.1). */
+  readonly workerLabel?: string
   /** Coarse activity bucket from the registered-tool display declarations. */
   readonly activityKind?: string | null
   /** Latest recorded activity time (no heartbeat fabrication). */
@@ -141,6 +143,8 @@ export interface TaskWire {
 export interface WorkerDetailWire {
   readonly ticketId: string
   readonly title: string
+  /** Display-only Worker label derived from the ticket id (v2 §9.1). */
+  readonly workerLabel: string
   /** The unified user-facing status (same vocabulary as TaskWire). */
   readonly status: string
   /** `null` while the execution session has not been allocated yet. */

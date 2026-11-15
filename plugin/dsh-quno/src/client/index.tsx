@@ -46,6 +46,7 @@ import { QunoSettingsSection } from './settings.tsx'
 import { QunoMainMarker, QunoPresetLabelShadow } from './marker.tsx'
 import { QunoPanelTab, QunoPanelTitle } from './panel.tsx'
 import { QunoCapsule } from './capsule.tsx'
+import { QunoCliCallCard, QunoExchangeCard } from './tool-cards.tsx'
 import { QunoWorkEntry } from './work-entry.tsx'
 import { QunoLeadingIdentity, QunoWorkerCommands, WorkerComposerTakeover, selectWorkerComposer } from './worker-session.tsx'
 import { createWorkNavigation, workerOpenFailure } from './work-navigation.ts'
@@ -253,7 +254,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     const failure = workerOpenFailure(result, ticketId)
     if (failure !== null) {
       const statusText = result.ok === true ? result.value.status : null
-      report({ ticketId, reason: failure, statusText })
+      report({ ticketId, reason: failure, statusText, keyboard })
       return
     }
     if (result.ok !== true) return
@@ -270,7 +271,7 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     try {
       openSession(detail.executorSessionId)
     } catch {
-      report({ ticketId, reason: 'detail-failed', statusText: null })
+      report({ ticketId, reason: 'detail-failed', statusText: null, keyboard })
     }
   }
 
@@ -373,6 +374,22 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       key: 'quno_task',
       inject: () => ({ store, t, openPanel }),
     }, QunoTaskCard))
+
+    // Redacted cards for the Quno-owned worker tools (design v2 §6.2): the
+    // stock transcript would render raw arguments — including hallucinated
+    // credential parameters — so these keyed views shadow it with the
+    // denylist-redacted, bounded projection (redaction.ts). Ungated: a
+    // worker session viewed while the master switch is off stays scrubbed.
+    ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
+      name: 'tool.call.toolview',
+      key: 'quno_cli_call',
+      inject: () => ({ t }),
+    }, QunoCliCallCard))
+    ctx.slots.inject('tool.call.toolview', () => ctx.slots.register({
+      name: 'tool.call.toolview',
+      key: 'quno_exchange',
+      inject: () => ({ t }),
+    }, QunoExchangeCard))
 
     // Queue display filter (design §7.1): program-injected inputs never
     // surface as queued rows above the composer. Two signals cooperate — the

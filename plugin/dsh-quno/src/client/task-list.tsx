@@ -44,7 +44,10 @@ export function WorkerRow(props: {
   const status = taskUserStatus(task)
   const statusText = t(taskUserStatusKey(status))
   const activity = workerRowActivity(task, t)
-  const workerLabel = workerLabelOf(task.id)
+  // Wire label first (v2 §9.1); the derivation is the fallback for stale rows.
+  const workerLabel = 'workerLabel' in task && typeof task.workerLabel === 'string'
+    ? task.workerLabel
+    : workerLabelOf(task.id)
   return (
     <button
       type="button"
@@ -56,7 +59,8 @@ export function WorkerRow(props: {
       <span className="quno-worker-row__title">{task.title}</span>
       <span className="quno-worker-row__worker">{workerLabel}</span>
       {activity !== null && <span className="quno-worker-row__activity">{activity}</span>}
-      <span className="quno-worker-row__status">{statusText}</span>
+      {/* v2 §7.3: the status announces ONCE per actual change (role=status). */}
+      <span className="quno-worker-row__status" role="status">{statusText}</span>
     </button>
   )
 }
@@ -85,20 +89,23 @@ export function TaskListPage(props: TaskListPageProps): React.ReactElement {
     return <PanelEmpty icon="task" title={t('tasksEmptyTitle')} description={t('tasksEmptyDesc')} />
   }
 
+  // v2 §7.3: the work list is a semantic list — one li per worker row.
   const row = (task: TaskWire): React.ReactElement => (
-    <WorkerRow key={task.id} task={task} t={t} onOpenWorker={props.onOpenWorker} />
+    <li key={task.id}>
+      <WorkerRow task={task} t={t} onOpenWorker={props.onOpenWorker} />
+    </li>
   )
 
   return (
     <div style={styles.stack}>
       {groups.needsYou.length > 0 && (
-        <PanelSection title={t('taskGroupNeedsYou')}>{groups.needsYou.map(row)}</PanelSection>
+        <PanelSection title={t('taskGroupNeedsYou')}><ul style={styles.rows}>{groups.needsYou.map(row)}</ul></PanelSection>
       )}
       {groups.active.length > 0 && (
-        <PanelSection title={t('taskGroupActive')}>{groups.active.map(row)}</PanelSection>
+        <PanelSection title={t('taskGroupActive')}><ul style={styles.rows}>{groups.active.map(row)}</ul></PanelSection>
       )}
       {groups.settled.length > 0 && (
-        <PanelSection title={t('taskGroupSettled')}>{groups.settled.map(row)}</PanelSection>
+        <PanelSection title={t('taskGroupSettled')}><ul style={styles.rows}>{groups.settled.map(row)}</ul></PanelSection>
       )}
     </div>
   )
@@ -110,6 +117,8 @@ export interface WorkerMissing {
   readonly reason: 'unknown-ticket' | 'session-not-assigned' | 'detail-failed'
   /** The worker's RAW status; the page localizes it beside the reason copy. */
   readonly statusText: string | null
+  /** Whether the failed attempt came from the keyboard (drives focus, v2 §6.3). */
+  readonly keyboard: boolean
 }
 
 /** The honest missing page (v2 §5.4): never auto-create, never impersonate. */
@@ -119,6 +128,13 @@ export function WorkerMissingPage(props: {
   readonly onBack: (keyboard: boolean) => void
 }): React.ReactElement {
   const { missing, t } = props
+  // v2 §6.3: a worker that cannot open focuses 「返回 Quno」, never blank body.
+  const hostRef = React.useRef<HTMLDivElement | null>(null)
+  React.useEffect(() => {
+    if (!missing.keyboard) return
+    const back = hostRef.current?.querySelector('button')
+    if (back !== null && back !== undefined) back.focus()
+  }, [missing.keyboard, missing.ticketId])
   const title = missing.reason === 'session-not-assigned'
     ? t('workerSessionNotAssigned')
     : t('workerRecordUnavailable')
@@ -131,16 +147,19 @@ export function WorkerMissingPage(props: {
       ? `${t('taskStatusCurrent')}${statusText}`
       : t('workerMissingDesc')
   return (
-    <MissingState
-      icon="task"
-      title={title}
-      description={description}
-      backLabel={t('workerBackToQuno')}
-      onBack={() => { props.onBack(true) }}
-    />
+    <div ref={hostRef}>
+      <MissingState
+        icon="task"
+        title={title}
+        description={description}
+        backLabel={t('workerBackToQuno')}
+        onBack={() => { props.onBack(true) }}
+      />
+    </div>
   )
 }
 
 const styles = {
   stack: { display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 },
+  rows: { listStyle: 'none', margin: 0, padding: 0, minWidth: 0 },
 } as const

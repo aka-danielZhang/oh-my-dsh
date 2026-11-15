@@ -32,6 +32,7 @@ import { consumeEntryFocus } from './work-navigation.ts'
 import { clip, formatClock, formatDuration } from './format.ts'
 import { taskTone, taskUserStatus, taskUserStatusKey } from './panel-state.ts'
 import { StatusLabel } from './panel-primitives.tsx'
+import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import { QunoHeaderIdentity } from './header-identity.tsx'
 import { QunoMark } from './quno-mark.tsx'
 
@@ -136,13 +137,14 @@ export function WorkerTaskSummary(props: {
                   if (event.key === 'Enter' && answer.trim() !== '' && busy === null) void act(answer.trim())
                 }}
               />
-              <button
-                type="button"
+              <Button
+                size="sm"
+                variant="primary"
                 disabled={busy !== null || answer.trim() === ''}
                 onClick={() => { void act(answer.trim()) }}
               >
                 {busy === 'answer' ? t('taskAnswerSending') : t('taskAnswerSend')}
-              </button>
+              </Button>
             </div>
             <p className="quno-worker-summary__hint">{t('taskAnswerHint')}</p>
           </section>
@@ -169,9 +171,9 @@ export function WorkerTaskSummary(props: {
                   ? <a href={artifact.uri} target="_blank" rel="noreferrer">{artifact.label}</a>
                   : <span>{artifact.label}</span>}
                 {(artifact.kind === 'file' || artifact.kind === 'directory') && (
-                  <button type="button" onClick={() => { void copy(artifact.uri) }}>
+                  <Button size="sm" variant="ghost" onClick={() => { void copy(artifact.uri) }}>
                     {copied === artifact.uri ? t('taskCopied') : t('taskCopyPath')}
-                  </button>
+                  </Button>
                 )}
               </div>
             ))}

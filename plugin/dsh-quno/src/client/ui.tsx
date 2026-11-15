@@ -546,13 +546,13 @@ export const QUNO_WORK_CSS = `
   display: flex; flex-direction: column; gap: 8px;
 }
 .quno-worker-summary__body h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--dsw-alias-label-primary); }
-.quno-worker-summary__body p { margin: 2px 0 0; font-size: 12px; line-height: 1.6; color: var(--dsw-alias-label-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.quno-worker-summary__body p { margin: 2px 0 0; font-size: 14px; line-height: 22px; color: var(--dsw-alias-label-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
 .quno-worker-summary__question { color: var(--dsw-alias-label-primary); }
 .quno-worker-summary__error { color: var(--dsw-alias-state-error-primary); }
 .quno-worker-summary__hint { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
 .quno-worker-summary__meta { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
 .quno-worker-summary__meta code { font-family: ui-monospace, monospace; font-size: 10.5px; overflow-wrap: anywhere; }
-.quno-worker-summary__answer { display: flex; gap: 6px; margin-top: 4px; }
+.quno-worker-summary__answer { display: flex; gap: 6px; margin-top: 4px; align-items: center; }
 .quno-worker-summary__answer input {
   flex: 1; min-width: 0; font: inherit; font-size: 12px;
   padding: 5px 9px; border-radius: 8px;
@@ -561,12 +561,6 @@ export const QUNO_WORK_CSS = `
   color: var(--dsw-alias-label-primary);
 }
 .quno-worker-summary__answer input:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
-.quno-worker-summary__answer button {
-  border: 0; border-radius: 8px; cursor: pointer;
-  background: var(--dsw-alias-brand-primary); color: #fff;
-  font: inherit; font-size: 12px; padding: 5px 12px;
-}
-.quno-worker-summary__answer button:disabled { opacity: 0.6; cursor: default; }
 .quno-worker-summary__artifact { display: flex; align-items: center; gap: 6px; font-size: 12px; flex-wrap: wrap; margin-top: 2px; }
 .quno-worker-summary__artifact-kind {
   flex: none; font-size: 10.5px; font-weight: 600;
@@ -588,5 +582,14 @@ export const QUNO_WORK_CSS = `
 @media (max-width: 480px) {
   .quno-worker-row__worker { display: none; }
   .quno-worker-identity__title { max-width: 40vw; }
+}
+
+/* Tool-card value rows (v2 §6.2): bounded redacted projections, monospace. */
+.dsh-quno-tool-card__args { display: flex; gap: 8px; align-items: baseline; }
+.dsh-quno-tool-card__args .dsh-quno-card__label { flex: none; color: var(--dsw-alias-label-tertiary); }
+.dsh-quno-tool-card__value {
+  min-width: 0; font-family: ui-monospace, monospace; font-size: 10.5px;
+  color: var(--dsw-alias-label-secondary);
+  overflow-wrap: anywhere; white-space: pre-wrap;
 }
 `

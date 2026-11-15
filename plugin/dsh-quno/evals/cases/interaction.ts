@@ -7,8 +7,9 @@
  * - main-task-internal-failure-hidden: two illegal async reads leave durable
  *   error evidence and INTERNAL relays only.
  * - task-report-progress-no-chat: progress reports move the projection only.
- * - task-activity-readonly-running: the record is readable while running.
- * - task-activity-redaction: credentials/env/reasoning never reach the record.
+ * - worker-missing-session-no-auto-create: missing workers stay honest.
+ * (The taskActivity cases retired with the self-drawn timeline; the redaction
+ * law now backs the tool cards — see src/redaction.ts.)
  *
  * @module dsh-quno/evals/cases/interaction
  */
@@ -208,5 +209,39 @@ export const interactionCases: readonly EvalCase[] = [
       }
     },
     budget: { maxDurationMs: 120_000, maxModelCalls: 12 },
+  },
+  {
+    id: 'worker-missing-session-no-auto-create',
+    title: 'Worker 缺失诚实呈现：不自动创建会话，重复读取幂等',
+    priority: 'p0',
+    requirement: '未知 ticket 的 workerDetail 返回 unknown-ticket 且 executorSessionId 为 null；重复读取结果一致、repo 无新增 ticket；已存在任务给出的 executor 会话 id 稳定',
+    tags: ['interaction', 'worker', 'missing'],
+    model: { router: 'scripted', worker: 'scripted' },
+    scripts: {
+      router: [
+        textTurn('好的，这一步我先等你。'),
+      ],
+      worker: [],
+    },
+    steps: [
+      { kind: 'human', text: '先不用做任何事，等我的通知。' },
+    ],
+    checks: async (rt) => {
+      const repo = rt.host.repo
+      const before = repo.listTickets(rt.host.qunoId, { limit: 200 }).length
+      const missing = await rt.host.workerDetailForClient({ ticketId: 'no-such-ticket' })
+      const missingAgain = await rt.host.workerDetailForClient({ ticketId: 'no-such-ticket' })
+      const after = repo.listTickets(rt.host.qunoId, { limit: 200 }).length
+      return {
+        chain: [
+          check('worker.execution', 'missing-honest', missing.note === 'unknown-ticket' && missing.executorSessionId === null, { note: missing.note, executorSessionId: missing.executorSessionId }, 'unknown-ticket + null'),
+          check('worker.execution', 'missing-idempotent', missingAgain.note === missing.note && missingAgain.executorSessionId === null, 'same answer', 'same answer'),
+          check('worker.execution', 'no-auto-create', before === after, after - before, 0),
+          check('worker.execution', 'identity-echo', missing.ticketId === 'no-such-ticket' && missingAgain.ticketId === 'no-such-ticket', missing.ticketId, 'no-such-ticket'),
+        ],
+        semantics: [],
+      }
+    },
+    budget: { maxDurationMs: 60_000, maxModelCalls: 4 },
   },
 ]

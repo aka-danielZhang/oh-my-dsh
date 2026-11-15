@@ -26,7 +26,7 @@ function remote(overrides: Partial<QunoRemoteFace>): QunoRemoteFace {
     noticeDetail: async () => ok(null),
     eventDetail: async () => ok(null),
     taskCommand: async () => ok(wireState),
-    workerDetail: async () => ok({ ticketId: 't1', title: 'T', status: 'done', executorSessionId: null, canStop: false, canRetry: false }),
+    workerDetail: async () => ok({ ticketId: 't1', title: 'T', workerLabel: 'Worker 00000000', status: 'done', executorSessionId: null, canStop: false, canRetry: false }),
     mute: async () => ok(wireState),
     eventsRecent: async () => ok({ events: [] }),
   }
