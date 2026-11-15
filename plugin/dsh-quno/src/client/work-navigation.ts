@@ -36,10 +36,16 @@ export type WorkerOpenFailure =
   | 'session-not-assigned'
   | 'detail-failed'
 
+/** Viewing posture declared alongside one openSession call (fork §9.4 gate). */
+export interface QunoSessionViewOptions {
+  /** `inspect` makes the Host refuse user prompt admission for the session. */
+  readonly interactionMode?: 'inspect' | 'interactive'
+}
+
 /** Structural shell faces the navigation needs. All duck-checked upstream. */
 export interface WorkNavigationFaces {
   /** Show one session in the shell's main region. */
-  readonly openSession: (sessionId: string) => void
+  readonly openSession: (sessionId: string, options?: QunoSessionViewOptions) => void
   /** Hand the main region back to the Conversation view. */
   readonly selectMainPanel: () => void
   /** Open the right column on the work list. */
@@ -156,7 +162,9 @@ export function createWorkNavigation(
         keyboard: false,
       }
       if (effective.mainSessionId === '') return { restored: false, keyboard: false, mainSessionId: null }
-      faces.openSession(effective.mainSessionId)
+      // Leaving the worker clears the inspect declaration: the main
+      // conversation is interactive again (v2 §9.3/§9.4).
+      faces.openSession(effective.mainSessionId, { interactionMode: 'interactive' })
       if (effective.workPanelOpen) faces.openWorkPanel()
       else faces.selectMainPanel()
       if (effective.scrollY !== null) faces.restoreMainScroll(effective.scrollY)
@@ -165,7 +173,7 @@ export function createWorkNavigation(
     },
     returnToMainFromPanel(keyboard: boolean): void {
       const mainSessionId = faces.fallbackMainSessionId()
-      if (mainSessionId !== null) faces.openSession(mainSessionId)
+      if (mainSessionId !== null) faces.openSession(mainSessionId, { interactionMode: 'interactive' })
       faces.selectMainPanel()
       if (keyboard) faces.focusWorkEntry()
     },

@@ -44,7 +44,7 @@
     "directory": "plugin/dsh-quno-collector-feed"
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.5",
+    "@deepseek-ai/cordis": "4.1.0",
     "@types/node": "^24.13.3",
     "tsdown": "^0.22.2",
     "tsx": "^4.19.2",

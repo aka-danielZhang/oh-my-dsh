@@ -62,6 +62,9 @@ function snapshotOf(facts: SessionFacts): SessionSnapshot {
     openError: null,
     hasMore: false,
     loadingOlder: false,
+    // 0.2.2 snapshot: the history-load telemetry the dock does not read.
+    historyWasPartial: false,
+    historyLoadStatus: 'idle',
     promptError: null,
     blank: false,
     lastAgentError: null,

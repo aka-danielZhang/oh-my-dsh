@@ -10,10 +10,16 @@ export const NATIVE_WEB_SEARCH_SECTION = 'tool:web_search'
 /** Materialized when a stale or indirect call reaches execution while off. */
 export const NATIVE_WEB_SEARCH_DISABLED_REASON = 'Web Search is disabled in General settings.'
 
-/** Minimal structured shape used by the system-prompt assembly waterfall. */
+/**
+ * Minimal structural constraint for the system-prompt assembly waterfall. The
+ * 0.2.2 presentation carries contexts and variables besides sections and
+ * tools; the suppressor stays generic over the full face, so every
+ * non-filtered member copies through untouched.
+ */
 export interface WebSearchAssembly {
   sections: Array<{ name: string }>
-  tools: Array<{ name: string }>
+  /** Present on complete assemblies; the incomplete waterfall path omits it. */
+  tools?: Array<{ name: string }>
 }
 
 /** Return the guard denial only for native search while the switch is off. */
@@ -30,11 +36,12 @@ export function nativeWebSearchDenial(toolName: string, enabled: boolean): strin
  */
 export function suppressNativeWebSearch<T extends WebSearchAssembly>(assembly: T): T {
   const sections = assembly.sections.filter(section => section.name !== NATIVE_WEB_SEARCH_SECTION)
-  const tools = assembly.tools.filter(tool => tool.name !== NATIVE_WEB_SEARCH_TOOL)
-  if (sections.length === assembly.sections.length && tools.length === assembly.tools.length) {
+  const tools = assembly.tools?.filter(tool => tool.name !== NATIVE_WEB_SEARCH_TOOL)
+  if (sections.length === assembly.sections.length
+    && (tools === undefined || tools.length === assembly.tools?.length)) {
     return assembly
   }
-  return { ...assembly, sections, tools }
+  return { ...assembly, sections, ...(tools === undefined ? {} : { tools }) }
 }
 
 /**

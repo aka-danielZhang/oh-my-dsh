@@ -38,7 +38,6 @@ import type { QunoLocaleKey } from './locales.ts'
 import type { QunoRemoteFace } from './store.ts'
 import type { SidebarRightFace } from './capsule.tsx'
 import type { QunoConversationFace } from './report-actions.tsx'
-import type { QunoQueueDockInjected } from './queue-dock.tsx'
 import TYPERT_REMOTE from '../typert.remote-client.ts'
 import { QunoClientStore } from './store.ts'
 import { en, zh } from './locales.ts'
@@ -48,7 +47,8 @@ import { QunoPanelTab, QunoPanelTitle } from './panel.tsx'
 import { QunoCapsule } from './capsule.tsx'
 import { QunoCliCallCard, QunoExchangeCard } from './tool-cards.tsx'
 import { QunoWorkEntry } from './work-entry.tsx'
-import { QunoLeadingIdentity, QunoWorkerCommands, WorkerComposerTakeover, selectWorkerComposer } from './worker-session.tsx'
+import { QunoLeadingIdentity, QunoWorkerCommands, QunoWorkerSessionHeader, WorkerComposerTakeover, selectWorkerComposer } from './worker-session.tsx'
+import { executorTicketIdOf } from '../presentation.ts'
 import { createWorkNavigation, workerOpenFailure } from './work-navigation.ts'
 import type { WorkerMissing } from './task-list.tsx'
 import { QunoHeroWelcome } from './hero-welcome.tsx'
@@ -57,8 +57,7 @@ import { QunoReportActions } from './report-actions.tsx'
 import { QunoEntryPanel, QunoEntryGlyph } from './entry-panel.tsx'
 import { QunoOnboardingHost, onboarding } from './collector-onboarding.tsx'
 import { qunoNoticeDefinition } from './report-turn.ts'
-import { registerInternalQueueKinds } from './queue-internal.ts'
-import { QunoQueueDock, QUNO_QUEUE_CSS } from './queue-dock.tsx'
+import { isInternalQueueSource, registerInternalQueueKinds, type QueueSourceLike } from './queue-internal.ts'
 import { qunoWorkspaceSessionVisible, surfaceEnabled } from './view-model.ts'
 import { QUNO_PANEL_ID, QUNO_PANEL_KIND } from './right-tab.ts'
 import { QUNO_CSS, QUNO_WORK_CSS } from './ui.tsx'
@@ -186,13 +185,13 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     ? (ctx.get('sidebarRightTabs') as unknown as SidebarRightTabsFace)
     : undefined
   const workspace = ctx.get('uiWorkspace') as {
-    openSession(sessionId: SessionId): void
+    openSession(sessionId: SessionId, options?: { readonly interactionMode?: 'inspect' | 'interactive' }): void
     registerSessionVisibilityFilter?: (filter: (session: {
       readonly projectionValues?: { readonly agentPreset?: string | null }
     }) => boolean) => () => void
   } | undefined
-  const openSession = (sessionId: string): void => {
-    workspace?.openSession(sessionId as SessionId)
+  const openSession = (sessionId: string, options?: { readonly interactionMode?: 'inspect' | 'interactive' }): void => {
+    workspace?.openSession(sessionId as SessionId, options)
   }
   // The entry panel's hand-off target: from a selected panel back to the
   // Conversation view (absent layout service → no-op; the panel degrades to
@@ -269,39 +268,15 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       keyboard,
     })
     try {
-      openSession(detail.executorSessionId)
+      // v2 §9.4 inspect: the opened worker session is declared read-only at
+      // the Host — prompt admission is refused until backToQuno declares
+      // interactive again.
+      openSession(detail.executorSessionId, { interactionMode: 'inspect' })
     } catch {
       report({ ticketId, reason: 'detail-failed', statusText: null, keyboard })
     }
   }
 
-  // Queue-dock operations, resolved per session exactly like the stock dock's
-  // inject (the conversation service is session-scoped; image URLs come from
-  // uiConversation). Structural faces — no harness value imports.
-  const queueDockFace = (sessionId: SessionId): QunoQueueDockInjected => {
-    const sessionsRoot = ctx.get('sessions') as unknown as {
-      scope?(id: string): { get(name: string): unknown } | undefined
-    } | undefined
-    const actx = sessionsRoot?.scope?.(sessionId)
-    if (actx === undefined) throw new Error(`queue dock: session "${String(sessionId)}" resolved no scope`)
-    const conversation = actx.get('conversation') as
-      | {
-        updateQueue(itemId: string, action: QueueAction): Promise<void>
-        input: { for(scope: unknown): { notify(level: 'info' | 'error', text: string): void } }
-      }
-      | undefined
-    if (conversation === undefined) throw new Error('queue dock: conversation service unavailable')
-    const imageFace = uiConversation as unknown as
-      | { imageUrl?(id: string, attachment: { attachmentId: string }): Promise<string> }
-      | undefined
-    return {
-      updateQueue: (itemId, action) => conversation.updateQueue(itemId, action),
-      notify: (level, text) => { conversation.input.for(actx).notify(level, text) },
-      loadImage: attachment => imageFace?.imageUrl !== undefined
-        ? imageFace.imageUrl(sessionId, attachment)
-        : Promise.reject(new Error('queue dock: image URL service unavailable')),
-    }
-  }
   // The panel linkage degrades to the child-session jump while the gated
   // surface is disposed or the service is missing (an unregistered kind throws).
   let panelReady = false
@@ -398,17 +373,28 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
     // queued program rows from before a master-switch flip must still hide.
     ctx.effect(() => registerInternalQueueKinds(['quno-eval', 'quno-report', 'quno-notify', 'quno-task']), 'dsh-quno: internal queue kinds')
 
-    // The internal-aware queue strip shadows the stock dock entry (same entry
-    // id `queue`, lower priority renders): identical UI, plus the display
-    // filter. Human rows keep edit/remove/steer; the filter only affects
-    // display and the model still receives every queued message.
-    ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({
-      name: 'conversation.input.dock',
-      id: 'queue',
-      priority: -1,
-      locale: 'conversation',
-      inject: (sessionId: SessionId) => queueDockFace(sessionId),
-    }, QunoQueueDock))
+    // §10 上收 (fork zw.1): the stock dock consumes the optional session-scoped
+    // `conversationQueueVisibility` policy, so the v1 plugin-side dock clone
+    // retires. The policy rides the Quno MAIN session scope only — the session
+    // whose inbox carries program-injected inputs; executor and stock sessions
+    // keep the stock dock verbatim. Local pending echoes bypass the policy.
+    const sessionsRoot = ctx.get('sessions') as unknown as {
+      scope?(id: string): { set(name: string, value: unknown): void } | undefined
+    } | undefined
+    let visibilitySession: string | null = null
+    const installQueueVisibility = (sessionId: string | null): void => {
+      if (sessionId === null || visibilitySession === sessionId) return
+      const scope = sessionsRoot?.scope?.(sessionId)
+      if (scope === undefined) return
+      scope.set('conversationQueueVisibility', {
+        visible: (row: { readonly source?: QueueSourceLike }) => !isInternalQueueSource(row.source as QueueSourceLike),
+      })
+      visibilitySession = sessionId
+    }
+    ctx.effect(() => {
+      installQueueVisibility(store.getSnapshot().state?.main.sessionId ?? null)
+      return store.subscribe(() => { installQueueVisibility(store.getSnapshot().state?.main.sessionId ?? null) })
+    }, 'dsh-quno: main-session queue visibility')
 
     // A durable program input becomes one hidden Chat node bound to its own
     // Turn; the tail card below reads notices back by notification id.
@@ -464,18 +450,6 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       style.dataset.plugin = 'dsh-quno'
       style.dataset.pluginCss = tagId
       style.textContent = QUNO_WORK_CSS
-      document.head.appendChild(style)
-      return () => { style.remove() }
-    })
-
-    // The queue strip's stylesheet (same claim discipline as the skin CSS).
-    ctx.effect(() => {
-      const tagId = 'dsh-quno/queue-css'
-      if (document.querySelector(`style[data-plugin-css="${tagId}"]`) !== null) return () => {}
-      const style = document.createElement('style')
-      style.dataset.plugin = 'dsh-quno'
-      style.dataset.pluginCss = tagId
-      style.textContent = QUNO_QUEUE_CSS
       document.head.appendChild(style)
       return () => { style.remove() }
     })
@@ -563,11 +537,27 @@ export async function apply(ctx: ClientContext): Promise<() => Promise<void>> {
       // identity on a main, the worker identity (返回 Quno + title + Worker
       // label + status) on an executor session. ONE registration — the slot
       // is single-kind, a second entry would shadow this cell outright.
+      // The Quno main identity on the leading seat; the worker identity moved
+      // into the whole-header chain claim below (fork zw.1).
       held.push(ctx.slots.inject('conversation.header.leading', () => ctx.slots.register({
         name: 'conversation.header.leading',
         priority: -1,
         inject: () => ({ store, t, onBack: (keyboard: boolean) => { workNavigation.backToQuno() } }),
       }, QunoLeadingIdentity)))
+
+      // §6.1 chrome hiding (fork zw.1): the whole worker header — back + title
+      // + Worker label + status + read-only note — replaces the stock header
+      // on executor sessions. The chain tries lower priority first; the
+      // durable `quno-exec-` prefix is the pure claim input, and the fork's
+      // always-claiming stock selector is the fallback for every other
+      // session. Commands ride the actions slot re-rendered inside the claim.
+      held.push(ctx.slots.inject('conversation.session.header', () => ctx.slots.register({
+        name: 'conversation.session.header',
+        priority: -10,
+        inject: () => ({ store, t, onBack: (keyboard: boolean) => { workNavigation.backToQuno() } }),
+        select: (owner: { readonly sessionId: string }) =>
+          executorTicketIdOf(String(owner.sessionId)) !== null ? String(owner.sessionId) : null,
+      } as never, QunoWorkerSessionHeader)))
 
       // First-open welcome (§13.8): avatar + welcome line + opener chips on
       // the hero of a Quno main (the marker's hero seat carries the claim).

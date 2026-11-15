@@ -96,7 +96,6 @@ function harness(): Harness {
 
   const fakeTools = (bucket: string[]): unknown => ({
     register: (tool: { name: string }) => { bucket.push(tool.name); return () => {} },
-    presentAs: () => {},
     restrict: () => {},
     guard: () => () => {},
     schemas: () => [],
@@ -107,16 +106,18 @@ function harness(): Harness {
     get: () => undefined,
     logger,
     effect: () => () => {},
+    // installModelSelection wires its switch notice through the scoped event bus.
+    on: () => () => {},
   } as unknown as Context)
 
-  const createAgent = (options: { sessionId: string; parentAgent?: { session: { id: string } }; setup?: (ctx: Context, agent: FakeAgent) => unknown }): { agent: FakeAgent; dispose(): Promise<void> } => {
+  const createAgent = (options: { sessionId: string; meta?: { parentSession?: string }; setup?: (ctx: Context, agent: FakeAgent) => unknown }): { agent: FakeAgent; dispose(): Promise<void> } => {
     const list = events.get(options.sessionId) ?? []
     events.set(options.sessionId, list)
     const agent = makeAgent(options.sessionId, list)
     agents.set(options.sessionId, agent)
     const bucket: string[] = []
     registeredTools.push(bucket)
-    created.push({ sessionId: options.sessionId, parentSessionId: options.parentAgent?.session.id ?? '' })
+    created.push({ sessionId: options.sessionId, parentSessionId: options.meta?.parentSession ?? '' })
     if (options.setup !== undefined) {
       const result = options.setup(fakeAgentCtx(bucket), agent)
       if (result instanceof Promise) void result
@@ -131,7 +132,7 @@ function harness(): Harness {
         return {
           get: (id: string) => agents.get(id),
           create: async (options: never) => createAgent(options),
-          resume: async (options: { resumeSessionId: string; parentAgent?: { session: { id: string } }; setup?: (ctx: Context, agent: FakeAgent) => unknown }) => createAgent({ ...options, sessionId: options.resumeSessionId }),
+          resume: async (options: { resumeSessionId: string; setup?: (ctx: Context, agent: FakeAgent) => unknown }) => createAgent({ ...options, sessionId: options.resumeSessionId }),
         }
       }
       if (name === 'sessions') return { flush: async () => true }

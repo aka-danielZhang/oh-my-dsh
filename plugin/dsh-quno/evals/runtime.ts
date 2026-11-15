@@ -213,7 +213,7 @@ export class EvalRuntime {
     // startup recovery (reconcile + effects kick) resolves the Router as the
     // live parent for worker launches.
     const setup = (agentCtx: Context): void => {
-      agentCtx.tools.presentAs('native')
+      // 0.2.2: the mounted native executor replaced the per-agent presentAs modes.
       applyQunoPreset(agentCtx)
     }
     const agentOptions = { provider: this.options.plan.router.provider, model: this.options.plan.router.model }

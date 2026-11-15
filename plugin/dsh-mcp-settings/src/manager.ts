@@ -19,7 +19,8 @@ import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import type { SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import { MAX_TIMER_DELAY_MS } from '@deepseek-ai/dsh-timeout'
 import * as McpClient from '@deepseek-ai/dsh-mcp-client'
-import type { ReconnectConfig } from '@deepseek-ai/dsh-mcp-client'
+import { connectionStatusOf } from '@deepseek-ai/dsh-mcp-client'
+import type { McpConnectionStatus, ReconnectConfig } from '@deepseek-ai/dsh-mcp-client'
 import type { McpClientStatus, McpServerEntry, McpSettings, McpServerStatus } from './manager-types.ts'
 
 function sameJson(left: unknown, right: unknown): boolean {
@@ -39,7 +40,6 @@ declare module '@deepseek-ai/cordis' {
   }
   interface Events {
     /** @mode emit */
-    'mcp-client/status'(serverName: string, status: McpClientStatus, toolCount: number): void
   }
 }
 
@@ -136,8 +136,16 @@ async function resolveCredential(ctx: Context, ref: string, serverName: string):
   return resolved.value
 }
 
+/**
+ * The spawn validates through McpClient.Config, whose schema materializes the
+ * transport-option defaults; building the INPUT shape here keeps the manager
+ * free of hardcoded upstream defaults (closeTimeoutMs, expandTemplates). The
+ * z callable's first parameter IS the input face.
+ */
+type McpClientConfigInput = Parameters<typeof McpClient.Config>[0]
+
 /** Map one settings entry to the mcp-client plugin config and resolve credential projections. */
-async function toClientConfig(ctx: Context, entry: McpServerEntry): Promise<McpClient.Config> {
+async function toClientConfig(ctx: Context, entry: McpServerEntry): Promise<McpClientConfigInput> {
   const shared = {
     serverName: entry.serverName,
     toolCallTimeoutMs: entry.toolCallTimeoutMs,
@@ -178,6 +186,29 @@ async function toClientConfig(ctx: Context, entry: McpServerEntry): Promise<McpC
 }
 
 /**
+ * Project the official mcp-client connection status onto the manager's wire
+ * union (manager-types McpClientStatus). `waiting-credentials` is a connect
+ * posture, not a failure; a closed instance is `disposed`.
+ * @param status - the supervisor's current committed status.
+ * @returns the projected wire status.
+ */
+export function projectMcpStatus(status: McpConnectionStatus): McpClientStatus {
+  switch (status.state) {
+    case 'closed':
+      return 'disposed'
+    case 'waiting-credentials':
+    case 'connecting':
+      return 'connecting'
+    case 'connected':
+      return 'connected'
+    case 'reconnecting':
+      return 'reconnecting'
+    case 'failed':
+      return 'failed'
+  }
+}
+
+/**
  * Composes MCP servers from the `mcp` settings section and serves their
  * merged status (`ctx.mcpManager`).
  */
@@ -201,16 +232,6 @@ export class McpManagerService extends Service {
   constructor(ctx: Context, config: McpSettings = EMPTY_SETTINGS) {
     super(ctx, 'mcpManager')
 
-    // Subscribe before any spawn can run so a fast-failing server's first
-    // status event is not missed. Events only update state; removal runs in
-    // this service's own sync path, so a renamed server's late 'disposed'
-    // event lands on the outgoing entry rather than its replacement.
-    ctx.on('mcp-client/status', (serverName, status, toolCount) => {
-      const managed = this.runtime.get(serverName)
-      if (managed === undefined) return
-      managed.connection = status
-      managed.toolCount = toolCount
-    })
 
     // Projected credentials are resolved at process/connect time. Restart only
     // clients that reference the changed value so rotations take effect.
@@ -398,6 +419,20 @@ export class McpManagerService extends Service {
         return
       }
       managed.fiber = fiber
+      // The official status cell (fork zw.1 merge: the fork's mcp-client/status
+      // event retired in favor of this surface) is registered during the
+      // instance's apply, so the handle exists by the time plugin() returns.
+      // onChange observers are detached by the cell at final fiber disposal.
+      const status = connectionStatusOf(fiber)
+      if (status !== undefined) {
+        const admit = (value: McpConnectionStatus): void => {
+          if (this.disposing || this.runtime.get(entry.serverName) !== managed) return
+          managed.connection = projectMcpStatus(value)
+          managed.toolCount = value.state === 'connected' ? value.toolCount : 0
+        }
+        admit(status.current())
+        status.onChange(admit)
+      }
       // Config validation and startup failures settle the fiber without ever
       // running the supervisor, so surface them through the fiber itself.
       void fiber.await().then(

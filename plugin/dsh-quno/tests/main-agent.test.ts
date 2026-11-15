@@ -114,7 +114,6 @@ test('the main agent delegates execution and immediately reports the handoff', a
     meta: { cwd: '/tmp', agentPreset: 'quno' },
     agentOptions: { provider: 'mock', model: 'mock' },
     setup: (agentCtx) => {
-      agentCtx.tools.presentAs('native')
       applyQunoPreset(agentCtx)
     },
   })

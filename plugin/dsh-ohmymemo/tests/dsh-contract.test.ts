@@ -33,6 +33,9 @@ import { createScope } from '@deepseek-ai/dsh-scope'
 import type { Scope } from '@deepseek-ai/dsh-scope'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutorModule from '@deepseek-ai/dsh-tool-executor-native'
+// The package exports named members (name/inject/apply/Config), not a default.
+const NativeToolExecutor = NativeToolExecutorModule as unknown as Parameters<typeof Context.prototype.plugin>[0]
 import type { ToolDefinition, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { HarnessError, ToolCallId } from '@deepseek-ai/dsh-llm'
@@ -84,6 +87,8 @@ async function mount(agentId: string): Promise<{
   const ctx = new Context()
   await ctx.plugin(SystemPrompt, {})
   await ctx.plugin(ToolRuntime, {})
+  // 0.2.2 split the executor out of the runtime; native dispatch is its own plugin.
+  await ctx.plugin(NativeToolExecutor, {})
   const agent = { id: agentId } as unknown as Agent
   let scope!: Scope
   // Mirror production: the minting plugin's inject list plays the dependency
@@ -95,13 +100,14 @@ async function mount(agentId: string): Promise<{
 }
 
 async function executeCall(ctx: Context, agent: Agent, name: string, args: unknown): Promise<ToolExecutionResult> {
-  return await ctx.tools.execute({
+  // 0.2.2 tool surface: one batch of model-shaped call blocks in, one
+  // correlated result list out — unwrap the single call's execution outcome.
+  const batch = await ctx.tools.execute({
     signal: new AbortController().signal,
-    callId: ToolCallId(`call-${Math.random().toString(36).slice(2)}`),
-    name,
-    arguments: args,
+    calls: [{ type: 'tool-call', id: ToolCallId(`call-${Math.random().toString(36).slice(2)}`), name, arguments: JSON.stringify(args) }],
     agent,
   })
+  return batch.results[0]!.result
 }
 
 const GLOBAL_TOOL = dreamLikeTool('memory_remember', { body: async () => ({ slot: 0, outcome: 'global-body-ran' }) })

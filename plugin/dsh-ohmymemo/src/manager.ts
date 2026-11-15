@@ -650,8 +650,10 @@ export class OhMyMemoManager extends TypertRemoteService {
         },
         signal,
         setup: (agentCtx) => {
-          installModelSelection(agentCtx, { current: model, assembled: undefined })
-          agentCtx.tools.presentAs('native')
+          installModelSelection(agentCtx)
+          // 0.2.2 removed per-agent executor modes: the mounted native
+          // executor serves every agent; the empty allow mask plus the guard
+          // keep maintenance Agents tool-free.
           agentCtx.tools.restrict({ allow: [] })
           agentCtx.tools.guard(() => 'OhMyMemo maintenance Agents cannot execute tools')
         },

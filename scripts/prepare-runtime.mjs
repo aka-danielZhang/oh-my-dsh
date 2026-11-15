@@ -121,14 +121,17 @@ const FORK_MODIFIED = new Set([
   '@deepseek-ai/dsh-api-session-controller',
   '@deepseek-ai/dsh-client-modules',
   '@deepseek-ai/dsh-client-shortcuts',
+  '@deepseek-ai/dsh-client-test-runtime',
+  '@deepseek-ai/dsh-client-ui-agent-preset',
+  '@deepseek-ai/dsh-client-ui-conversation',
   '@deepseek-ai/dsh-client-ui-model-selection',
   '@deepseek-ai/dsh-client-ui-sidebar',
   '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-ui-workspace',
   '@deepseek-ai/dsh-cordis-client-runner',
+  '@deepseek-ai/dsh-experimental-liveshare',
   '@deepseek-ai/dsh-host-frontend-static',
   '@deepseek-ai/dsh-llm-pi-ai',
-  '@deepseek-ai/dsh-mcp-client',
   '@deepseek-ai/dsh-tool-cordis',
 ])
 const FORK_NPM_SCOPE = process.env.FORK_NPM_SCOPE ?? '@crazx'

@@ -1,18 +1,22 @@
 /**
  * The worker session surface (design v2 §6): a native executor session
- * presented read-only. Three seats carry it:
+ * presented read-only. Four seats carry it:
  *
- * - `conversation.header.leading` (single/root): ONE combined identity —
- *   Quno main identity OR worker identity (「‹ 返回 Quno」+ task title +
- *   Worker label + status). One registration because a single slot has one
- *   cell: a second registration would shadow the first outright.
+ * - `conversation.session.header` (chain elect, fork zw.1): the WHOLE worker
+ *   header — back + task title + Worker label + status + the read-only note —
+ *   claimed by the executor id prefix. The stock header keeps every other
+ *   session (v2 §6.1 chrome hiding; the fork's always-claiming stock selector
+ *   is the fallback, so the plugin never renders stock components).
+ * - `conversation.header.leading` (single/root): the Quno main identity only —
+ *   the worker identity moved into the whole-header claim.
  * - `conversation.session.header.actions` (list): the per-status task
- *   commands (停止任务 / 重试) — never nested inside a row button (v2 §5.2).
+ *   commands (停止任务 / 重试) — re-rendered inside the worker header through
+ *   the slot, never nested inside a row button (v2 §5.2).
  * - `conversation.composer` (chain elect): replaces the whole composer for
  *   executor sessions with the read-only notice and the collapsible task
- *   summary (v2 §6.2 + §10). This is the client half of v2 §9.4 inspect —
- *   the Host-side submit gate stays the recorded fork follow-up; program
- *   inputs bypass the composer entirely and are never touched.
+ *   summary (v2 §6.2 + §10). The client half of v2 §9.4 inspect; the Host
+ *   gate (fork `session/setInteractionMode` + the prompt refusal) is the
+ *   authoritative backstop. Program inputs bypass the composer entirely.
  *
  * A worker session is recognized by the durable id convention
  * `quno-exec-<ticketId>` (presentation.ts) and the `quno-task` preset
@@ -22,7 +26,7 @@
  */
 
 import React from 'react'
-import type { PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
+import type { PropsLocale, PropsRenderSlots, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { EXECUTOR_PRESET, executorTicketIdOf, workerLabelOf } from '../presentation.ts'
 import { selectWorkerComposer, type WorkerComposerMatch } from './work-model.ts'
 import type { TaskWire } from '../api-types.ts'
@@ -197,18 +201,77 @@ export function WorkerTaskSummary(props: {
   )
 }
 
-/** Props of the combined leading identity (one cell — both claims live here). */
+/** Props of the whole-header worker claim (chain elect — fork zw.1). */
+export type QunoWorkerHeaderProps =
+  PropsRuntime<'conversation.session.header'>
+  & PropsRenderSlots<'conversation.session.header.actions'>
+  & QunoWorkerInjected
+  & { matched: string }
+
+/**
+ * The whole-header worker replacement (v2 §6.1, fork `conversation.session.header`
+ * chain): back + task title + Worker label + status + the static read-only
+ * note, with the per-status commands re-rendered through the actions slot.
+ * Stock chrome (新建会话/模型/权限) is absent by construction — the chain
+ * election replaces the stock header outright for the claimed session.
+ */
+export function QunoWorkerSessionHeader(props: QunoWorkerHeaderProps): React.ReactElement {
+  const snapshot = React.useSyncExternalStore(props.store.subscribe, props.store.getSnapshot, props.store.getSnapshot)
+  const ticketId = props.matched
+  const task = snapshot.state?.tasks.find(candidate => candidate.id === ticketId) ?? null
+  const status = task === null ? null : taskUserStatus(task)
+  const statusLabel = status === null ? null : props.t(taskUserStatusKey(status))
+  const backRef = React.useRef<HTMLButtonElement | null>(null)
+
+  // v2 §6.3: a keyboard entry moves focus to「返回 Quno」once; mouse entry
+  // never steals focus. Consuming the one-shot flag keeps later remounts
+  // (scroll restoration, panel reopen) from grabbing focus back.
+  React.useEffect(() => {
+    if (!consumeEntryFocus(typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined' ? window.sessionStorage : null)) return
+    backRef.current?.focus()
+  }, [ticketId])
+
+  return (
+    <span className="quno-worker-identity" data-quno-worker="">
+      <span className="quno-worker-identity__row">
+        <button
+          type="button"
+          ref={backRef}
+          className="quno-worker-identity__back"
+          onClick={event => { props.onBack(event.detail === 0) }}
+        >
+          ‹ {props.t('workerBackToQuno')}
+        </button>
+        {statusLabel !== null && (
+          <StatusLabel tone={taskTone(task ?? { status: 'dropped' })}>{statusLabel}</StatusLabel>
+        )}
+      </span>
+      <span className="quno-worker-identity__title">
+        {task === null ? props.t('workerRecordUnavailable') : task.title}
+      </span>
+      <span className="quno-worker-identity__meta">
+        <QunoMark size={12} />
+        <span>{workerLabelOf(ticketId)}</span>
+        <span className="quno-worker-identity__note">{props.t('workerReadonlyTitle')}</span>
+        <span className="quno-worker-identity__commands">
+          {props.renderSlot('conversation.session.header.actions', {})}
+        </span>
+      </span>
+    </span>
+  )
+}
+
+/** Props of the leading identity (main sessions only — the worker claim moved). */
 export type QunoLeadingIdentityProps =
   PropsRuntime<'conversation.header.leading'> & QunoWorkerInjected
 
 /**
- * Combined `conversation.header.leading` identity (v2 §6.1): the Quno main
- * identity on a main, the worker identity (back + title + label + status) on
- * an executor session, nothing otherwise. Hooks stay unconditional — the
- * preset only decides what RENDERS, never which hooks run.
+ * `conversation.header.leading` identity: the Quno main identity on a main,
+ * nothing otherwise. The worker identity lives in the whole-header chain
+ * claim; hooks stay unconditional — the preset only decides what RENDERS,
+ * never which hooks run.
  */
 export function QunoLeadingIdentity(props: QunoLeadingIdentityProps): React.ReactElement | null {
-  const snapshot = React.useSyncExternalStore(props.store.subscribe, props.store.getSnapshot, props.store.getSnapshot)
   const mainViewId = props.useSessions((state) => {
     for (const row of Object.values(state.byId)) {
       if ((row.retainedBy.mainView ?? 0) > 0) return row.id
@@ -218,47 +281,10 @@ export function QunoLeadingIdentity(props: QunoLeadingIdentityProps): React.Reac
   const preset = props.useSessions(sessions => mainViewId === undefined
     ? undefined
     : sessions.byId[mainViewId]?.projectionValues?.agentPreset)
-  const backRef = React.useRef<HTMLButtonElement | null>(null)
-  const isWorker = preset === EXECUTOR_PRESET && mainViewId !== undefined
-    && executorTicketIdOf(mainViewId) !== null
-
-  // v2 §6.3: a keyboard entry moves focus to「返回 Quno」once; mouse entry
-  // never steals focus. Consuming the one-shot flag keeps later remounts
-  // (scroll restoration, panel reopen) from grabbing focus back.
-  React.useEffect(() => {
-    if (!isWorker) return
-    if (!consumeEntryFocus(typeof window !== 'undefined' && typeof window.sessionStorage !== 'undefined' ? window.sessionStorage : null)) return
-    backRef.current?.focus()
-  }, [isWorker, mainViewId])
 
   // Quno main: delegate to the shipped identity (it re-checks the preset).
   if (preset === 'quno') return <QunoHeaderIdentity {...props} />
-  if (!isWorker || mainViewId === undefined) return null
-
-  const ticketId = executorTicketIdOf(mainViewId)
-  if (ticketId === null) return null
-  const task = snapshot.state?.tasks.find(candidate => candidate.id === ticketId) ?? null
-  const status = task === null ? null : taskUserStatus(task)
-  const statusLabel = status === null ? null : props.t(taskUserStatusKey(status))
-  return (
-    <span className="quno-worker-identity" data-quno-worker="">
-      <button
-        type="button"
-        ref={backRef}
-        className="quno-worker-identity__back"
-        onClick={event => { props.onBack(event.detail === 0) }}
-      >
-        ‹ {props.t('workerBackToQuno')}
-      </button>
-      <span className="quno-worker-identity__divider" aria-hidden="true" />
-      <span className="quno-worker-identity__title">{task === null ? props.t('workerRecordUnavailable') : task.title}</span>
-      <span className="quno-worker-identity__meta">
-        <QunoMark size={12} />
-        <span>{workerLabelOf(ticketId)}</span>
-        {statusLabel !== null && <StatusLabel tone={taskTone(task ?? { status: 'dropped' })}>{statusLabel}</StatusLabel>}
-      </span>
-    </span>
-  )
+  return null
 }
 
 /** Props of the per-status worker commands. */

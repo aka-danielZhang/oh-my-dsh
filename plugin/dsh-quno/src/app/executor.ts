@@ -19,7 +19,7 @@
  */
 
 import { installModelSelection } from '@deepseek-ai/dsh-agent'
-import type { Agent, AgentHandle, ModelSelectionRef } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AgentRegistry } from '@deepseek-ai/dsh-agent'
@@ -444,7 +444,7 @@ export class Executor {
     if (exists) {
       const handle = await agents.resume({
         resumeSessionId: sessionId,
-        parentAgent: router,
+        ...(this.agentOptions() === undefined ? {} : { agentOptions: this.agentOptions() }),
         signal,
         setup,
       })
@@ -455,7 +455,6 @@ export class Executor {
     try {
       handle = await agents.create({
         sessionId,
-        parentAgent: router,
         meta: {
           cwd: directory,
           parentSession: router.session.id,
@@ -469,7 +468,12 @@ export class Executor {
     } catch (error) {
       // A persisted session the persistence probe could not see (or a stale
       // registration) is recoverable by resuming under the same identity.
-      handle = await agents.resume({ resumeSessionId: sessionId, parentAgent: router, signal, setup })
+      handle = await agents.resume({
+        resumeSessionId: sessionId,
+        ...(this.agentOptions() === undefined ? {} : { agentOptions: this.agentOptions() }),
+        signal,
+        setup,
+      })
       void error
     }
     this.residents.set(ticketId, { agent: handle.agent, handle })
@@ -485,9 +489,10 @@ export class Executor {
 
   private composeSetup(ticketId: TicketId): (agentCtx: Context, agent: Agent) => Promise<void> {
     return async (agentCtx: Context): Promise<void> => {
-      const selection = this.selectionRef()
-      if (selection !== undefined) installModelSelection(agentCtx, selection)
-      agentCtx.tools.presentAs('native')
+      // 0.2.2: the selection rides agentOptions (create and cold resume);
+      // installModelSelection only wires the switch-notice machinery, and the
+      // mounted native executor replaced the per-agent presentAs modes.
+      installModelSelection(agentCtx)
       agentCtx.systemPrompt.section({ name: 'quno-worker-boundary', order: 5, text: WORKER_BOUNDARY })
       registerWorkerTools(agentCtx, {
         repo: this.deps.repo,
@@ -506,21 +511,6 @@ export class Executor {
           this.deps.logger.warn(`dsh-quno: worker preset could not be mounted: ${(error as Error).message}`)
         }
       }
-    }
-  }
-
-  private selectionRef(): ModelSelectionRef | undefined {
-    const selected = this.deps.modelSelection?.()
-    if (selected === undefined || selected.provider === '' || selected.model === '') return undefined
-    return {
-      current: {
-        provider: selected.provider,
-        model: selected.model,
-        ...(selected.reasoningEffort === undefined || selected.reasoningEffort === ''
-          ? {}
-          : { reasoningEffort: ReasoningEffortId(selected.reasoningEffort) }),
-      },
-      assembled: undefined,
     }
   }
 

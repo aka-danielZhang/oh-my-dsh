@@ -123,7 +123,6 @@ test('an eval turn reads the candidate and submits a decision through the preset
     meta: { cwd: '/tmp', agentPreset: 'quno' },
     agentOptions: { provider: 'mock', model: 'mock' },
     setup: (agentCtx) => {
-      agentCtx.tools.presentAs('native')
       applyQunoPreset(agentCtx)
     },
   })

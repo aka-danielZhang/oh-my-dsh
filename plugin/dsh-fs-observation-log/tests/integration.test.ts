@@ -23,6 +23,9 @@ import { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime from '@deepseek-ai/dsh-tools'
+import * as NativeToolExecutorModule from '@deepseek-ai/dsh-tool-executor-native'
+// The package exports named members (name/inject/apply/Config), not a default.
+const NativeToolExecutor = NativeToolExecutorModule as unknown as { apply: (ctx: never, config?: never) => void }
 import FsLocal from '@deepseek-ai/dsh-fs-local'
 import * as FsPolicy from '@deepseek-ai/dsh-fs-observation-policy'
 import * as ToolFs from '@deepseek-ai/dsh-tool-fs'
@@ -48,6 +51,9 @@ async function boot(home: string): Promise<Context> {
   const ctx = new Context()
   await ctx.plugin(SystemPrompt)
   await ctx.plugin(ToolRuntime)
+  // 0.2.2 split the executor out of the tool runtime; native dispatch mounts
+  // as its own plugin (the runtime's Config rejects the removed mode fields).
+  await ctx.plugin(NativeToolExecutor)
   await ctx.plugin(FsLocal)
   await ctx.plugin(FsPolicy)
   // tool-fs's cwd resolution is scope furniture here, not under test: a
@@ -63,14 +69,15 @@ async function boot(home: string): Promise<Context> {
 }
 
 let callCounter = 0
-function call(ctx: Context, name: string, args: unknown, session: { id: string; parentSession?: string; cwd?: string }) {
-  return ctx.tools.execute({
+async function call(ctx: Context, name: string, args: unknown, session: { id: string; parentSession?: string; cwd?: string }) {
+  // 0.2.2 tool surface: one batch of model-shaped call blocks in, one
+  // correlated result list out — unwrap the single call's execution outcome.
+  const batch = await ctx.tools.execute({
     signal,
-    callId: ToolCallId(`call-${++callCounter}`),
-    name,
-    arguments: args,
+    calls: [{ type: 'tool-call', id: ToolCallId(`call-${++callCounter}`), name, arguments: JSON.stringify(args) }],
     agent: { session: { header: session } } as never,
   })
+  return batch.results[0]!.result
 }
 
 function resultText(result: { content: { type: string; text?: string }[] }): string {

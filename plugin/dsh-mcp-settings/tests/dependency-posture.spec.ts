@@ -8,37 +8,26 @@ const packageJson = JSON.parse(
 ) as { devDependencies?: Record<string, string> }
 
 const SOURCE_SPEC = 'link:../deepseek-harness/packages/mcp/mcp-client'
-// The registry spec rides the manifest as a single source of truth: the
-// candidate aliases track the fork release the manifest pins, so deriving
-// the expectation from the manifest keeps the bump a one-file change.
+// The official 0.2.2-rc.3 client natively carries the status surface the
+// manager consumes (`connectionStatusOf`); the fork's `mcp-client/status`
+// event retired with the 0.2.2-rc.3+zw.1 merge. The manifest pins the official
+// baseline (or the source link for debug posture) and the resolved build must
+// expose that surface.
 const registrySpec = packageJson.devDependencies?.['@deepseek-ai/dsh-mcp-client'] ?? ''
-const registryVersion = registrySpec.match(/^npm:@crazx\/dsh-mcp-client@(\S+)$/)?.[1]
 
 test('managed installs use the status-capable MCP client', () => {
   const spec = packageJson.devDependencies?.['@deepseek-ai/dsh-mcp-client']
   expect([SOURCE_SPEC, registrySpec]).toContain(spec)
-  expect(registrySpec === SOURCE_SPEC || registryVersion !== undefined).toBe(true)
-
+  // Identity: a link: posture resolves the checkout (original scope); the
+  // registry posture resolves the official package at the pinned baseline.
   const clientPackage = require('@deepseek-ai/dsh-mcp-client/package.json') as {
     name: string
     version: string
   }
-  if (spec !== SOURCE_SPEC && clientPackage.name === '@deepseek-ai/dsh-mcp-client') {
-    // Transitional publish window: the manifest already aliases the fork
-    // layer while the local node_modules still holds the source-link tree
-    // (@crazx/* not on npm yet). Identity and status capability are the
-    // checkable invariants; the exact fork version lands with the publish.
-    expect(readFileSync(require.resolve('@deepseek-ai/dsh-mcp-client'), 'utf8')).toContain(
-      'mcp-client/status',
-    )
-    return
-  }
-  expect(clientPackage).toMatchObject(spec === SOURCE_SPEC
-    // Source posture: the linked checkout's version rides the harness branch,
-    // so only the identity and the status capability are pinned here.
-    ? { name: '@deepseek-ai/dsh-mcp-client' }
-    : { name: '@crazx/dsh-mcp-client', version: registryVersion })
+  expect(clientPackage.name).toBe('@deepseek-ai/dsh-mcp-client')
+  if (spec !== SOURCE_SPEC) expect(clientPackage.version).toBe(spec)
+  // Capability: the official status face the manager binds per spawned fiber.
   expect(readFileSync(require.resolve('@deepseek-ai/dsh-mcp-client'), 'utf8')).toContain(
-    'mcp-client/status',
+    'connectionStatusOf',
   )
 })
