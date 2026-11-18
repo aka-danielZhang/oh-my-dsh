@@ -22,8 +22,18 @@ import type { CliCapabilityBroker } from './cli-broker.ts'
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'dsh-quno'
 
-/** The Host cannot operate without its durable and model seams. */
+/**
+ * The Host cannot operate without its durable and model seams.
+ *
+ * `agentPresets` is a hard dependency, not a best-effort lookup: the presets
+ * declared here are how a resumed Quno session finds its composition, and the
+ * loader creates entries concurrently, so a lookup-only dependency can race
+ * the registry and lose the presets for the whole process (2026-11-19 restart:
+ * "Unknown agent preset: quno"). Declaring it keeps this fiber pending until
+ * the registry exists.
+ */
 export const inject = [
+  'agentPresets',
   'agents',
   'sessions',
   'tools',

@@ -342,21 +342,25 @@ export class QunoHost implements QunoServiceFace {
     })
   }
 
-  /** Open the store, recover persisted state, register presets and arm the loop. */
+  /** Register presets, open the store, recover persisted state and arm the loop. */
   async start(): Promise<void> {
     if (this.started) return
-    this.started = true
-    const now = this.now()
-    this.store.open(now)
-    const quno = this.provision(now)
-    void this.verifyMainSession()
-
+    // Presets come first: they are the composition seam a resumed session
+    // resolves before it can reach this Host, so no store failure may skip
+    // them. Losing them is not a degraded mode (the session becomes
+    // unopenable), hence a failure here blocks startup rather than warning.
     try {
       this.disposePresets = await registerQunoPresets(this.ctx)
     } catch (error) {
       this.presetError = (error as Error).message
       this.logger.warn(`dsh-quno: preset registration failed: ${this.presetError}`)
+      throw error
     }
+
+    const now = this.now()
+    this.store.open(now)
+    const quno = this.provision(now)
+    void this.verifyMainSession()
 
     try {
       await this.executor.reconcile(now)
@@ -373,6 +377,9 @@ export class QunoHost implements QunoServiceFace {
     this.scheduler.start()
     void this.outbox.kick()
     this.armMaintenance()
+    // Latched only once every step succeeded: a failed start stays retryable
+    // instead of silently no-oping every later attempt.
+    this.started = true
     this.logger.info(
       `dsh-quno: started (main=${quno.mainSessionId ?? 'unbound'}, collectors=${String(this.store.listCollectorInstances(this.qunoId).length)})`,
     )
