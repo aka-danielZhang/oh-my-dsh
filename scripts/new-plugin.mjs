@@ -12,7 +12,7 @@
  *   host   — host-only row          (blueprint: dsh-fs-observation-log)
  *   client — browser-only surface   (blueprint: dsh-branding: empty host
  *                                     apply + exports["./client"] half)
- *   dual   — host + client in one   (blueprint: dsh-web-search-toggle)
+ *   dual   — host + client in one   (blueprint: dsh-usage-stats)
  *
  * What it generates (per face): package.json (exports / dsh.bundle /
  * dsh.client / pinned registry devDeps), cordis.patch.yml row (or an
@@ -157,7 +157,7 @@ function cordisPatchYml() {
   }
   const lines = [
     `# ${name} bundle patch: the row(s) mounted for every profile that installs`,
-    '# this plugin. Grow extra rows here as needed (see dsh-web-search-toggle',
+    '# this plugin. Grow extra rows here as needed (see dsh-usage-stats',
     '# for a host-gateway + client pair). If the row should be preset-owned',
     '# instead (host service only some agent presets mount), empty this patch',
     '# to [] and ship a preset-snippet.yml.',

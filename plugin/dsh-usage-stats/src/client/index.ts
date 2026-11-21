@@ -1,6 +1,6 @@
 /**
  * Browser half: mounts the usageStats Remote contribution and registers the
- * settings section page (dsh-web-search-toggle's client posture).
+ * settings section page (the out-of-tree client posture).
  *
  * @module dsh-usage-stats/client
  */

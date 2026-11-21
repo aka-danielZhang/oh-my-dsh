@@ -33,6 +33,12 @@ export const RETIRED_DESKTOP_PACKAGES: readonly RetiredDesktopPackage[] = [
   // 0.4.0-rc.8: cross-session handoff retired outright, no replacement (see
   // docs/notes/2026-11-03-retire-dsh-thread.md).
   { package: 'dsh-thread', destRel: 'plugins/dsh-thread' },
+  // 2026-11-21: upstream 0.2.2 composes the web tools per Agent Preset and
+  // re-attaches tool schemas after the prompt-assembly waterfall, so the
+  // toggle could no longer hide `web_search` — it only left a visible tool
+  // that always failed. Retired outright; upstream now withholds the tool by
+  // provider readiness (see docs/notes/2026-11-21-retire-web-search-toggle.md).
+  { package: 'dsh-web-search-toggle', destRel: 'plugins/dsh-web-search-toggle' },
   // 2026-11-10 collector redesign: renamed to dsh-quno-collector-calendar /
   // dsh-quno-collector-feed (contract quno.collector/v2; the old Sense-era
   // packages refuse to load next to the new Host anyway) — see

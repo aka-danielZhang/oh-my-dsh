@@ -42,7 +42,7 @@ pnpm desktop:build
 
 ## 2. 包结构与首启解压（原理）
 
-runtime 与三个桌面自有插件以 **tar.gz 资源**进包（不是散目录拷贝）：runtime 树是 pnpm 安装产物（3k+ 符号链接），electron-builder 对目录 extraResources 不承诺保链接（解引用拷贝会让 .pnpm store 膨胀到 GB 级）；tar 往返链接感知。此外 tarball 方案让 App Translocation 不再影响可写性（解压到 home 后树恒可写），并允许 prepare 在归档前对 runtime 树里的每个 Mach-O 统一签名。注意 notarytool 会展开扫描 tarball，归档本身不能隐藏未签名二进制。
+runtime 与桌面自有插件以 **tar.gz 资源**进包（不是散目录拷贝）：runtime 树是 pnpm 安装产物（3k+ 符号链接），electron-builder 对目录 extraResources 不承诺保链接（解引用拷贝会让 .pnpm store 膨胀到 GB 级）；tar 往返链接感知。此外 tarball 方案让 App Translocation 不再影响可写性（解压到 home 后树恒可写），并允许 prepare 在归档前对 runtime 树里的每个 Mach-O 统一签名。注意 notarytool 会展开扫描 tarball，归档本身不能隐藏未签名二进制。
 
 Mac 热更新 zip **不含** `runtime.tar.gz`（sha 未变时不必再传约 115MB）。DMG / NSIS 仍自带，离线首装不变。打包态 `releaseRuntimeDir`：`.ok` 哈希命中 → 用 `~/.dsh-desktop/runtime/<sha>`；否则抽包内 tar；再否则先拼 npm 分片、失败再按 `runtime-<sha>-<platform>-<arch>.tar.gz` 从该次 GitHub Release 下载并校 sha256。`ready` / 重启要求本版 zip 与对应 runtime 都已就绪。瘦 zip、revision JSON、npm 分片与这条补拉必须同发，否则 OTA 用户会撞上 `bundled tarball missing`。
 
@@ -54,15 +54,13 @@ Mac 热更新 zip **不含** `runtime.tar.gz`（sha 未变时不必再传约 115
   bridge/{package.json,lib,cordis.patch.yml}  ← bridge.tar.gz 解压
   plugins/dsh-compaction-hierarchical/{package.json,lib,cordis.patch.yml,preset-snippet.yml,README.md}
                                       ← compaction-hierarchical.tar.gz 解压
-  plugins/dsh-web-search-toggle/{package.json,lib,cordis.patch.yml,README.md}
-                                      ← web-search-toggle.tar.gz 解压
 ```
 
 解压是「临时目录 + sentinel 校验 + rename 原子晋升」——半截解压不会被当作完整 runtime。缓存是**内容寻址**的：`.ok` 标记存 tarball 的 sha256（哈希写进 `runtime-revision.json`），同 revision 但内容变了（组装变更、任一插件重建）只会自动重解压对应目录；哈希命中秒过。
 
-三个插件 archive 都刻意不带 `node_modules`。壳在 `plugin add` 之后补 runtime-owned peer 链接：bridge 链 `@deepseek-ai/cordis`；hierarchical compaction 链 package.json 声明的六个 Harness peers；Web Search toggle 链 Host/Client 使用的 Cordis、settings、credentials、Typert、tools、system-prompt、locale/runtime/settings/slots peers。目标优先取 runtime 的 hoisted 包，回退到排序后的 `.pnpm` 实例，并 canonicalize 到 loader 同一 real path；这样既解决 Node ESM peer 解析，又避免 Cordis/Service/Typert 注册表因模块副本分裂。链接指向旧 revision 或悬空时会自愈重指；真实 dev 依赖目录不动，且 compaction/Web Search toggle 只在 shell-owned `.ok` 目录上受管。
+两个插件 archive 都刻意不带 `node_modules`。壳在 `plugin add` 之后补 runtime-owned peer 链接：bridge 链 `@deepseek-ai/cordis`；hierarchical compaction 链 package.json 声明的六个 Harness peers；目标优先取 runtime 的 hoisted 包，回退到排序后的 `.pnpm` 实例，并 canonicalize 到 loader 同一 real path；这样既解决 Node ESM peer 解析，又避免 Cordis/Service/Typert 注册表因模块副本分裂。链接指向旧 revision 或悬空时会自愈重指；真实 dev 依赖目录不动，且 compaction 只在 shell-owned `.ok` 目录上受管。
 
-sidecar runtime 解析顺序（`find_runtime`）：`$DSH_DESKTOP_RUNTIME` → 仓库 `runtime/build/<sha>`（dev 主路径）→ 包内资源解压树（仅 release）→ DSH 源码 checkout（dev 兜底）。桌面插件分别由 `find_bridge`、`find_compaction_plugin` 与 `find_web_search_toggle_plugin` 解析 env override → release resource → dev tree。
+sidecar runtime 解析顺序（`find_runtime`）：`$DSH_DESKTOP_RUNTIME` → 仓库 `runtime/build/<sha>`（dev 主路径）→ 包内资源解压树（仅 release）→ DSH 源码 checkout（dev 兜底）。桌面插件分别由 `find_bridge` 与 `find_compaction_plugin` 解析 env override → release resource → dev tree。
 
 ## 3. 体积参考（Electron + Chromium）
 

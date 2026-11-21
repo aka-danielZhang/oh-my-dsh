@@ -1,9 +1,0 @@
-# dsh-web-search-toggle: two rows — the Host gateway serving and enforcing the
-# toggle across global and Agent Preset scopes, and the browser settings row
-# (General section) that reads/writes it. The managed home-patch block remains
-# the persisted source of truth and disables the legacy/global tool row.
-- insert:
-    - id: dsh-web-search-toggle-gateway
-      name: dsh-web-search-toggle/gateway
-    - id: dsh-web-search-toggle
-      name: dsh-web-search-toggle

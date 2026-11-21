@@ -17,7 +17,6 @@
  *   src/resources/runtime.tar.gz.sha      (cache marker: revision sha)
  *   src/resources/bridge.tar.gz           (package.json + lib/ + patch)
  *   src/resources/compaction-hierarchical.tar.gz (host plugin package)
- *   src/resources/web-search-toggle.tar.gz (host + client plugin package)
  *   src/resources/model-image-input.tar.gz (client-only plugin package)
  *   src/resources/send-while-running.tar.gz (client-only plugin package)
  *   src/resources/model-efforts-editor.tar.gz (client-only plugin package)

@@ -9,7 +9,7 @@
  * would mount but the endpoints 404). Registering the same strict
  * descriptors the browser half mounts puts the endpoints on the registry's
  * local store directly — claims and dispatch both take the strict path, no
- * marker discovery involved (dsh-web-search-toggle's posture).
+ * marker discovery involved (the out-of-tree posture).
  *
  * @module dsh-usage-stats/typert.host
  */

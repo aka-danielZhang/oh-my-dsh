@@ -59,7 +59,6 @@ docs/                        权威契约文档 + packaging-playbook.md + notes/
 | `dsh-mcp-settings` | dual | 设置页 MCP 服务器管理（manager/inventory/ui 三行一包） |
 | `dsh-provider-balance` | browser-only | 供应商剩余额度可视化（纯 DOM 注入） |
 | `dsh-reasoning-efforts` | host-only | 给手写 llm-pi-ai 模型补 `reasoningEfforts` 声明与 compat 开关 |
-| `dsh-web-search-toggle` | dual | 设置页 Web Search 开关 + Host 跨 preset 关闭原生 web_search |
 | `dsh-compaction-hierarchical` | host-only | 有界 map-reduce 层次压缩（官方 upstream/既有 preset 兼容 Provider） |
 | `dsh-branding` | browser-only | 侧栏字标替换为 "Oh My DSH" 并重写 document title（始终挂载） |
 | `dsh-fs-observation-log` | host-only | 持久化 `fs/observed` evidence，重启后恢复观察记录 |

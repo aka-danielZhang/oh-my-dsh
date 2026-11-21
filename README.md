@@ -50,7 +50,6 @@ dsh plugin --profile web add <name>                 # mcp-settings 与 provider-
 | [`dsh-send-while-running`](plugin/dsh-send-while-running) | 会话运行中也能继续发送新消息 |
 | [`dsh-settings-icons`](plugin/dsh-settings-icons) | 设置导航补三枚语义图标（使用统计 / MCP / 记忆） |
 | [`dsh-usage-stats`](plugin/dsh-usage-stats) | 设置页「使用统计」：用量摘要卡、活动热力图、模型用量与质量图表 |
-| [`dsh-web-search-toggle`](plugin/dsh-web-search-toggle) | 设置页一键开关原生 Web Search |
 
 除桌面集成桥外，其余插件在终端 `dsh web` 下同样可用。各插件的形态（host-only / browser-only / dual）、完整版本沿革与 desktop-owned 随包清单见 [docs/plugins-catalog.md](docs/plugins-catalog.md)。
 

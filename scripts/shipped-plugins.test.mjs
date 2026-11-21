@@ -26,7 +26,7 @@ test('derives the historical tarball and hash keys', () => {
   assert.equal(defaultDestRel('dsh-desktop-bridge'), 'bridge')
   assert.equal(defaultDestRel('dsh-usage-stats'), 'plugins/dsh-usage-stats')
   assert.equal(hashKeyForTarball('compaction-hierarchical.tar.gz'), 'compactionHierarchicalTarball')
-  assert.equal(hashKeyForTarball('web-search-toggle.tar.gz'), 'webSearchToggleTarball')
+  assert.equal(hashKeyForTarball('model-image-input.tar.gz'), 'modelImageInputTarball')
   assert.equal(camelCaseStem('model-efforts-editor'), 'modelEffortsEditor')
 })
 
@@ -65,7 +65,6 @@ test('lists every ship:true plugin once', () => {
     'dsh-settings-icons',
     'dsh-todo-completion-guard',
     'dsh-usage-stats',
-    'dsh-web-search-toggle',
   ]
   const qunoTrio = ['dsh-quno', 'dsh-quno-collector-calendar', 'dsh-quno-collector-feed']
   const qunoShipping = names.includes('dsh-quno')

@@ -1,5 +1,5 @@
 # dsh-settings-icons bundle patch: the row(s) mounted for every profile that installs
-# this plugin. Grow extra rows here as needed (see dsh-web-search-toggle
+# this plugin. Grow extra rows here as needed (see dsh-usage-stats
 # for a host-gateway + client pair). If the row should be preset-owned
 # instead (host service only some agent presets mount), empty this patch
 # to [] and ship a preset-snippet.yml.

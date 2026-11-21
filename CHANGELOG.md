@@ -2,6 +2,12 @@
 
 Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的，不在这里重复。发版时 `scripts/release-notes.mjs` 抽取对应 `## [version]`（没有则回退 `## [Unreleased]
 
+## [Unreleased]
+
+### Removed
+
+- 「设置→通用→Web Search」开关下线（`dsh-web-search-toggle` 随包插件退役）。0.2.2 底座把 web 工具改成每个 Agent Preset 自己组合，且工具 schema 在提示词装配之后才回填，开关已无法隐藏原生 `web_search`——它只剩「模型看得见、一调就报错」的假工具；同时基线已原生覆盖它的初衷：provider 没凭据时按 readiness 逐 step 不把 `web_search` 交给模型，provider / 计费 / key 由官方「插件 → 网页搜索与获取」页配置。已有安装在下一次启动时由桌面自动下船（只清理桌面自己装的那份），不设替代能力；决策与执行记录见 `docs/notes/2026-11-21-retire-web-search-toggle.md`。
+
 ## [0.4.0-rc.10] - 2026-11-15
 
 ### Changed

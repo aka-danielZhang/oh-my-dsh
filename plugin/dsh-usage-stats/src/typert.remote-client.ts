@@ -1,6 +1,6 @@
 /**
  * Generated-equivalent Typert Client contribution owned by dsh-usage-stats
- * (dsh-web-search-toggle's pattern): the single source of truth for the
+ * (the out-of-tree Remote posture): the single source of truth for the
  * usageStats namespace's wire shape, shared by the browser half's
  * `ctx.remote.$mount` and the Host's strict registration (./typert.host.ts).
  *

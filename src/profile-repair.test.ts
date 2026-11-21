@@ -136,7 +136,7 @@ test('validates all desktop-owned manifest and link targets', () => {
   const packages = [
     'dsh-desktop-bridge',
     'dsh-compaction-hierarchical',
-    'dsh-web-search-toggle',
+    'dsh-model-image-input',
   ];
   const sources = packages.map((packageName) => {
     const source = path.join(sourceRoot, packageName);
@@ -152,7 +152,7 @@ test('validates all desktop-owned manifest and link targets', () => {
     const profile = path.join(shadowHome, 'profiles/web');
     fs.writeFileSync(
       path.join(profile, 'package.json'),
-      '{"name":"managed-targets","dependencies":{"dsh-desktop-bridge":"link:bridge","dsh-compaction-hierarchical":"link:compaction","dsh-web-search-toggle":"link:web-search-toggle"}}\n',
+      '{"name":"managed-targets","dependencies":{"dsh-desktop-bridge":"link:bridge","dsh-compaction-hierarchical":"link:compaction","dsh-model-image-input":"link:model-image-input"}}\n',
     );
     for (const [index, packageName] of packages.entries()) {
       fs.symlinkSync(

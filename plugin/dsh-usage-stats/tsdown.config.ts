@@ -1,7 +1,7 @@
 /**
  * Build config for dsh-usage-stats, distilled from the harness's
- * packages/client/tsdown.client.ts contract (same shape as
- * dsh-web-search-toggle):
+ * packages/client/tsdown.client.ts contract (the out-of-tree client
+ * posture):
  *
  * - Node half (lib/*.js): plain ESM libs, one entry per plugin row plus the
  *   shared wire/typert modules, with standard decorators pre-transpiled for

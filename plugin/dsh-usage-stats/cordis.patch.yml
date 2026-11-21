@@ -3,7 +3,6 @@
 #     backfill through sessionQuery) into $DSH_HOME/usage-stats/
 #   gateway:   Typert Remote serving summary/daily/activity/breakdown
 #   main row:  strict typert registration + the browser settings page
-# (see dsh-web-search-toggle for the same host-gateway + client shape).
 # The collector accepts a config row, e.g.
 #     - id: dsh-usage-stats-collector
 #       config: { retentionDays: 400 }
