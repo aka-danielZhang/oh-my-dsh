@@ -2,7 +2,7 @@
 
 Oh My DSH 桌面端的面向用户变更。插件各自有包内 CHANGELOG 的，不在这里重复。发版时 `scripts/release-notes.mjs` 抽取对应 `## [version]`（没有则回退 `## [Unreleased]
 
-## [Unreleased]
+## [0.4.0-rc.11] - 2026-11-22
 
 ### Removed
 
